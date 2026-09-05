@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 40" fill="none" role="img" aria-label="GIC">
+  <defs>
+    <linearGradient id="mark-bg" x1="4" y1="4" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A84FF"/>
+      <stop offset="1" stop-color="#0056D6"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="36" height="36" rx="10" fill="url(#mark-bg)"/>
+  <path fill="#fff" d="M9.5 27.5V12.5h3.4l3 5.6 3-5.6h3.4v15h-2.6v-5.8L17.2 27.5h-2.2l-3.2-5.4v5.4H9.5z"/>
+  <path fill="#fff" fill-opacity="0.92" d="M24.8 27.5V12.5h2.6v10.4h5.2v2.6h-7.8z"/>
+  <text x="48" y="27" fill="#1d1d1f" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="18" font-weight="700" letter-spacing="-0.03em">GIC</text>
+  <text x="48" y="36" fill="#86868b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="8.5" font-weight="600" letter-spacing="0.12em">GESTION</text>
+</svg>

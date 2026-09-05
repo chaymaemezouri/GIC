@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" role="img" aria-label="GIC">
+  <defs>
+    <linearGradient id="gic-bg" x1="6" y1="4" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A84FF"/>
+      <stop offset="1" stop-color="#0056D6"/>
+    </linearGradient>
+    <linearGradient id="gic-shine" x1="12" y1="8" x2="36" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="44" height="44" rx="12" fill="url(#gic-bg)"/>
+  <rect x="2" y="2" width="44" height="44" rx="12" fill="url(#gic-shine)"/>
+  <path fill="#fff" d="M11.5 31.5V16.5h4.1l3.6 6.8 3.6-6.8h4.1v15h-3.1v-7L18.2 31.5h-2.6l-3.8-6.4v6.4h-3.5z"/>
+  <path fill="#fff" fill-opacity="0.92" d="M28.2 31.5V16.5h3.1v12.4h6.2v3h-9.3z"/>
+</svg>

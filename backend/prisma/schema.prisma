@@ -1,0 +1,981 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  username      String?  @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  photo         String?
+  sidebarPrefs  Json?
+  role          String   @default("SUPER_ADMIN")
+  isActive      Boolean  @default(true)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  managedChantiers Chantier[]
+  internalStaff InternalStaff?
+  cashAccounts  CashAccount[]
+}
+
+model InternalStaff {
+  id               String   @id @default(cuid())
+  reference        String?  @unique
+  firstName        String
+  lastName         String
+  photo            String?
+  email            String?
+  cin              String?
+  birthDate        DateTime?
+  address          String?
+  phone1           String?
+  phone2           String?
+  jobTitle         String?
+  department       String?
+  hireDate         DateTime?
+  contractType     String?
+  monthlySalary    Float    @default(0)
+  salaryPeriod     String   @default("mensuel")
+  declared         Boolean  @default(false)
+  cnssNumber       String?
+  bankAccount      String?
+  bankName         String?
+  rib              String?
+  emergencyContact String?
+  remark           String?
+  isActive         Boolean  @default(true)
+  userId           String?  @unique
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  documents        InternalStaffDocument[]
+  salaryRecords    InternalStaffSalaryRecord[]
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  entity     String
+  entityId   String?
+  details    String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+}
+
+model InternalStaffDocument {
+  id        String        @id @default(cuid())
+  staffId   String
+  staff     InternalStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  docType   String
+  reference String?
+  data      String?
+  createdAt DateTime      @default(now())
+}
+
+model InternalStaffSalaryRecord {
+  id           String        @id @default(cuid())
+  staffId      String
+  staff        InternalStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  periodYear   Int
+  periodMonth  Int
+  periodWeek   Int           @default(0)
+  salaryPeriod String        @default("mensuel")
+  baseSalary   Float         @default(0)
+  bonus        Float         @default(0)
+  deduction    Float         @default(0)
+  advance      Float         @default(0)
+  netSalary    Float         @default(0)
+  status       String        @default("brouillon")
+  paidAt       DateTime?
+  remark       String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([staffId, periodYear, periodMonth, periodWeek])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  type      String   @default("info")
+  isRead    Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+}
+
+model DropdownOption {
+  id        String   @id @default(cuid())
+  category  String
+  label     String
+  value     String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([category, value])
+}
+
+model Agent {
+  id          String   @id @default(cuid())
+  reference   String?  @unique
+  photo       String?
+  remark      String?
+  firstName   String
+  lastName    String
+  email       String?
+  phone1      String?
+  phone2      String?
+  address     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  clients     Client[]
+}
+
+model Reconnu {
+  id         String   @id @default(cuid())
+  reference  String?  @unique
+  firstName  String
+  lastName   String
+  phone1     String?
+  phone2     String?
+  address    String?
+  relation   String?  // ex: femme de ménage, fournisseur ponctuel
+  remark     String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  movements  OfficeCashMovement[]
+}
+
+model OfficeCashMovement {
+  id           String   @id @default(cuid())
+  date         DateTime @default(now())
+  /// entree | sortie
+  direction    String
+  amount       Float
+  /// chantier | travail | aleatoire | alimentation (for entree)
+  purpose      String
+  designation  String
+  workLabel    String?
+  chantierId   String?
+  chantier     Chantier? @relation(fields: [chantierId], references: [id])
+  reconnuId    String?
+  reconnu      Reconnu?  @relation(fields: [reconnuId], references: [id])
+  /// Nom libre si la personne n'est pas dans la liste des reconnus
+  reconnuName  String?
+  proofFile    String?
+  remark       String?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+}
+
+model Mandant {
+  id            String   @id @default(cuid())
+  reference     String?  @unique
+  photo         String?
+  remark        String?
+  firstName     String
+  lastName      String
+  identityType  String?
+  identityNumber String? @unique
+  birthDate     DateTime?
+  email         String?
+  phone1        String?
+  phone2        String?
+  address       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  clients       ClientMandant[]
+}
+
+model Client {
+  id              String   @id @default(cuid())
+  reference       String   @unique
+  photo           String?
+  firstName       String
+  lastName        String
+  identityType    String?
+  identityNumber  String?  @unique
+  birthDate       DateTime?
+  email           String
+  phone1          String
+  phone2          String?
+  address         String?
+  isProspect      Boolean  @default(true)
+  isBuyer         Boolean  @default(false)
+  isTenant        Boolean  @default(false)
+  agentId         String?
+  agent           Agent?   @relation(fields: [agentId], references: [id])
+  source          String?
+  remark          String?
+  nb              String?
+  isArchived      Boolean  @default(false)
+  archivedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  mandants        ClientMandant[]
+  sales           Sale[]
+  rentals         Rental[]
+  documents       Document[]
+  agentHistory    ClientAgentHistory[]
+  projects        Project[]
+}
+
+model ClientAgentHistory {
+  id                String   @id @default(cuid())
+  clientId          String
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  previousAgentId   String?
+  previousAgentName String?
+  newAgentId        String?
+  newAgentName      String?
+  changedBy         String?
+  createdAt         DateTime @default(now())
+}
+
+model ClientMandant {
+  id        String  @id @default(cuid())
+  clientId  String
+  mandantId String
+  client    Client  @relation(fields: [clientId], references: [id])
+  mandant   Mandant @relation(fields: [mandantId], references: [id])
+
+  @@unique([clientId, mandantId])
+}
+
+model Location {
+  id          String   @id @default(cuid())
+  name        String
+  city        String?
+  description String?
+  createdAt   DateTime @default(now())
+  projects    Project[]
+}
+
+model Project {
+  id            String         @id @default(cuid())
+  reference     String?        @unique
+  name          String
+  ownershipType String         @default("personnel") // personnel | client
+  clientId      String?
+  client        Client?        @relation(fields: [clientId], references: [id])
+  city          String?
+  address       String?
+  description   String?
+  remark        String?
+  photo         String?
+  status        String         @default("actif")
+  locationId    String?
+  location      Location?      @relation(fields: [locationId], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  tranches      Tranche[]
+  properties    Property[]
+  chantiers     Chantier[]
+  images        ProjectImage[]
+}
+
+model ProjectImage {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  path      String
+  caption   String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Tranche {
+  id        String   @id @default(cuid())
+  name      String
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  blocs     Bloc[]
+}
+
+model Bloc {
+  id        String   @id @default(cuid())
+  name      String
+  trancheId String
+  tranche   Tranche  @relation(fields: [trancheId], references: [id])
+  lots      Lot[]
+}
+
+model Lot {
+  id     String  @id @default(cuid())
+  name   String
+  blocId String
+  bloc   Bloc    @relation(fields: [blocId], references: [id])
+  floors Floor[]
+}
+
+model Floor {
+  id         String     @id @default(cuid())
+  name       String
+  lotId      String
+  lot        Lot        @relation(fields: [lotId], references: [id])
+  properties Property[]
+}
+
+model Property {
+  id               String   @id @default(cuid())
+  reference        String   @unique
+  titleNumber      String?
+  name             String
+  city             String?
+  description      String?
+  surface          Float?
+  rooms            Int?
+  status           String   @default("disponible")
+  contractualDesc  String?
+  photo            String?
+  price            Float?
+  projectId        String?
+  project          Project? @relation(fields: [projectId], references: [id])
+  floorId          String?
+  floor            Floor?   @relation(fields: [floorId], references: [id])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  sales            Sale[]
+  rentals          Rental[]
+  documents        Document[]
+}
+
+model Sale {
+  id                String   @id @default(cuid())
+  reference         String   @unique
+  clientId          String
+  client            Client   @relation(fields: [clientId], references: [id])
+  propertyId        String
+  property          Property @relation(fields: [propertyId], references: [id])
+  contractDate      DateTime?
+  sellerSignatureDate String?
+  sellerLegalizationNo String?
+  buyerSignatureDate  String?
+  buyerLegalizationNo String?
+  salePrice         Float
+  discount          Float    @default(0)
+  advance           Float    @default(0)
+  netPrice          Float
+  totalPaid         Float    @default(0)
+  remaining         Float
+  contractType      String?
+  description       String?
+  status            String   @default("brouillon")
+  resiliationMotif  String?
+  resiliatedAt      DateTime?
+  resiliatedBy      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  payments          Payment[]
+  documents         Document[]
+  schedules         PaymentSchedule[]
+}
+
+model Rental {
+  id                String   @id @default(cuid())
+  reference         String   @unique
+  clientId          String
+  client            Client   @relation(fields: [clientId], references: [id])
+  propertyId        String
+  property          Property @relation(fields: [propertyId], references: [id])
+  contractDate      DateTime?
+  /// Début de location (1er mois de loyer)
+  startDate         DateTime?
+  /// Fin de location (optionnel = bail ouvert)
+  endDate           DateTime?
+  landlordSignatureDate String?
+  landlordLegalizationNo String?
+  tenantSignatureDate String?
+  tenantLegalizationNo String?
+  monthlyRent       Float
+  discount          Float    @default(0)
+  totalPaid         Float    @default(0)
+  remaining         Float    @default(0)
+  contractType      String?
+  description       String?
+  status            String   @default("active")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  payments          Payment[]
+  documents         Document[]
+  schedules         PaymentSchedule[]
+}
+
+model PaymentSchedule {
+  id        String    @id @default(cuid())
+  saleId    String?
+  sale      Sale?     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  rentalId  String?
+  rental    Rental?   @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  dueDate   DateTime
+  amount    Float
+  label     String?
+  status    String    @default("pending")
+  paidAt    DateTime?
+  remark    String?
+  createdAt DateTime  @default(now())
+  payments  Payment[]
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  receiptNo     String   @unique
+  saleId        String?
+  sale          Sale?    @relation(fields: [saleId], references: [id])
+  rentalId      String?
+  rental        Rental?  @relation(fields: [rentalId], references: [id])
+  scheduleId    String?
+  schedule      PaymentSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  date          DateTime @default(now())
+  amount        Float
+  nature        String?
+  internalRef   String?  @unique
+  operationType String?
+  proofFile     String?
+  operationNo   String?  @unique
+  bank          String?
+  payerName     String?
+  createdAt     DateTime @default(now())
+}
+
+model CashAccount {
+  id           String   @id @default(cuid())
+  name         String
+  type         String   @default("caisse")
+  isActive     Boolean  @default(true)
+  holderUserId String?
+  holderUser   User?    @relation(fields: [holderUserId], references: [id])
+  rib          String?
+  bankName     String?
+  createdAt    DateTime @default(now())
+  movements    CashMovement[]
+}
+
+model CashMovement {
+  id               String   @id @default(cuid())
+  date             DateTime @default(now())
+  designation      String
+  accountId        String
+  account          CashAccount @relation(fields: [accountId], references: [id])
+  mode             String?
+  debit            Float    @default(0)
+  credit           Float    @default(0)
+  remark           String?
+  proofFile        String?
+  invoiceFile      String?
+  deliveryNoteFile String?
+  receptionPvFile  String?
+  /// encaissement | achat | main_oeuvre | equipe_interne
+  sourceType       String?
+  sourceId         String?
+  isAutomatic      Boolean  @default(false)
+  createdBy        String?
+  createdAt        DateTime @default(now())
+}
+
+model WorkforcePayrollRecord {
+  id          String    @id @default(cuid())
+  reference   String?   @unique
+  workforceId String
+  workforce   Workforce @relation(fields: [workforceId], references: [id], onDelete: Cascade)
+  periodYear  Int
+  periodMonth Int
+  brut        Float     @default(0)
+  advances    Float     @default(0)
+  bonuses     Float     @default(0)
+  netDue      Float     @default(0)
+  amountPaid  Float     @default(0)
+  remaining   Float     @default(0)
+  paymentMode String?
+  status      String    @default("pending")
+  paidAt      DateTime?
+  remark      String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([workforceId, periodYear, periodMonth])
+}
+
+model Supplier {
+  id            String   @id @default(cuid())
+  reference     String   @unique
+  companyName   String
+  contactName   String?
+  phone1        String?
+  phone2        String?
+  email         String?
+  address       String?
+  cin           String?  @unique
+  source        String?
+  bankName      String?
+  rib           String?
+  passwordHash  String?
+  portalRole    String?  @default("ACHATS")
+  remark        String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  purchases     Purchase[]
+  documents     Document[]
+  supplierDocs  SupplierDocument[]
+}
+
+model PurchaseFamily {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  designations PurchaseDesignation[]
+}
+
+model PurchaseDesignation {
+  id       String         @id @default(cuid())
+  label    String
+  familyId String
+  family   PurchaseFamily @relation(fields: [familyId], references: [id])
+  purchases Purchase[]
+}
+
+model Purchase {
+  id            String   @id @default(cuid())
+  reference     String   @unique
+  date          DateTime @default(now())
+  family        String?
+  designation   String
+  designationId String?
+  designationRef PurchaseDesignation? @relation(fields: [designationId], references: [id])
+  unit          String?
+  quantity      Float
+  unitPrice     Float
+  amountHT      Float?
+  tvaRate       Float    @default(20)
+  tvaAmount     Float?
+  totalPrice    Float
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  author        String?
+  paymentMode   String?
+  invoiced      Boolean  @default(false)
+  chantierId    String?
+  chantier      Chantier? @relation(fields: [chantierId], references: [id])
+  tranche       String?
+  status        String   @default("brouillon")
+  remark        String?
+  proofFile     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  history       PurchaseHistory[]
+}
+
+model PurchaseHistory {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id])
+  userName   String?
+  oldStatus  String?
+  newStatus  String
+  comment    String?
+  createdAt  DateTime @default(now())
+}
+
+model Chantier {
+  id           String   @id @default(cuid())
+  name         String
+  address      String?
+  startDate    DateTime?
+  workerCount  Int      @default(0)
+  managerName  String?
+  remark       String?
+  status       String   @default("actif")
+  progressPct  Float    @default(0)
+  budgetAchats Float?
+  projectId    String?
+  project      Project? @relation(fields: [projectId], references: [id])
+  endDate      DateTime?
+  photo        String?
+  managerUserId String?
+  managerUser  User?    @relation(fields: [managerUserId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  purchases    Purchase[]
+  assignments  WorkforceAssignment[]
+  pointages    Pointage[]
+  progress     WorkProgress[]
+  missions     Mission[]
+  documents    Document[]
+  cameras      ChantierCamera[]
+  tranches     ChantierTranche[]
+  stockItems   ChantierStockItem[]
+  subcontractors ChantierSubcontractor[]
+  images         ChantierImage[]
+  officeCashMovements OfficeCashMovement[]
+}
+
+model ChantierImage {
+  id         String   @id @default(cuid())
+  chantierId String
+  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  path       String
+  caption    String?
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model ChantierTranche {
+  id         String   @id @default(cuid())
+  name       String
+  chantierId String
+  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  remark     String?
+  createdAt  DateTime @default(now())
+
+  @@unique([chantierId, name])
+}
+
+model ChantierStockItem {
+  id         String   @id @default(cuid())
+  chantierId String
+  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  name       String
+  quantity   Float    @default(0)
+  unit       String?
+  tranche    String?
+  remark     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model ChantierSubcontractor {
+  id          String   @id @default(cuid())
+  chantierId  String
+  chantier    Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  companyName String
+  corpsEtat   String?
+  phone       String?
+  amount      Float?
+  status      String   @default("actif")
+  remark      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ChantierCamera {
+  id         String   @id @default(cuid())
+  chantierId String
+  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  name       String
+  url        String
+  zone       String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+model Workforce {
+  id            String   @id @default(cuid())
+  reference     String?  @unique
+  photo         String?
+  firstName     String
+  lastName      String
+  cin           String?  @unique
+  birthDate     DateTime?
+  address       String?
+  phone1        String?
+  phone2        String?
+  email         String?
+  category      String?
+  groupe        String?
+  workPassport  String?
+  hireDate      DateTime?
+  contractType  String?
+  declared      Boolean  @default(false)
+  cnssNumber    String?
+  /** jour = pointage ; mois = salaire mensuel (hors pointage) */
+  salaryPeriod  String   @default("jour")
+  dailySalary   Float    @default(0)
+  monthlySalary Float    @default(0)
+  bankName      String?
+  rib           String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  assignments   WorkforceAssignment[]
+  pointages     Pointage[]
+  generatedDocs WorkforceDocument[]
+  payrollRecords WorkforcePayrollRecord[]
+}
+
+model WorkforceDocument {
+  id          String    @id @default(cuid())
+  workforceId String
+  workforce   Workforce @relation(fields: [workforceId], references: [id])
+  docType     String
+  reference   String?
+  data        String?
+  createdAt   DateTime  @default(now())
+}
+
+model WorkforceAssignment {
+  id           String    @id @default(cuid())
+  workforceId  String
+  workforce    Workforce @relation(fields: [workforceId], references: [id])
+  chantierId   String
+  chantier     Chantier  @relation(fields: [chantierId], references: [id])
+  functionRole String?
+  tranche      String?
+  startDate    DateTime  @default(now())
+  endDate      DateTime?
+}
+
+model Pointage {
+  id            String    @id @default(cuid())
+  date          DateTime
+  workforceId   String
+  workforce     Workforce @relation(fields: [workforceId], references: [id])
+  chantierId    String?
+  chantier      Chantier? @relation(fields: [chantierId], references: [id])
+  dayValue      Float     @default(0)
+  hours         Float     @default(0)
+  totalDay      Float     @default(0)
+  dayRate       Float?
+  advance       Float     @default(0)
+  bonus         Float     @default(0)
+  validated     Boolean   @default(false)
+  validatedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  /// Un pointage par ouvrier / jour / chantier (matrice multi-projets)
+  @@unique([date, workforceId, chantierId])
+}
+
+model WorkProgress {
+  id         String   @id @default(cuid())
+  chantierId String
+  chantier   Chantier @relation(fields: [chantierId], references: [id])
+  tranche    String?
+  groupe     String?
+  etage      String?
+  taskName   String
+  percent    Float    @default(0)
+  remark     String?
+  /// Phases manuelles du lot : [{ percent, label, description?, deliverables? }]
+  phases     Json?
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+}
+
+model Engin {
+  id            String   @id @default(cuid())
+  photo         String?
+  ownershipType String   @default("personnel") // personnel | loue
+  rentalSupplier String?
+  rentalMonthly  Float?
+  brand         String?
+  genre         String?
+  groupe        String?
+  workPassport  String?
+  matricule     String?  @unique
+  chassisNo     String?
+  emptyWeight   Float?
+  totalWeight   Float?
+  gsmNumber     String?
+  gpsNumber     String?
+  gpsMountDate  DateTime?
+  transferDate  DateTime?
+  counterValue  Float?
+  counterUnit   String?  @default("KM")
+  counterDate   DateTime?
+  purchasePrice Float?
+  status        String   @default("disponible")
+  fuelLevel     Float?
+  insuranceExpiry DateTime?
+  vignetteExpiry  DateTime?
+  visitExpiry     DateTime?
+  authExpiry      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  maintenances  Maintenance[]
+  missions      Mission[]
+  documents     Document[]
+  fuelLogs      FuelLog[]
+  gpsPositions  GpsPosition[]
+}
+
+model Maintenance {
+  id            String   @id @default(cuid())
+  enginId       String
+  engin         Engin    @relation(fields: [enginId], references: [id])
+  date          DateTime @default(now())
+  responsible   String?
+  supervisor    String?
+  designation   String
+  budget        Float?
+  counterValue  Float?
+  remark        String?
+  createdAt     DateTime @default(now())
+}
+
+model Mission {
+  id            String   @id @default(cuid())
+  enginId       String
+  engin         Engin    @relation(fields: [enginId], references: [id])
+  date          DateTime @default(now())
+  driverName    String?
+  mission       String
+  usage         String?
+  chantierId    String?
+  chantier      Chantier? @relation(fields: [chantierId], references: [id])
+  tranche       String?
+  requestedBy   String?
+  remark        String?
+  createdAt     DateTime @default(now())
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  name        String
+  category    String?
+  mimeType    String?
+  size        Int?
+  path        String
+  entityType  String?
+  entityId    String?
+  expiresAt   DateTime?
+  clientId    String?
+  client      Client?  @relation(fields: [clientId], references: [id])
+  propertyId  String?
+  property    Property? @relation(fields: [propertyId], references: [id])
+  saleId      String?
+  sale        Sale?    @relation(fields: [saleId], references: [id])
+  rentalId    String?
+  rental      Rental?  @relation(fields: [rentalId], references: [id])
+  supplierId  String?
+  supplier    Supplier? @relation(fields: [supplierId], references: [id])
+  chantierId  String?
+  chantier    Chantier? @relation(fields: [chantierId], references: [id])
+  enginId     String?
+  engin       Engin?   @relation(fields: [enginId], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model ArchiveEntry {
+  id          String   @id @default(cuid())
+  registerNo  String?
+  date        DateTime @default(now())
+  subject     String
+  sender      String?
+  recipient   String?
+  category    String?
+  direction   String?  @default("entrant")
+  filePath    String?
+  remark      String?
+  emailTo     String?
+  emailSentAt DateTime?
+  entityType  String?
+  entityId    String?
+  createdAt   DateTime @default(now())
+}
+
+model Counter {
+  id      String @id
+  year    Int
+  prefix  String
+  value   Int    @default(0)
+
+  @@unique([prefix, year])
+}
+
+model ConversationMessage {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  channel    String
+  direction  String   @default("outbound")
+  subject    String?
+  body       String
+  recipient  String?
+  status     String   @default("sent")
+  userId     String?
+  userName   String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model FuelLog {
+  id           String   @id @default(cuid())
+  enginId      String
+  engin        Engin    @relation(fields: [enginId], references: [id], onDelete: Cascade)
+  date         DateTime @default(now())
+  liters       Float
+  cost         Float?
+  counterValue Float?
+  remark       String?
+  createdAt    DateTime @default(now())
+}
+
+model GpsPosition {
+  id         String   @id @default(cuid())
+  enginId    String
+  engin      Engin    @relation(fields: [enginId], references: [id], onDelete: Cascade)
+  lat        Float
+  lng        Float
+  recordedAt DateTime @default(now())
+  source     String?
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+/// Paramètres société / promoteur (singleton id = "default")
+model CompanySettings {
+  id               String   @id @default("default")
+  companyName      String   @default("GIC — Expertise & Consulting")
+  address          String?
+  city             String?
+  phone            String?
+  email            String?
+  ice              String?
+  rc               String?
+  logoPath         String?
+  /// Titre du document liste banque
+  bankLetterTitle  String   @default("Demande de virement de salaires")
+  /// Paragraphe d'accompagnement pour la banque
+  bankLetterIntro  String   @default("Madame, Monsieur,\n\nNous vous prions de bien vouloir procéder au virement des salaires au profit des bénéficiaires dont la liste figure ci-après, selon les coordonnées bancaires (CIN et RIB) indiquées pour chacun.\n\nNous vous remercions de l'attention que vous porterez à la présente demande.\n\nCordialement,")
+  bankLetterFooter String?
+  updatedAt        DateTime @updatedAt
+}
+
+model SupplierDocument {
+  id         String   @id @default(cuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+  purchaseId String?
+  docType    String
+  reference  String?
+  filePath   String?
+  data       String?
+  createdAt  DateTime @default(now())
+}
