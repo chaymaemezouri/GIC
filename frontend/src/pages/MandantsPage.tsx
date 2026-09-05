@@ -11,6 +11,7 @@ import {
   Modal, PageHeader, Pagination, TableWrap, Td, Th,
 } from '../components/ui';
 import { MandantFormFields, emptyMandantForm, mandantToForm, type MandantFormData } from '../components/MandantFormFields';
+import MacAvatar from '../components/MacAvatar';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -373,11 +374,7 @@ export default function MandantsPage() {
               {items.map((m) => (
                 <tr key={m.id} className="cursor-pointer" onClick={() => navigate(`/mandants/${m.id}`)}>
                   <Td mac>
-                    {m.photo ? (
-                      <img src={m.photo} alt="" className="mac-avatar" />
-                    ) : (
-                      <span className="mac-avatar-fallback">{m.firstName[0]}{m.lastName[0]}</span>
-                    )}
+                    <MacAvatar photo={m.photo} firstName={m.firstName} lastName={m.lastName} />
                   </Td>
                   <Td mac>
                     <Link

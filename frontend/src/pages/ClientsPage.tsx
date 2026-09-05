@@ -11,6 +11,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ClientFormFields, emptyClientForm, clientToForm, type ClientFormData } from '../components/ClientFormFields';
+import MacAvatar from '../components/MacAvatar';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -410,11 +411,7 @@ export default function ClientsPage() {
                   onClick={() => navigate(`/clients/${c.id}`)}
                 >
                   <Td mac>
-                    {c.photo ? (
-                      <img src={c.photo} alt="" className="mac-avatar" />
-                    ) : (
-                      <span className="mac-avatar-fallback">{c.firstName[0]}{c.lastName[0]}</span>
-                    )}
+                    <MacAvatar photo={c.photo} firstName={c.firstName} lastName={c.lastName} />
                   </Td>
                   <Td mac>
                     <Link to={`/clients/${c.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{c.reference}</Link>

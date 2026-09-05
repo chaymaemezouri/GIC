@@ -30,7 +30,13 @@ const uploadDir = process.env.UPLOAD_DIR || './uploads';
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const app = express();
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // API + fichiers statiques (pas de HTML) — le CSP casse notamment les SVG en <img>
+    contentSecurityPolicy: false,
+  })
+);
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:5173',

@@ -14,6 +14,7 @@ import {
   BienFormFields, emptyBienForm, flattenProjectFloors,
   type BienFormData, type FloorOption,
 } from '../components/BienFormFields';
+import MacAvatar from '../components/MacAvatar';
 import { useI18n } from '../i18n/I18nContext';
 
 type Property = {
@@ -462,11 +463,7 @@ export default function BiensPage() {
                   onClick={() => navigate(`/biens/${p.id}`)}
                 >
                   <Td mac>
-                    {p.photo ? (
-                      <img src={p.photo} alt="" className="mac-avatar" />
-                    ) : (
-                      <span className="mac-avatar-fallback">{p.reference.slice(-2)}</span>
-                    )}
+                    <MacAvatar photo={p.photo} name={p.name} fallback={p.reference.slice(-2)} />
                   </Td>
                   <Td mac>
                     <Link to={`/biens/${p.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{p.reference}</Link>

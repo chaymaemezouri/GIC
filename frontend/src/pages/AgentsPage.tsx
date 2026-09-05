@@ -11,6 +11,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { AgentFormFields, emptyAgentForm, agentToForm, type AgentFormData } from '../components/AgentFormFields';
+import MacAvatar from '../components/MacAvatar';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -376,11 +377,7 @@ export default function AgentsPage() {
               {items.map((a) => (
                 <tr key={a.id} className="cursor-pointer" onClick={() => navigate(`/agents/${a.id}`)}>
                   <Td mac>
-                    {a.photo ? (
-                      <img src={a.photo} alt="" className="mac-avatar" />
-                    ) : (
-                      <span className="mac-avatar-fallback">{a.firstName[0]}{a.lastName[0]}</span>
-                    )}
+                    <MacAvatar photo={a.photo} firstName={a.firstName} lastName={a.lastName} />
                   </Td>
                   <Td mac>
                     <Link to={`/agents/${a.id}`} className="mac-table-ref font-medium" onClick={(e) => e.stopPropagation()}>

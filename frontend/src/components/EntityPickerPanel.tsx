@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { Input, StatusPill } from './ui';
+import MacAvatar from './MacAvatar';
 import { useI18n } from '../i18n/I18nContext';
 
 export type EntityPickerItem = {
@@ -204,13 +205,16 @@ export function EntityPickerPanel({
                   onClick={() => handleItemClick(item.id)}
                 >
                   <div className="mac-client-picker-row-main">
-                    {item.photo ? (
-                      <img src={item.photo} alt="" className="mac-avatar shrink-0" />
-                    ) : (
-                      <span className="mac-avatar-fallback shrink-0" style={pickerAvatarStyle(item.id)}>
-                        {item.avatarLabel}
-                      </span>
-                    )}
+                    <MacAvatar
+                      photo={item.photo}
+                      className="mac-avatar shrink-0"
+                      fallbackClassName=""
+                      fallback={
+                        <span className="mac-avatar-fallback shrink-0" style={pickerAvatarStyle(item.id)}>
+                          {item.avatarLabel}
+                        </span>
+                      }
+                    />
                     <div className="min-w-0">
                       <p className="mac-row-title truncate">{item.title}</p>
                       {item.subtitle ? (

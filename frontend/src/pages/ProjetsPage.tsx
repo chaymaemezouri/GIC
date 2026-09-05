@@ -11,6 +11,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ProjectFormFields, emptyProjectForm, projectToForm, projectFormToBody, projectOwnershipLabel, type ProjectFormData } from '../components/ProjectFormFields';
+import MacAvatar from '../components/MacAvatar';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -445,11 +446,7 @@ export default function ProjetsPage() {
                 <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/projets/${p.id}`)}>
                   <Td mac className="w-12">
                     <div onClick={(e) => e.stopPropagation()}>
-                    {p.photo ? (
-                      <img src={p.photo} alt="" className="mac-avatar" />
-                    ) : (
-                      <span className="mac-avatar-fallback"><Building2 size={14} /></span>
-                    )}
+                    <MacAvatar photo={p.photo} name={p.name} fallback={<Building2 size={14} />} />
                     </div>
                   </Td>
                   <Td mac className="font-medium text-gic-violet">{p.reference || '—'}</Td>

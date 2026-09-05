@@ -11,6 +11,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ChantierFormFields, emptyChantierForm, chantierToForm, type ChantierFormData, type ProjectOption, type ChefOption } from '../components/ChantierFormFields';
+import MacAvatar from '../components/MacAvatar';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -402,13 +403,13 @@ export default function ChantiersPage() {
                 return (
                   <tr key={c.id} className="cursor-pointer" onClick={() => navigate(`/chantiers/${c.id}`)}>
                     <Td mac>
-                      {c.photo ? (
-                        <img src={c.photo} alt="" className="h-9 w-9 rounded-lg object-cover ring-1 ring-black/5" />
-                      ) : (
-                        <div className="h-9 w-9 rounded-lg bg-gradient-to-b from-[#ffb340] to-[#ff9500] text-white text-[10px] font-bold flex items-center justify-center">
-                          {initials.slice(0, 2)}
-                        </div>
-                      )}
+                      <MacAvatar
+                        photo={c.photo}
+                        name={c.name}
+                        className="h-9 w-9 rounded-lg object-cover ring-1 ring-black/5"
+                        fallbackClassName="h-9 w-9 rounded-lg bg-gradient-to-b from-[#ffb340] to-[#ff9500] text-white text-[10px] font-bold flex items-center justify-center"
+                        fallback={initials.slice(0, 2)}
+                      />
                     </Td>
                     <Td mac>
                       <Link to={`/chantiers/${c.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{c.name}</Link>

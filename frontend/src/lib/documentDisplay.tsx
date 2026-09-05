@@ -1,6 +1,8 @@
 import { formatDate } from './api';
 import { useI18n, tStatic } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
+export { fileUrl } from './photoUrl';
+import { fileUrl } from './photoUrl';
 
 export type DocEntity = {
   id: string;
@@ -21,11 +23,6 @@ export type DocEntity = {
   rental?: { id: string; reference: string } | null;
   engin?: { id: string; matricule: string; brand?: string } | null;
 };
-
-export function fileUrl(path: string) {
-  const base = import.meta.env.VITE_API_URL?.replace(/\/api$/, '') || 'http://localhost:4000';
-  return path.startsWith('http') ? path : `${base}${path}`;
-}
 
 export function formatSize(bytes?: number | null, t: TranslateFn = tStatic) {
   if (!bytes) return '—';

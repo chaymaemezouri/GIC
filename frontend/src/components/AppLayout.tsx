@@ -211,30 +211,6 @@ function UserMenu({ onLogout, photoBust }: { onLogout: () => void; photoBust: nu
   );
 }
 
-function LanguageToggle() {
-  const { lang, setLang, t } = useI18n();
-  return (
-    <div className="shell-lang-toggle" role="group" aria-label={t('settings.language')}>
-      <button
-        type="button"
-        className={`shell-lang-btn${lang === 'fr' ? ' shell-lang-btn-active' : ''}`}
-        onClick={() => setLang('fr')}
-        title={t('settings.french')}
-      >
-        FR
-      </button>
-      <button
-        type="button"
-        className={`shell-lang-btn${lang === 'ar' ? ' shell-lang-btn-active' : ''}`}
-        onClick={() => setLang('ar')}
-        title={t('settings.arabic')}
-      >
-        ع
-      </button>
-    </div>
-  );
-}
-
 export default function AppLayout() {
   const { user, logout, photoBust } = useAuth();
   const { t } = useI18n();
@@ -345,7 +321,6 @@ export default function AppLayout() {
 
             <div className="shell-header-end">
               <div className="shell-tools">
-                <LanguageToggle />
                 <NotificationsDropdown />
               </div>
               <div className="shell-header-sep" aria-hidden />
