@@ -108,6 +108,7 @@ function NavMenu({ group }: { group: NavGroup }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
+        title={groupLabel}
         className={[
           'shell-nav-pill',
           open ? 'shell-nav-pill-open' : '',
@@ -325,14 +326,14 @@ export default function AppLayout() {
               </Link>
             </div>
             <div className="shell-header-center">
-              <nav className="shell-nav-cluster hidden lg:flex" aria-label={t('nav.modules')}>
+              <nav className="shell-nav-cluster hidden xl:flex" aria-label={t('nav.modules')}>
                 {showHome && <NavDirectLink item={homeLink} />}
                 {primaryNavGroup && <NavMenu group={primaryNavGroup} />}
                 {otherNavGroups.map((g) => (
                   <NavMenu key={g.id} group={g} />
                 ))}
               </nav>
-              <div className="shell-nav-actions-wrap hidden lg:flex">
+              <div className="shell-nav-actions-wrap hidden xl:flex">
                 {directLinks.map((item) => (
                   <NavDirectLink key={item.to} item={item} accent />
                 ))}

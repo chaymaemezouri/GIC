@@ -104,6 +104,7 @@ export default function NewMenu({ groups, variant = 'dashboard', onOpenChange }:
           type="button"
           onClick={() => setMenuOpen(!open)}
           aria-expanded={open}
+          title={t('common.new')}
           className={[
             'shell-nav-pill shell-nav-pill-new',
             open ? 'shell-nav-pill-open' : '',
