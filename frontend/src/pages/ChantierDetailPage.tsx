@@ -14,6 +14,7 @@ import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, PageBackLink, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { useI18n } from '../i18n/I18nContext';
+import { photoSrc } from '../lib/photoUrl';
 
 import {
   ChantierFormFields, chantierToForm, emptyChantierForm, type ChantierFormData,
@@ -543,12 +544,23 @@ export default function ChantierDetailPage() {
         <div className="mac-detail-hero-main">
           <div className="mac-detail-photo">
             {chantier.photo ? (
-              <img src={chantier.photo} alt={chantier.name} className="h-full w-full object-cover rounded-2xl" />
-            ) : (
-              <div className="mac-detail-photo-fallback !bg-gradient-to-b from-[#ffb340] to-[#ff9500]">
-                {initials.slice(0, 2)}
-              </div>
-            )}
+              <img
+                src={photoSrc(chantier.photo)}
+                alt={chantier.name}
+                className="h-full w-full object-cover rounded-2xl"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  const fb = e.currentTarget.nextElementSibling as HTMLElement | null;
+                  if (fb) fb.style.display = 'flex';
+                }}
+              />
+            ) : null}
+            <div
+              className="mac-detail-photo-fallback !bg-gradient-to-b from-[#ffb340] to-[#ff9500]"
+              style={chantier.photo ? { display: 'none' } : undefined}
+            >
+              {initials.slice(0, 2)}
+            </div>
             <label className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-gray-900 text-white flex items-center justify-center cursor-pointer shadow-md">
               <Image size={12} />
               <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.webp" onChange={onPhotoUpload} disabled={photoUploading} />

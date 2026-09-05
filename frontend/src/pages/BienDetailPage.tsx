@@ -11,6 +11,7 @@ import {
   PageBackLink,
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
+import MacProfilePhoto from '../components/MacProfilePhoto';
 import { useI18n } from '../i18n/I18nContext';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { fileUrl } from '../lib/documentDisplay';
@@ -203,19 +204,12 @@ export default function BienDetailPage() {
       <div className="mac-detail-hero">
         <PageBackLink fallbackTo="/biens" />
         <div className="mac-detail-hero-main">
-          <div className="mac-detail-photo">
-            {bien.photo ? (
-              <img src={bien.photo} alt="" />
-            ) : (
-              <div className="mac-detail-photo-fallback">
-                <Building2 size={22} strokeWidth={1.75} />
-              </div>
-            )}
-            <label className="mac-detail-photo-cam" title={t('actions.changePhoto')}>
-              <Camera size={12} strokeWidth={2} />
-              <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.webp" onChange={onUploadPhoto} />
-            </label>
-          </div>
+          <MacProfilePhoto
+            photo={bien.photo}
+            firstName={bien.name}
+            editable
+            onFileChange={onUploadPhoto}
+          />
           <div className="min-w-0">
             <p className="mac-detail-eyebrow">{t('detail.property360')}</p>
             <h1 className="mac-detail-name truncate">{bien.name}</h1>

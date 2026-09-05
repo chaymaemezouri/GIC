@@ -11,6 +11,7 @@ import { googleMapsSearchUrl, projectLocationQuery } from '../lib/googleMaps';
 import { Btn, PageBackLink, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { photoSrc } from '../lib/photoUrl';
 
 import {
   ProjectFormFields, emptyProjectForm, projectToForm, projectFormToBody,
@@ -505,12 +506,22 @@ export default function ProjectDetailPage() {
         <div className="mac-detail-hero-main">
           <div className="mac-detail-photo mac-project-cover">
             {project.photo ? (
-              <img src={project.photo} alt="" />
-            ) : (
-              <div className="mac-detail-photo-fallback">
-                <Building2 size={28} />
-              </div>
-            )}
+              <img
+                src={photoSrc(project.photo)}
+                alt=""
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  const fb = e.currentTarget.nextElementSibling as HTMLElement | null;
+                  if (fb) fb.style.display = 'flex';
+                }}
+              />
+            ) : null}
+            <div
+              className="mac-detail-photo-fallback"
+              style={project.photo ? { display: 'none' } : undefined}
+            >
+              <Building2 size={28} />
+            </div>
             <label className="mac-detail-photo-cam" title={t('actions.addImages')}>
               <Camera size={12} strokeWidth={2} />
               <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.webp" multiple onChange={onGalleryUpload} disabled={galleryUploading} />

@@ -19,6 +19,7 @@ import { useI18n } from '../i18n/I18nContext';
 
 
 import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, type EnginFormData } from '../components/EnginFormFields';
+import MacProfilePhoto from '../components/MacProfilePhoto';
 import { fileUrl, printDocumentFiche } from '../lib/documentDisplay';
 
 
@@ -439,27 +440,12 @@ export default function EnginDetailPage() {
         <PageBackLink fallbackTo="/engins" />
         <div className="mac-detail-hero-main">
 
-          <div className="mac-detail-photo">
-
-            {engin.photo ? (
-
-              <img src={engin.photo} alt="" />
-
-            ) : (
-
-              <div className="mac-detail-photo-fallback">{photoLabel.slice(0, 2).toUpperCase()}</div>
-
-            )}
-
-            <label className="mac-detail-photo-cam" title={t('actions.changePhoto')}>
-
-              <Camera size={12} strokeWidth={2} />
-
-              <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.webp" onChange={onPhoto} />
-
-            </label>
-
-          </div>
+          <MacProfilePhoto
+            photo={engin.photo}
+            firstName={photoLabel}
+            editable
+            onFileChange={onPhoto}
+          />
 
           <div className="min-w-0">
 

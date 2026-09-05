@@ -9,6 +9,7 @@ import { useI18n } from '../i18n/I18nContext';
 
 
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
+import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { EntityPickerPanel, chantierToPickerItem } from '../components/EntityPickerPanel';
 import {
@@ -322,19 +323,13 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
       <div className="mac-detail-hero">
         <PageBackLink fallbackTo={listPath} />
         <div className="mac-detail-hero-main">
-          <div className="mac-detail-photo">
-            {worker.photo ? (
-              <img src={worker.photo} alt="" />
-            ) : (
-              <div className="mac-detail-photo-fallback">
-                {worker.firstName[0]}{worker.lastName[0]}
-              </div>
-            )}
-            <label className="mac-detail-photo-cam" title={t('actions.changePhoto')}>
-              <Camera size={12} strokeWidth={2} />
-              <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.webp" onChange={onPhoto} />
-            </label>
-          </div>
+          <MacProfilePhoto
+            photo={worker.photo}
+            firstName={worker.firstName}
+            lastName={worker.lastName}
+            editable
+            onFileChange={onPhoto}
+          />
           <div className="min-w-0">
             <p className="mac-detail-eyebrow">{t('detail.workforce360')}</p>
             <h1 className="mac-detail-name truncate">{worker.firstName} {worker.lastName}</h1>

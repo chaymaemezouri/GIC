@@ -16,6 +16,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 
 import { AgentFormFields, emptyAgentForm, agentToForm, type AgentFormData } from '../components/AgentFormFields';
+import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { ClientLinkPicker } from '../components/ClientLinkPicker';
 
@@ -190,19 +191,13 @@ export default function AgentDetailPage() {
       <div className="mac-detail-hero">
         <PageBackLink fallbackTo="/agents" />
         <div className="mac-detail-hero-main">
-          <div className="mac-detail-photo">
-            {agent.photo ? (
-              <img src={agent.photo} alt="" />
-            ) : (
-              <div className="mac-detail-photo-fallback">
-                {agent.firstName[0]}{agent.lastName[0]}
-              </div>
-            )}
-            <label className="mac-detail-photo-cam" title={t('actions.changePhoto')}>
-              <Camera size={12} strokeWidth={2} />
-              <input type="file" className="hidden" accept=".jpg,.jpeg,.png" onChange={onPhoto} />
-            </label>
-          </div>
+          <MacProfilePhoto
+            photo={agent.photo}
+            firstName={agent.firstName}
+            lastName={agent.lastName}
+            editable
+            onFileChange={onPhoto}
+          />
           <div className="min-w-0">
             <p className="mac-detail-eyebrow">{t('detail.agent360')}</p>
             <h1 className="mac-detail-name truncate">{agent.firstName} {agent.lastName}</h1>

@@ -2,9 +2,6 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 
 import authRoutes from './routes/auth.js';
 import clientsRoutes from './routes/clients.js';
@@ -24,10 +21,7 @@ import messagingRoutes from './routes/messaging.js';
 import equipeInterneRoutes from './routes/equipeInterne.js';
 import reconnusRoutes from './routes/reconnus.js';
 import officeCashRoutes from './routes/officeCash.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = process.env.UPLOAD_DIR || './uploads';
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+import { uploadDir } from './lib/uploadPaths.js';
 
 const app = express();
 app.use(
@@ -44,7 +38,16 @@ app.use(
   })
 );
 app.use(express.json({ limit: '10mb' }));
-app.use('/uploads', express.static(path.resolve(uploadDir)));
+app.use(
+  '/uploads',
+  express.static(uploadDir, {
+    fallthrough: true,
+    setHeaders(res) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
+  })
+);
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: 'GIC', version: '1.0.0' });

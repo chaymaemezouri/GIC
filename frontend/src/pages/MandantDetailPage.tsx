@@ -16,6 +16,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 
 import { MandantFormFields, emptyMandantForm, mandantToForm, type MandantFormData } from '../components/MandantFormFields';
+import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { ClientLinkPicker } from '../components/ClientLinkPicker';
 
@@ -185,19 +186,13 @@ export default function MandantDetailPage() {
       <div className="mac-detail-hero">
         <PageBackLink fallbackTo="/mandants" />
         <div className="mac-detail-hero-main">
-          <div className="mac-detail-photo">
-            {mandant.photo ? (
-              <img src={mandant.photo} alt="" />
-            ) : (
-              <div className="mac-detail-photo-fallback">
-                {mandant.firstName[0]}{mandant.lastName[0]}
-              </div>
-            )}
-            <label className="mac-detail-photo-cam" title={t('actions.changePhoto')}>
-              <Camera size={12} strokeWidth={2} />
-              <input type="file" className="hidden" accept=".jpg,.jpeg,.png" onChange={onPhoto} />
-            </label>
-          </div>
+          <MacProfilePhoto
+            photo={mandant.photo}
+            firstName={mandant.firstName}
+            lastName={mandant.lastName}
+            editable
+            onFileChange={onPhoto}
+          />
           <div className="min-w-0">
             <p className="mac-detail-eyebrow">{t('detail.mandant360')}</p>
             <h1 className="mac-detail-name truncate">{mandant.firstName} {mandant.lastName}</h1>

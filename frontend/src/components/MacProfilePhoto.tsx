@@ -38,7 +38,6 @@ export default function MacProfilePhoto({
           src={src}
           alt=""
           onError={() => setImgError(true)}
-          onLoad={() => setImgError(false)}
         />
       ) : (
         <div className="mac-detail-photo-fallback text-lg font-bold">

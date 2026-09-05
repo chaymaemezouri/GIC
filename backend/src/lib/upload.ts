@@ -1,10 +1,7 @@
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import { randomUUID } from 'crypto';
-
-const uploadDir = process.env.UPLOAD_DIR || './uploads';
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+import { uploadDir } from './uploadPaths.js';
 
 const ALLOWED = ['.pdf', '.jpg', '.jpeg', '.png', '.docx', '.xlsx', '.svg', '.webp'];
 
@@ -22,7 +19,7 @@ export const upload = multer({
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (!ALLOWED.includes(ext)) {
-      return cb(new Error('Type de fichier non autorisé (PDF, JPG, PNG, DOCX, XLSX)'));
+      return cb(new Error('Type de fichier non autorisé (PDF, JPG, PNG, DOCX, XLSX, SVG, WEBP)'));
     }
     cb(null, true);
   },

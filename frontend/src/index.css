@@ -634,29 +634,17 @@ html[dir="rtl"] .shell-rail-tooltip {
   isolation: isolate;
 }
 
-/* Laptop / petit desktop : labels icône seule pour éviter le chevauchement */
-@media (min-width: 1024px) and (max-width: 1535px) {
-  .shell-nav-pill-text {
-    display: none;
-  }
-
+/* Largeur intermédiaire : un peu plus compact, mais labels visibles */
+@media (min-width: 1024px) and (max-width: 1399px) {
   .shell-nav-pill {
-    padding: 6px 7px;
-    gap: 4px;
-  }
-
-  .shell-nav-pill .shell-nav-chevron {
-    margin-inline-start: -2px;
+    padding: 6px 8px 6px 7px;
+    gap: 5px;
+    font-size: 12px;
   }
 
   .shell-nav-actions-wrap {
-    padding-inline-start: 8px;
+    padding-inline-start: 10px;
     gap: 6px;
-  }
-
-  .shell-lang-btn {
-    min-width: 26px;
-    padding: 0 5px;
   }
 }
 

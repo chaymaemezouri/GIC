@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../lib/audit.js';
 import { upload } from '../lib/upload.js';
+import { uploadDir } from '../lib/uploadPaths.js';
 import { sendEmail } from '../lib/email.js';
 import { logConversation } from '../lib/conversations.js';
 import { sendExcel } from '../lib/exportExcel.js';
@@ -455,7 +456,6 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const doc = await prisma.document.findUnique({ where: { id: req.params.id } });
   if (!doc) return res.status(404).json({ message: 'Document introuvable' });
-  const uploadDir = process.env.UPLOAD_DIR || './uploads';
   const filename = path.basename(doc.path);
   const fullPath = path.join(uploadDir, filename);
   if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);

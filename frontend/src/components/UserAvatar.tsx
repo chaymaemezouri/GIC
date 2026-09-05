@@ -26,7 +26,6 @@ export default function UserAvatar({ photo, firstName, lastName, className = 'sh
           alt=""
           className="shell-avatar-img"
           onError={() => setImgError(true)}
-          onLoad={() => setImgError(false)}
         />
       </div>
     );
