@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -5,13 +6,13 @@ import {
   Plus, Upload, Download, Printer, Eye, Trash2, Pencil, FileText, FolderOpen,
   AlertTriangle, Inbox, Send, SlidersHorizontal, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
-import { api, downloadCsv, downloadExcel, uploadDocument, uploadForm, formatDate, type PaginatedResponse } from '../lib/api';
+import { api, downloadCsv, downloadExcel, uploadDocument, uploadForm, formatDate, formatMad, type PaginatedResponse } from '../lib/api';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, Tabs, TableWrap, Td, Th,
 } from '../components/ui';
 import {
-  entityLink, expiryClass, formatSize, fileUrl, type DocEntity,
+  entityLink, expiryClass, formatSize, fileUrl, isDocumentLate, type DocEntity,
 } from '../lib/documentDisplay';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -34,6 +35,7 @@ type Stats = {
   total: number;
   expiring: number;
   expired: number;
+  late?: number;
   totalSize: number;
   categories: string[];
   archivesTotal: number;
@@ -70,7 +72,7 @@ export default function DocumentsPage() {
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Stats>({
-    total: 0, expiring: 0, expired: 0, totalSize: 0, categories: [],
+    total: 0, expiring: 0, expired: 0, late: 0, totalSize: 0, categories: [],
     archivesTotal: 0, archivesEntrant: 0, archivesSortant: 0,
   });
   const [q, setQ] = useState(searchParams.get('q') || '');
@@ -90,7 +92,14 @@ export default function DocumentsPage() {
   const [error, setError] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadMeta, setUploadMeta] = useState({ name: '', category: 'general', expiresAt: '' });
+  const [uploadMeta, setUploadMeta] = useState({
+    name: '',
+    category: 'general',
+    expiresAt: '',
+    feeAmount: '',
+    estimatedStartDate: '',
+    estimatedEndDate: '',
+  });
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveForm, setArchiveForm] = useState({
     registerNo: '', subject: '', sender: '', recipient: '', category: '', direction: 'entrant',
@@ -253,10 +262,16 @@ export default function DocumentsPage() {
         name: uploadMeta.name || uploadFile.name,
         category: uploadMeta.category,
         ...(uploadMeta.expiresAt ? { expiresAt: uploadMeta.expiresAt } : {}),
+        ...(uploadMeta.feeAmount ? { feeAmount: uploadMeta.feeAmount } : {}),
+        ...(uploadMeta.estimatedStartDate ? { estimatedStartDate: uploadMeta.estimatedStartDate } : {}),
+        ...(uploadMeta.estimatedEndDate ? { estimatedEndDate: uploadMeta.estimatedEndDate } : {}),
       });
       setUploadOpen(false);
       setUploadFile(null);
-      setUploadMeta({ name: '', category: 'general', expiresAt: '' });
+      setUploadMeta({
+        name: '', category: 'general', expiresAt: '', feeAmount: '',
+        estimatedStartDate: '', estimatedEndDate: '',
+      });
       load(page);
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
@@ -325,24 +340,21 @@ export default function DocumentsPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
+  async function printList() {
+
     if (tab === 'documents') {
-      w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
+      await printWithCompany({ title: t('pages.documents'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
         <h1>Documents GIC</h1><table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
         <tr><th>Nom</th><th>Catégorie</th><th>Taille</th><th>Échéance</th><th>Date</th></tr>
         ${docs.map((d) => `<tr><td>${d.name}</td><td>${d.category || '—'}</td><td>${formatSize(d.size)}</td><td>${formatDate(d.expiresAt)}</td><td>${formatDate(d.createdAt)}</td></tr>`).join('')}
-        </table></body></html>`);
+        </table></body></html>`, { grid: false }) });
     } else {
-      w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
+      await printWithCompany({ title: t('pages.documents'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
         <h1>Bureau d'ordre GIC</h1><table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
         <tr><th>N°</th><th>Date</th><th>Objet</th><th>Direction</th></tr>
         ${archives.map((a) => `<tr><td>${a.registerNo || '—'}</td><td>${formatDate(a.date)}</td><td>${a.subject}</td><td>${a.direction}</td></tr>`).join('')}
-        </table></body></html>`);
+        </table></body></html>`, { grid: false }) });
     }
-    w.document.close();
-    w.print();
   }
 
   function switchTab(id: TabId) {
@@ -391,9 +403,10 @@ export default function DocumentsPage() {
         }
       />
 
-      <div className="mac-kpi-grid mac-kpi-grid-4">
+      <div className="mac-kpi-grid mac-kpi-grid-5">
         <KpiCard title={t('pages.documents')} value={stats.total} icon={FileText} tone="violet" delta={formatSize(stats.totalSize)} deltaTone="muted" />
         <KpiCard title={t('kpi.expiring30d')} value={stats.expiring} icon={AlertTriangle} tone="amber" delta={t('kpi.expiredCount', { count: stats.expired })} deltaTone="muted" />
+        <KpiCard title={t('docs.lateDossiers')} value={stats.late || 0} icon={AlertTriangle} tone="coral" />
         <KpiCard title={t('kpi.bureauOrdre')} value={stats.archivesTotal} icon={FolderOpen} tone="emerald" delta={t('kpi.incomingCount', { count: stats.archivesEntrant })} deltaTone="muted" />
         <KpiCard title={t('kpi.outgoingMail')} value={stats.archivesSortant} icon={Send} tone="coral" />
       </div>
@@ -493,6 +506,7 @@ export default function DocumentsPage() {
                         { id: '', label: t('common.all') },
                         { id: 'expiring', label: t('filters.expiring30d') },
                         { id: 'expired', label: t('status.expiredPlural') },
+                        { id: 'late', label: t('docs.lateDossiers') },
                       ].map((f) => (
                         <button
                           key={f.id || 'all-alert'}
@@ -581,10 +595,14 @@ export default function DocumentsPage() {
                             setPage(1);
                             load(1, { q: '', alert: '', category: '' });
                           } else {
+                            const from = monthStartISO();
+                            const to = new Date().toISOString().slice(0, 10);
                             setDirectionFilter('');
                             setQ('');
+                            setDateFrom(from);
+                            setDateTo(to);
                             setPage(1);
-                            load(1, { q: '', direction: '' });
+                            load(1, { q: '', direction: '', dateFrom: from, dateTo: to });
                           }
                           setShowFilters(false);
                         }}
@@ -630,13 +648,24 @@ export default function DocumentsPage() {
               <tbody>
                 {docs.map((d) => {
                   const link = entityLink(d);
+                  const late = isDocumentLate(d);
                   return (
                     <tr
                       key={d.id}
                       className="cursor-pointer"
                       onClick={() => navigate(`/documents/${d.id}`)}
                     >
-                      <Td mac className="font-medium max-w-[200px] truncate">{d.name}</Td>
+                      <Td mac className="font-medium max-w-[220px]">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="truncate">{d.name}</span>
+                          {late && (
+                            <span className="mac-chip mac-chip-orange shrink-0">{t('docs.lateDossier')}</span>
+                          )}
+                          {d.feeAmount != null && d.feeAmount > 0 && (
+                            <span className="mac-chip mac-chip-violet shrink-0">{formatMad(d.feeAmount)}</span>
+                          )}
+                        </div>
+                      </Td>
                       <Td mac>
                         {d.category ? <span className="mac-chip capitalize">{d.category}</span> : '—'}
                       </Td>
@@ -648,7 +677,15 @@ export default function DocumentsPage() {
                           <span className="mac-table-muted">{d.entityType}</span>
                         ) : '—'}
                       </Td>
-                      <Td mac className={expiryClass(d.expiresAt)}>{formatDate(d.expiresAt)}</Td>
+                      <Td mac>
+                        {d.estimatedEndDate ? (
+                          <span className={late ? 'text-gic-coral font-medium' : undefined}>
+                            {formatDate(d.estimatedEndDate)}
+                          </span>
+                        ) : (
+                          <span className={expiryClass(d.expiresAt)}>{formatDate(d.expiresAt)}</span>
+                        )}
+                      </Td>
                       <Td mac className="mac-table-muted">{formatDate(d.createdAt)}</Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
@@ -741,6 +778,28 @@ export default function DocumentsPage() {
             {DOC_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </Select>
           <Input label={t('fields.deadlineOptional')} type="date" value={uploadMeta.expiresAt} onChange={(e) => setUploadMeta({ ...uploadMeta, expiresAt: e.target.value })} />
+          <Input
+            label={t('docs.feeOptional')}
+            type="number"
+            min={0}
+            step="0.01"
+            value={uploadMeta.feeAmount}
+            onChange={(e) => setUploadMeta({ ...uploadMeta, feeAmount: e.target.value })}
+            placeholder={t('docs.feePlaceholder')}
+          />
+          <Input
+            label={t('docs.estimatedStart')}
+            type="date"
+            value={uploadMeta.estimatedStartDate}
+            onChange={(e) => setUploadMeta({ ...uploadMeta, estimatedStartDate: e.target.value })}
+          />
+          <Input
+            label={t('docs.estimatedEnd')}
+            type="date"
+            value={uploadMeta.estimatedEndDate}
+            onChange={(e) => setUploadMeta({ ...uploadMeta, estimatedEndDate: e.target.value })}
+          />
+          <p className="text-[10px] text-gic-muted">{t('docs.estimateHint')}</p>
         </form>
       </Modal>
 

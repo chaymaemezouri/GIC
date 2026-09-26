@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -172,11 +173,10 @@ export default function AchatDetailPage() {
     }
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!purchase) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>Achat ${purchase.reference}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
+
+    await printWithCompany({ title: `Achat ${purchase.reference}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Achat ${purchase.reference}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>Bon d'achat — GIC</h1>
       <h2>${purchase.reference}</h2>
       <p><b>Date :</b> ${formatDate(purchase.date)}</p>
@@ -189,9 +189,7 @@ export default function AchatDetailPage() {
       <p><b>Total TTC :</b> ${formatMad(purchase.totalPrice)}</p>
       <p><b>Statut :</b> ${purchase.status}</p>
       <p><b>Mode paiement :</b> ${purchase.paymentMode || '—'}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!purchase && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;

@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -103,11 +104,14 @@ export default function ReferentielsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  function buildStatsQuery() {
+  function buildStatsQuery(overrides?: { category?: string; active?: string; q?: string }) {
     const qs = new URLSearchParams();
-    if (q) qs.set('q', q);
-    if (categoryFilter) qs.set('category', categoryFilter);
-    if (activeFilter) qs.set('active', activeFilter);
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
+    const cat = overrides?.category !== undefined ? overrides.category : categoryFilter;
+    const act = overrides?.active !== undefined ? overrides.active : activeFilter;
+    if (qVal) qs.set('q', qVal);
+    if (cat) qs.set('category', cat);
+    if (act) qs.set('active', act);
     return qs.toString();
   }
 
@@ -147,7 +151,10 @@ export default function ReferentielsPage() {
   ) {
     setLoading(true);
     setError('');
-    const statsQs = buildStatsQuery();
+    const statsQs = buildStatsQuery({
+      category: overrides?.category,
+      active: overrides?.active,
+    });
     Promise.all([
       api<PaginatedResponse<DropdownItem>>(`/dropdowns?${buildQuery(pageNum, overrides)}`),
       api<Stats>(`/dropdowns/stats?${statsQs}`),
@@ -274,10 +281,9 @@ export default function ReferentielsPage() {
     downloadExcel(`/dropdowns/export/xlsx?${buildStatsQuery()}`, 'referentiels-gic.xlsx');
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.references'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>${t('pages.referentials')} — GIC</h1>
       <p>${t('msg.referentialsPrintSummary', { categories: stats.categoriesCount, active: stats.actifs, total: stats.total })}</p>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
@@ -290,9 +296,7 @@ export default function ReferentielsPage() {
           <td>${i.isActive ? t('fields.yes') : t('fields.no')}</td>
         </tr>`).join('')}
       </table>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: false }) });
   }
 
   const allCategories = [

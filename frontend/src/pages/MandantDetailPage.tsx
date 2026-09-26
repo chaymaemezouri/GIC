@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -147,12 +148,11 @@ export default function MandantDetailPage() {
     load();
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!mandant) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
+
     const linkedClients = (mandant.clients || []).map((cm: any) => cm.client);
-    w.document.write(`<html><head><title>Mandant ${mandant.firstName} ${mandant.lastName}</title></head><body style="font-family:sans-serif;padding:24px">
+    await printWithCompany({ title: `${mandant.firstName} ${mandant.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Mandant ${mandant.firstName} ${mandant.lastName}</title></head><body style="font-family:sans-serif;padding:24px">
       <h1>Fiche mandant — GIC</h1>
       <h2>${mandant.reference || ''} — ${mandant.firstName} ${mandant.lastName}</h2>
       <p><b>Identité :</b> ${mandant.identityType || '—'} ${mandant.identityNumber || ''}</p>
@@ -162,9 +162,7 @@ export default function MandantDetailPage() {
       <p><b>Remarque :</b> ${mandant.remark || '—'}</p>
       <h3>Clients liés (${linkedClients.length})</h3>
       <ul>${linkedClients.map((c: any) => `<li>${c.reference} — ${c.firstName} ${c.lastName}</li>`).join('')}</ul>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!mandant && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;

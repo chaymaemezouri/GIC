@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -95,7 +96,7 @@ export default function FournisseursPage() {
     const qs = buildQuery(pageNum, overrides);
     Promise.all([
       api<PaginatedResponse<Supplier>>(`/achats/suppliers?${qs}`),
-      api<Stats>('/achats/suppliers/stats'),
+      api<Stats>(`/achats/suppliers/stats?${qs}`),
     ])
       .then(([res, st]) => {
         setItems(res.items);
@@ -220,10 +221,9 @@ export default function FournisseursPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.suppliers')} — GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.suppliers'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.suppliers')} — GIC</title></head><body>
       <h1>${t('pages.suppliers')} — GIC</h1>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
         <tr><th>${t('columns.ref')}</th><th>${t('columns.companyName')}</th><th>${t('columns.contact')}</th><th>${t('columns.phoneFull')}</th><th>${t('columns.email')}</th><th>${t('columns.purchases')}</th><th>${t('columns.status')}</th></tr>
@@ -236,9 +236,7 @@ export default function FournisseursPage() {
           <td>${s._count?.purchases ?? 0}</td>
           <td>${s.isActive ? t('status.active') : t('status.inactive')}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   function exportCsv() {

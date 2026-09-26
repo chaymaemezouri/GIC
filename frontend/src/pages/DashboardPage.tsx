@@ -261,8 +261,9 @@ export default function DashboardPage() {
                 { label: t('nav.receipts'), value: data?.alertes.paiementsASuivre, to: '/ventes' },
                 { label: t('nav.purchases'), value: data?.alertes.achatsAction, to: '/achats' },
                 { label: t('nav.maintenance'), value: data?.alertes.enginsMaintenance, to: '/engins' },
-                { label: t('nav.documents'), value: data?.alertes.documentsExpirant, to: '/documents' },
-              ].filter((a) => (a.value ?? 0) > 0 && (!user || canAccessRoute(user.role, a.to)));
+                { label: t('nav.documents'), value: data?.alertes.documentsExpirant, to: '/documents?alert=expiring' },
+                { label: t('docs.lateDossiers'), value: data?.alertes.documentsEnRetard, to: '/documents?alert=late' },
+              ].filter((a) => (a.value ?? 0) > 0 && (!user || canAccessRoute(user.role, a.to.split('?')[0])));
               if (alertItems.length === 0) {
                 return <p className="text-[12px] text-gic-muted py-6 text-center">{t('dashboard.noAlerts')}</p>;
               }

@@ -5,7 +5,11 @@ import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../lib/audit.js';
 import { upload, uploadExcel } from '../lib/upload.js';
-import { TASKS_REFERENCE } from '../lib/tasks.js';
+import {
+  TASKS_REFERENCE,
+  STANDARD_TRANCHE_LOTS,
+  buildStandardLotPhases,
+} from '../lib/tasks.js';
 import { buildChantierOverview } from '../lib/chantierOverview.js';
 import { listChantierTranches, getChantierTrancheDetail } from '../lib/chantierTranches.js';
 import { validateWorkProgressPhases } from '../lib/workProgressPhases.js';
@@ -17,6 +21,7 @@ import {
   parseExcelWorkforceRows,
 } from '../lib/importWorkforce.js';
 import { workforceDocHtml } from '../lib/workforcePrint.js';
+import { getOrCreateCompanySettings } from '../lib/companySettings.js';
 import { syncWorkforcePayrollMovement } from '../lib/cashSync.js';
 import { workforceScopeFilters } from '../lib/workforceScope.js';
 
@@ -28,6 +33,43 @@ router.use(requirePermission);
 router.get('/tasks/reference', async (_req, res) => {
   res.json(TASKS_REFERENCE);
 });
+
+router.get('/tasks/standard', async (_req, res) => {
+  res.json(
+    STANDARD_TRANCHE_LOTS.map((lot) => ({
+      name: lot.name,
+      phases: buildStandardLotPhases(lot),
+    })),
+  );
+});
+
+async function seedStandardTrancheProgress(chantierId: string, trancheName: string) {
+  const existing = await prisma.workProgress.findMany({
+    where: { chantierId, tranche: trancheName },
+    select: { taskName: true },
+  });
+  const existingNames = new Set(existing.map((e) => e.taskName));
+  const created = [];
+  for (const lot of STANDARD_TRANCHE_LOTS) {
+    if (existingNames.has(lot.name)) continue;
+    const p = await prisma.workProgress.create({
+      data: {
+        chantierId,
+        tranche: trancheName,
+        taskName: lot.name,
+        percent: 0,
+        phases: buildStandardLotPhases(lot),
+      },
+    });
+    created.push(p);
+  }
+  if (created.length) {
+    const all = await prisma.workProgress.findMany({ where: { chantierId } });
+    const avg = all.length ? all.reduce((s, row) => s + row.percent, 0) / all.length : 0;
+    await prisma.chantier.update({ where: { id: chantierId }, data: { progressPct: avg } });
+  }
+  return created;
+}
 
 // --- Main-d'œuvre (avant /:id) ---
 function buildWorkforceWhere(
@@ -64,8 +106,14 @@ function buildWorkforceWhere(
 }
 
 router.get('/workforce/stats', async (req, res) => {
+  const q = String(req.query.q || '').trim();
   const category = String(req.query.category || '');
   const excludeCategory = String(req.query.excludeCategory || '');
+  const groupe = String(req.query.groupe || '');
+  const active = String(req.query.active || '');
+  const declared = String(req.query.declared || '');
+  const chantierId = String(req.query.chantierId || '');
+  const where = buildWorkforceWhere(q, category, groupe, active, declared, chantierId, excludeCategory);
   const scopeWhere = workforceScopeFilters(category, excludeCategory);
 
   const withoutRef = await prisma.workforce.findMany({ where: { reference: null }, select: { id: true } });
@@ -73,12 +121,12 @@ router.get('/workforce/stats', async (req, res) => {
     await prisma.workforce.update({ where: { id: w.id }, data: { reference: await nextReference('MO') } });
   }
 
-  const [total, actifs, declared, assigned, avgSalary, categories, groupes] = await Promise.all([
-    prisma.workforce.count({ where: scopeWhere }),
-    prisma.workforce.count({ where: { ...scopeWhere, isActive: true } }),
-    prisma.workforce.count({ where: { ...scopeWhere, declared: true } }),
-    prisma.workforce.count({ where: { ...scopeWhere, assignments: { some: {} } } }),
-    prisma.workforce.aggregate({ where: scopeWhere, _avg: { dailySalary: true } }),
+  const [total, actifs, declaredCount, assigned, avgSalary, categories, groupes] = await Promise.all([
+    prisma.workforce.count({ where }),
+    prisma.workforce.count({ where: { AND: [where, { isActive: true }] } }),
+    prisma.workforce.count({ where: { AND: [where, { declared: true }] } }),
+    prisma.workforce.count({ where: { AND: [where, { assignments: { some: {} } }] } }),
+    prisma.workforce.aggregate({ where, _avg: { dailySalary: true } }),
     prisma.workforce.findMany({
       where: { ...scopeWhere, category: { not: null }, NOT: { category: '' } },
       select: { category: true },
@@ -96,7 +144,7 @@ router.get('/workforce/stats', async (req, res) => {
     total,
     actifs,
     inactifs: total - actifs,
-    declared,
+    declared: declaredCount,
     assigned,
     avgSalary: Math.round(avgSalary._avg.dailySalary || 0),
     categories: categories.map((c) => c.category).filter(Boolean),
@@ -296,6 +344,7 @@ router.get('/workforce/:id/print/:docType', async (req, res) => {
   if (!worker) return res.status(404).json({ message: 'Ouvrier introuvable' });
 
   const { from, to } = parseDateRange(dateFrom, dateTo);
+  const company = await getOrCreateCompanySettings();
   let html = '';
   let printData: Record<string, unknown> = { generatedAt: new Date().toISOString() };
 
@@ -337,7 +386,7 @@ router.get('/workforce/:id/print/:docType', async (req, res) => {
         advance: p.advance,
         bonus: p.bonus,
       })),
-    });
+    }, company);
   } else {
     html = workforceDocHtml(docType, {
       reference: worker.reference,
@@ -359,7 +408,7 @@ router.get('/workforce/:id/print/:docType', async (req, res) => {
         tranche: a.tranche,
         startDate: a.startDate.toISOString().slice(0, 10),
       })),
-    });
+    }, company);
   }
 
   await prisma.workforceDocument.create({
@@ -1378,15 +1427,33 @@ router.get('/chefs', async (_req, res) => {
   res.json(users);
 });
 
-router.get('/stats', async (_req, res) => {
+router.get('/stats', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const status = String(req.query.status || '');
+  const projectId = String(req.query.projectId || '').trim();
+  const chefClause =
+    req.user?.role === 'CHEF_CHANTIER' && req.user.id
+      ? { managerUserId: req.user.id }
+      : {};
+  const baseWhere = { AND: [...buildChantierWhere(q, '', projectId).AND, chefClause] };
+  const where = { AND: [...buildChantierWhere(q, status, projectId).AND, chefClause] };
+
   const [total, actifs, termines, suspendus, avgProgress, workerSum, purchaseAgg] = await Promise.all([
-    prisma.chantier.count(),
-    prisma.chantier.count({ where: { status: 'actif' } }),
-    prisma.chantier.count({ where: { status: 'termine' } }),
-    prisma.chantier.count({ where: { status: 'suspendu' } }),
-    prisma.chantier.aggregate({ _avg: { progressPct: true } }),
-    prisma.chantier.aggregate({ _sum: { workerCount: true } }),
-    prisma.purchase.aggregate({ _sum: { totalPrice: true }, where: { chantierId: { not: null } } }),
+    prisma.chantier.count({ where }),
+    prisma.chantier.count({ where: { AND: [baseWhere, { status: 'actif' }] } }),
+    prisma.chantier.count({ where: { AND: [baseWhere, { status: 'termine' }] } }),
+    prisma.chantier.count({ where: { AND: [baseWhere, { status: 'suspendu' }] } }),
+    prisma.chantier.aggregate({ where, _avg: { progressPct: true } }),
+    prisma.chantier.aggregate({ where, _sum: { workerCount: true } }),
+    prisma.purchase.aggregate({
+      _sum: { totalPrice: true },
+      where: {
+        chantierId: { not: null },
+        ...(q || status || projectId || chefClause.managerUserId
+          ? { chantier: where }
+          : {}),
+      },
+    }),
   ]);
   res.json({
     total,
@@ -1648,11 +1715,33 @@ router.post('/:id/tranches', async (req, res) => {
   if (!name) return res.status(400).json({ message: 'Nom de tranche requis' });
   const chantier = await prisma.chantier.findUnique({ where: { id: chantierId }, select: { id: true } });
   if (!chantier) return res.status(404).json({ message: 'Chantier introuvable' });
-  const tranche = await prisma.chantierTranche.upsert({
+  const estimatedStartDate = req.body.estimatedStartDate ? new Date(String(req.body.estimatedStartDate)) : null;
+  const estimatedEndDate = req.body.estimatedEndDate ? new Date(String(req.body.estimatedEndDate)) : null;
+  const existingTranche = await prisma.chantierTranche.findUnique({
     where: { chantierId_name: { chantierId, name } },
-    create: { chantierId, name, remark: req.body.remark ? String(req.body.remark).trim() : null },
-    update: { remark: req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark).trim() : null) : undefined },
   });
+  if (existingTranche) {
+    const updated = await prisma.chantierTranche.update({
+      where: { id: existingTranche.id },
+      data: {
+        remark: req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark).trim() : null) : undefined,
+        estimatedStartDate: req.body.estimatedStartDate !== undefined ? estimatedStartDate : undefined,
+        estimatedEndDate: req.body.estimatedEndDate !== undefined ? estimatedEndDate : undefined,
+      },
+    });
+    await audit(req, 'modification', 'ChantierTranche', updated.id, updated.name);
+    return res.status(200).json(updated);
+  }
+  const tranche = await prisma.chantierTranche.create({
+    data: {
+      chantierId,
+      name,
+      remark: req.body.remark ? String(req.body.remark).trim() : null,
+      estimatedStartDate,
+      estimatedEndDate,
+    },
+  });
+  await seedStandardTrancheProgress(chantierId, tranche.name);
   await audit(req, 'création', 'ChantierTranche', tranche.id, tranche.name);
   res.status(201).json(tranche);
 });
@@ -1674,7 +1763,19 @@ router.put('/:id/tranches/:trancheId', async (req, res) => {
   const remark = req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark).trim() : null) : tranche.remark;
   if (!newName) return res.status(400).json({ message: 'Nom requis' });
   const oldName = tranche.name;
-  const updated = await prisma.chantierTranche.update({ where: { id: trancheId }, data: { name: newName, remark } });
+  const data: {
+    name: string;
+    remark: string | null;
+    estimatedStartDate?: Date | null;
+    estimatedEndDate?: Date | null;
+  } = { name: newName, remark };
+  if (req.body.estimatedStartDate !== undefined) {
+    data.estimatedStartDate = req.body.estimatedStartDate ? new Date(String(req.body.estimatedStartDate)) : null;
+  }
+  if (req.body.estimatedEndDate !== undefined) {
+    data.estimatedEndDate = req.body.estimatedEndDate ? new Date(String(req.body.estimatedEndDate)) : null;
+  }
+  const updated = await prisma.chantierTranche.update({ where: { id: trancheId }, data });
   if (newName !== oldName) {
     await Promise.all([
       prisma.workProgress.updateMany({ where: { chantierId, tranche: oldName }, data: { tranche: newName } }),
@@ -1964,7 +2065,7 @@ router.post('/:id/progress', async (req, res) => {
 });
 
 router.post('/:id/progress/init', async (req, res) => {
-  const { tranche, groupe, etage, trancheId } = req.body;
+  const { tranche, trancheId } = req.body;
   let trancheName = tranche ? String(tranche).trim() : '';
   if (trancheId) {
     const t = await prisma.chantierTranche.findFirst({
@@ -1973,16 +2074,7 @@ router.post('/:id/progress/init', async (req, res) => {
     if (t) trancheName = t.name;
   }
   if (!trancheName) return res.status(400).json({ message: 'Tranche requise' });
-  const existing = await prisma.workProgress.findMany({ where: { chantierId: req.params.id } });
-  const existingNames = new Set(existing.map((e) => e.taskName));
-  const created = [];
-  for (const taskName of TASKS_REFERENCE) {
-    if (existingNames.has(taskName)) continue;
-    const p = await prisma.workProgress.create({
-      data: { chantierId: req.params.id, tranche: trancheName, groupe, etage, taskName, percent: 0 },
-    });
-    created.push(p);
-  }
+  const created = await seedStandardTrancheProgress(String(req.params.id), trancheName);
   res.status(201).json({ created: created.length, tasks: created });
 });
 

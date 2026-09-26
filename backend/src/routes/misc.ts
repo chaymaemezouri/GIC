@@ -5,6 +5,7 @@ import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../lib/audit.js';
 import { sendExcel } from '../lib/exportExcel.js';
 import { actionFilterClause, entityFilterClause } from '../lib/auditFilters.js';
+import { syncLateDocumentNotifications } from '../lib/documentFees.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -201,6 +202,8 @@ router.get('/notifications/stats', async (req, res) => {
 });
 
 router.get('/notifications', async (req, res) => {
+  await syncLateDocumentNotifications().catch(() => 0);
+
   const q = String(req.query.q || '').trim();
   const unreadOnly = String(req.query.unread || '') === '1';
   const category = String(req.query.category || '');
@@ -661,23 +664,7 @@ router.get('/audit', async (req, res) => {
   res.json({ items, total, page, limit, pages: Math.ceil(total / limit) || 1 });
 });
 
-const DEFAULT_BANK_INTRO =
-  'Madame, Monsieur,\n\nNous vous prions de bien vouloir procéder au virement des salaires au profit des bénéficiaires dont la liste figure ci-après, selon les coordonnées bancaires (CIN et RIB) indiquées pour chacun.\n\nNous vous remercions de l\'attention que vous porterez à la présente demande.\n\nCordialement,';
-
-async function getOrCreateCompanySettings() {
-  let row = await prisma.companySettings.findUnique({ where: { id: 'default' } });
-  if (!row) {
-    row = await prisma.companySettings.create({
-      data: {
-        id: 'default',
-        companyName: 'GIC — Expertise & Consulting',
-        bankLetterTitle: 'Demande de virement de salaires',
-        bankLetterIntro: DEFAULT_BANK_INTRO,
-      },
-    });
-  }
-  return row;
-}
+import { getOrCreateCompanySettings } from '../lib/companySettings.js';
 
 router.get('/settings/company', async (_req, res) => {
   res.json(await getOrCreateCompanySettings());
@@ -689,10 +676,12 @@ router.put('/settings/company', async (req, res) => {
   const data: Record<string, unknown> = {};
   for (const key of [
     'companyName', 'address', 'city', 'phone', 'email', 'ice', 'rc',
+    'printDocSubtitle', 'printFooterText', 'printLegalMentions', 'printPrimaryColor', 'receiptTitle',
     'bankLetterTitle', 'bankLetterIntro', 'bankLetterFooter',
   ] as const) {
     if (b[key] !== undefined) data[key] = b[key] == null ? null : String(b[key]);
   }
+  if (b.printShowLogo !== undefined) data.printShowLogo = b.printShowLogo === true || b.printShowLogo === 'true';
   const row = await prisma.companySettings.update({ where: { id: 'default' }, data: data as never });
   await audit(req, 'modification', 'CompanySettings', 'default', 'Paramètres société / liste banque');
   res.json(row);

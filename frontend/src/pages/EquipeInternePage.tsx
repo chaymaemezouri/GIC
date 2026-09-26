@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -72,10 +73,12 @@ export default function EquipeInternePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  function buildStatsQuery() {
+  function buildStatsQuery(overrides?: { active?: string; q?: string }) {
     const qs = new URLSearchParams();
-    if (q) qs.set('q', q);
-    if (activeFilter) qs.set('active', activeFilter);
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
+    const active = overrides?.active !== undefined ? overrides.active : activeFilter;
+    if (qVal) qs.set('q', qVal);
+    if (active) qs.set('active', active);
     return qs.toString();
   }
 
@@ -112,7 +115,7 @@ export default function EquipeInternePage() {
   ) {
     setLoading(true);
     setError('');
-    const statsQs = buildStatsQuery();
+    const statsQs = buildStatsQuery({ active: overrides?.active });
     Promise.all([
       api<PaginatedResponse<StaffRow>>(`/equipe-interne?${buildQuery(pageNum, overrides)}`),
       api<Stats>(`/equipe-interne/stats?${statsQs}`),
@@ -180,10 +183,9 @@ export default function EquipeInternePage() {
     downloadExcel(`/equipe-interne/export/xlsx?${buildStatsQuery()}`, 'equipe-interne-gic.xlsx');
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.internalTeam'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>${t('pages.internalTeam')} — GIC</h1>
       <p>${stats.total} collaborateur(s) · ${stats.actifs} actifs</p>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
@@ -196,9 +198,7 @@ export default function EquipeInternePage() {
           <td>${s.isActive ? t('status.active') : t('status.inactive')}</td>
         </tr>`).join('')}
       </table>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: false }) });
   }
 
   const hasActiveFilters = !!activeFilter;

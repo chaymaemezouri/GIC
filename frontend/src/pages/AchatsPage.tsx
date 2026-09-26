@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -126,7 +127,7 @@ export default function AchatsPage() {
     const qs = buildQuery(pageNum, overrides);
     Promise.all([
       api<PurchaseListResponse>(`/achats/purchases?${qs}`),
-      api<Stats>('/achats/purchases/stats'),
+      api<Stats>(`/achats/purchases/stats?${qs}`),
     ])
       .then(([res, st]) => {
         setItems(res.items);
@@ -307,10 +308,9 @@ export default function AchatsPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.purchases')} — GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.purchases'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.purchases')} — GIC</title></head><body>
       <h1>${t('pages.purchases')} — GIC</h1>
       <p>Total filtré : ${formatMad(totals.amount)}</p>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
@@ -323,9 +323,7 @@ export default function AchatsPage() {
           <td>${p.totalPrice}</td>
           <td>${p.status}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   function exportCsv() {

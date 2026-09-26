@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -89,12 +90,11 @@ export default function ReconnuDetailPage() {
     }
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!reconnu) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
+
     const movements: Movement[] = reconnu.movements || [];
-    w.document.write(`<html><head><title>Reconnu ${reconnu.firstName} ${reconnu.lastName}</title></head><body style="font-family:sans-serif;padding:24px">
+    await printWithCompany({ title: `${reconnu.firstName} ${reconnu.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Reconnu ${reconnu.firstName} ${reconnu.lastName}</title></head><body style="font-family:sans-serif;padding:24px">
       <h1>Fiche reconnu — GIC</h1>
       <h2>${reconnu.reference || ''} — ${reconnu.firstName} ${reconnu.lastName}</h2>
       <p><b>Relation :</b> ${reconnu.relation || '—'}</p>
@@ -104,9 +104,7 @@ export default function ReconnuDetailPage() {
       <p><b>Statut :</b> ${reconnu.isActive ? 'Actif' : 'Inactif'}</p>
       <h3>Mouvements récents (${movements.length})</h3>
       <ul>${movements.map((m) => `<li>${formatDate(m.date)} — ${m.designation} — ${m.direction === 'sortie' ? '−' : '+'}${formatMad(m.amount)}</li>`).join('')}</ul>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!reconnu && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;

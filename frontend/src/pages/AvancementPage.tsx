@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -222,10 +223,9 @@ export default function AvancementPage() {
     downloadExcel(`/chantiers/avancement/export/xlsx?${buildStatsQuery()}`, 'avancement-gic.xlsx');
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.progress')} GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.progress'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.progress')} GIC</title></head><body>
       <h1>${t('pages.progress')} — GIC</h1>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
         <tr><th>${t('columns.chantier')}</th><th>${t('columns.task')}</th><th>${t('columns.tranche')}</th><th>${t('columns.taskProgress')}</th><th>${t('columns.globalProgress')}</th><th>${t('columns.status')}</th><th>${t('columns.updated')}</th></tr>
@@ -238,9 +238,7 @@ export default function AvancementPage() {
           <td>${taskStatus(p.percent).replace('_', ' ')}</td>
           <td>${p.updatedAt ? formatDate(p.updatedAt) : '—'}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const statusFilters = [

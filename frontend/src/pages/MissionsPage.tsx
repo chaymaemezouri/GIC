@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -68,14 +69,27 @@ export default function MissionsPage() {
     usage: '', requestedBy: '', tranche: '', remark: '',
   });
 
-  function buildStatsQuery() {
+  function buildStatsQuery(overrides?: {
+    q?: string;
+    enginId?: string;
+    chantierId?: string;
+    linkFilter?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
     const qs = new URLSearchParams();
-    if (q) qs.set('q', q);
-    if (enginFilter) qs.set('enginId', enginFilter);
-    if (chantierFilter) qs.set('chantierId', chantierFilter);
-    if (linkFilter) qs.set('linkFilter', linkFilter);
-    if (dateFrom) qs.set('dateFrom', dateFrom);
-    if (dateTo) qs.set('dateTo', dateTo);
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
+    const enginId = overrides?.enginId !== undefined ? overrides.enginId : enginFilter;
+    const chantierId = overrides?.chantierId !== undefined ? overrides.chantierId : chantierFilter;
+    const linkVal = overrides?.linkFilter !== undefined ? overrides.linkFilter : linkFilter;
+    const from = overrides?.dateFrom !== undefined ? overrides.dateFrom : dateFrom;
+    const to = overrides?.dateTo !== undefined ? overrides.dateTo : dateTo;
+    if (qVal) qs.set('q', qVal);
+    if (enginId) qs.set('enginId', enginId);
+    if (chantierId) qs.set('chantierId', chantierId);
+    if (linkVal) qs.set('linkFilter', linkVal);
+    if (from) qs.set('dateFrom', from);
+    if (to) qs.set('dateTo', to);
     return qs.toString();
   }
 
@@ -134,7 +148,11 @@ export default function MissionsPage() {
   ) {
     setLoading(true);
     setError('');
-    const statsQs = buildStatsQuery();
+    const statsQs = buildStatsQuery({
+      enginId: overrides?.enginId,
+      chantierId: overrides?.chantierId,
+      linkFilter: overrides?.linkFilter,
+    });
     Promise.all([
       api<PaginatedResponse<Mission>>(`/engins/missions?${buildQuery(pageNum, overrides)}`),
       api<Stats>(`/engins/missions/stats?${statsQs}`),
@@ -217,10 +235,9 @@ export default function MissionsPage() {
     downloadExcel(`/engins/missions/export/xlsx?${buildStatsQuery()}`, 'missions-gic.xlsx');
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.missions')} GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.missions'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.missions')} GIC</title></head><body>
       <h1>${t('pages.missionsPrintTitle')}</h1>
       <p>${t('fields.period')} : ${dateFrom} → ${dateTo} · ${t('msg.missionsCount', { count: stats.total })}</p>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
@@ -233,9 +250,7 @@ export default function MissionsPage() {
           <td>${m.chantier?.name || '—'}</td>
           <td>${m.requestedBy || '—'}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const hasActiveFilters = !!enginFilter || !!chantierFilter || !!linkFilter;

@@ -1,4 +1,5 @@
 import { prisma } from './prisma.js';
+import { TASKS_REFERENCE } from './tasks.js';
 
 type ProgressRow = {
   tranche: string | null;
@@ -9,6 +10,19 @@ type ProgressRow = {
   id: string;
   updatedAt: Date;
 };
+
+function lotSortIndex(taskName: string) {
+  const i = TASKS_REFERENCE.indexOf(taskName);
+  return i >= 0 ? i : 999;
+}
+
+function sortProgressByStandardOrder<T extends { taskName: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const d = lotSortIndex(a.taskName) - lotSortIndex(b.taskName);
+    if (d !== 0) return d;
+    return a.taskName.localeCompare(b.taskName, 'fr');
+  });
+}
 
 export async function syncChantierTranchesFromProgress(chantierId: string) {
   const progress = await prisma.workProgress.findMany({
@@ -70,6 +84,8 @@ export async function listChantierTranches(chantierId: string) {
       id: t.id,
       name: t.name,
       remark: t.remark,
+      estimatedStartDate: t.estimatedStartDate,
+      estimatedEndDate: t.estimatedEndDate,
       percent: avg(trancheProgress.map((p) => p.percent)),
       workersCount: assignments.filter((a) => a.tranche === t.name).length,
       missionsCount: missions.filter((m) => m.tranche === t.name).length,
@@ -90,7 +106,6 @@ export async function getChantierTrancheDetail(chantierId: string, trancheId: st
   const [progress, assignments, missions, purchases, stockItems] = await Promise.all([
     prisma.workProgress.findMany({
       where: { chantierId, tranche: tranche.name },
-      orderBy: { taskName: 'asc' },
     }),
     prisma.workforceAssignment.findMany({
       where: { chantierId, tranche: tranche.name },
@@ -113,22 +128,26 @@ export async function getChantierTrancheDetail(chantierId: string, trancheId: st
     }),
   ]);
 
-  const groupes = buildGroupes(progress as ProgressRow[], tranche.name);
+  const orderedProgress = sortProgressByStandardOrder(progress);
+
+  const groupes = buildGroupes(orderedProgress as ProgressRow[], tranche.name);
   const purchasesTotal = purchases.reduce((s, p) => s + Number(p.totalPrice || 0), 0);
 
   return {
     id: tranche.id,
     name: tranche.name,
     remark: tranche.remark,
-    percent: avg(progress.map((p) => p.percent)),
+    estimatedStartDate: tranche.estimatedStartDate,
+    estimatedEndDate: tranche.estimatedEndDate,
+    percent: avg(orderedProgress.map((p) => p.percent)),
     workersCount: assignments.length,
     missionsCount: missions.length,
-    tasksCount: progress.length,
+    tasksCount: orderedProgress.length,
     purchasesCount: purchases.length,
     purchasesTotal,
     stockCount: stockItems.length,
     groupes,
-    progress,
+    progress: orderedProgress,
     assignments,
     missions,
     purchases,

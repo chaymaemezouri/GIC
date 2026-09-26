@@ -1,24 +1,29 @@
 import type { Response } from 'express';
+import { getOrCreateCompanySettings } from './companySettings.js';
 
 type PdfColumn = { key: string; label: string; width?: number };
 
-export function sendPdfTable(
+export async function sendPdfTable(
   res: Response,
   filename: string,
   title: string,
   columns: PdfColumn[],
   rows: Record<string, unknown>[]
 ) {
+  const company = await getOrCreateCompanySettings();
+  const companyName = company.companyName || 'GIC — Expertise & Consulting';
   const escape = (v: unknown) =>
     String(v ?? '')
       .replace(/\\/g, '\\\\')
       .replace(/\(/g, '\\(')
       .replace(/\)/g, '\\)');
 
-  const colWidths = columns.map((c) => c.width || Math.floor(500 / columns.length));
   const header = columns.map((c) => c.label).join(' | ');
   const body = rows.map((row) => columns.map((c) => String(row[c.key] ?? '')).join(' | '));
-  const lines = [title, '', header, ...body];
+  const lines = [companyName, title, '', header, ...body];
+  if (company.printFooterText) {
+    lines.push('', company.printFooterText.replace(/\n/g, ' · '));
+  }
 
   let y = 800;
   const content: string[] = ['BT', '/F1 10 Tf', '50 800 Td'];

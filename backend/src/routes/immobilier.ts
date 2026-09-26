@@ -255,16 +255,51 @@ router.get('/projects/:id/rentals', async (req, res) => {
 
 router.get('/projects/:id/documents', async (req, res) => {
   const projectId = String(req.params.id);
-  const docs = await prisma.document.findMany({
-    where: {
-      OR: [
-        { entityType: 'Project', entityId: projectId },
-        { property: { projectId } },
-      ],
-    },
-    orderBy: { createdAt: 'desc' },
+  const [docs, project] = await Promise.all([
+    prisma.document.findMany({
+      where: {
+        OR: [
+          { entityType: 'Project', entityId: projectId },
+          { property: { projectId } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { docChecklist: true },
+    }),
+  ]);
+  res.json({ documents: docs, docChecklist: project?.docChecklist || null });
+});
+
+router.put('/projects/:id/doc-checklist', async (req, res) => {
+  const projectId = String(req.params.id);
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return res.status(404).json({ message: 'Projet introuvable' });
+
+  const customRaw = Array.isArray(req.body?.custom) ? req.body.custom : [];
+  const labelsRaw = req.body?.labels && typeof req.body.labels === 'object' ? req.body.labels : {};
+  const custom = customRaw
+    .filter((item: { key?: unknown; label?: unknown }) =>
+      typeof item?.key === 'string' && typeof item?.label === 'string' && String(item.label).trim())
+    .map((item: { key: string; label: string; required?: boolean }) => ({
+      key: String(item.key).slice(0, 80),
+      label: String(item.label).trim().slice(0, 180),
+      required: item.required === true,
+    }));
+  const labels: Record<string, string> = {};
+  for (const [key, value] of Object.entries(labelsRaw as Record<string, unknown>)) {
+    if (typeof value === 'string' && value.trim()) labels[key] = value.trim().slice(0, 180);
+  }
+  const docChecklist = JSON.stringify({ custom, labels });
+  const updated = await prisma.project.update({
+    where: { id: projectId },
+    data: { docChecklist },
+    select: { id: true, docChecklist: true },
   });
-  res.json(docs);
+  await audit(req, 'modification', 'Project', projectId, 'Checklist documents projet');
+  res.json(updated);
 });
 
 router.get('/projects/:id/tree', async (req, res) => {

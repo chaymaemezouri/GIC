@@ -104,16 +104,21 @@ router.post('/import/xlsx', uploadExcel.single('file'), async (req, res) => {
   res.json(result);
 });
 
-router.get('/stats', async (_req, res) => {
-  const [total, active, withEmail, withPhone, linked, unlinked] = await Promise.all([
-    prisma.agent.count(),
-    prisma.agent.count({ where: { isActive: true } }),
-    prisma.agent.count({ where: { email: { not: null }, NOT: { email: '' } } }),
-    prisma.agent.count({ where: { phone1: { not: null }, NOT: { phone1: '' } } }),
-    prisma.agent.count({ where: { clients: { some: { isArchived: false } } } }),
-    prisma.agent.count({ where: { clients: { none: { isArchived: false } } } }),
+router.get('/stats', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const linked = String(req.query.linked || '');
+  const active = String(req.query.active || '');
+  const where = buildAgentWhere(q, linked, active);
+
+  const [total, activeCount, withEmail, withPhone, linkedCount, unlinked] = await Promise.all([
+    prisma.agent.count({ where }),
+    prisma.agent.count({ where: { AND: [where, { isActive: true }] } }),
+    prisma.agent.count({ where: { AND: [where, { email: { not: null }, NOT: { email: '' } }] } }),
+    prisma.agent.count({ where: { AND: [where, { phone1: { not: null }, NOT: { phone1: '' } }] } }),
+    prisma.agent.count({ where: { AND: [where, { clients: { some: { isArchived: false } } }] } }),
+    prisma.agent.count({ where: { AND: [where, { clients: { none: { isArchived: false } } }] } }),
   ]);
-  res.json({ total, active, withEmail, withPhone, linked, unlinked });
+  res.json({ total, active: activeCount, withEmail, withPhone, linked: linkedCount, unlinked });
 });
 
 router.get('/', async (req, res) => {

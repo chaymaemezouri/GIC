@@ -9,6 +9,7 @@ import { notifyAllAdmins } from '../lib/notifications.js';
 import { sendExcel } from '../lib/exportExcel.js';
 import { assertUniqueCin } from '../lib/uniqueness.js';
 import { supplierDocHtml } from '../lib/supplierPrint.js';
+import { getOrCreateCompanySettings } from '../lib/companySettings.js';
 import { computePurchaseTax } from '../lib/purchaseTax.js';
 import { findPurchaseCashMovement } from '../lib/purchaseCash.js';
 import { removeAutomaticMovement, syncPurchaseMovement } from '../lib/cashSync.js';
@@ -40,20 +41,31 @@ function buildSupplierWhere(q: string, source: string, active: string, withPorta
   };
 }
 
-router.get('/suppliers/stats', async (_req, res) => {
-  const [total, active, withEmail, withPortal, linked, purchaseAgg] = await Promise.all([
-    prisma.supplier.count(),
-    prisma.supplier.count({ where: { isActive: true } }),
-    prisma.supplier.count({ where: { email: { not: null }, NOT: { email: '' } } }),
-    prisma.supplier.count({ where: { passwordHash: { not: null } } }),
-    prisma.supplier.count({ where: { purchases: { some: {} } } }),
-    prisma.purchase.aggregate({ _sum: { totalPrice: true } }),
+router.get('/suppliers/stats', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const source = String(req.query.source || '');
+  const active = String(req.query.active || '');
+  const withPortal = String(req.query.withPortal || '');
+  const where = buildSupplierWhere(q, source, active, withPortal);
+
+  const [total, activeCount, withEmail, withPortalCount, linked, purchaseAgg] = await Promise.all([
+    prisma.supplier.count({ where }),
+    prisma.supplier.count({ where: { AND: [where, { isActive: true }] } }),
+    prisma.supplier.count({ where: { AND: [where, { email: { not: null }, NOT: { email: '' } }] } }),
+    prisma.supplier.count({ where: { AND: [where, { passwordHash: { not: null } }] } }),
+    prisma.supplier.count({ where: { AND: [where, { purchases: { some: {} } }] } }),
+    prisma.purchase.aggregate({
+      _sum: { totalPrice: true },
+      where: q || source || active || withPortal
+        ? { supplier: where }
+        : undefined,
+    }),
   ]);
   res.json({
     total,
-    active,
+    active: activeCount,
     withEmail,
-    withPortal,
+    withPortal: withPortalCount,
     linked,
     purchaseTotal: purchaseAgg._sum.totalPrice || 0,
   });
@@ -302,15 +314,28 @@ function buildPurchaseWhere(
   };
 }
 
-router.get('/purchases/stats', async (_req, res) => {
+router.get('/purchases/stats', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const status = String(req.query.status || '');
+  const supplierId = String(req.query.supplierId || '');
+  const chantierId = String(req.query.chantierId || '');
+  const tranche = String(req.query.tranche || '');
+  const invoiced = String(req.query.invoiced || '');
+  const dateFrom = req.query.dateFrom ? new Date(String(req.query.dateFrom)) : null;
+  const dateTo = req.query.dateTo ? new Date(String(req.query.dateTo)) : null;
+  if (dateFrom) dateFrom.setHours(0, 0, 0, 0);
+  if (dateTo) dateTo.setHours(23, 59, 59, 999);
+  const baseWhere = buildPurchaseWhere(q, '', supplierId, chantierId, dateFrom, dateTo, invoiced, tranche);
+  const where = buildPurchaseWhere(q, status, supplierId, chantierId, dateFrom, dateTo, invoiced, tranche);
+
   const [total, brouillon, valide, vise, controle, retourne, agg] = await Promise.all([
-    prisma.purchase.count(),
-    prisma.purchase.count({ where: { status: 'brouillon' } }),
-    prisma.purchase.count({ where: { status: 'validé' } }),
-    prisma.purchase.count({ where: { status: 'visé' } }),
-    prisma.purchase.count({ where: { status: 'contrôlé' } }),
-    prisma.purchase.count({ where: { status: 'retourné' } }),
-    prisma.purchase.aggregate({ _sum: { totalPrice: true } }),
+    prisma.purchase.count({ where }),
+    prisma.purchase.count({ where: { AND: [baseWhere, { status: 'brouillon' }] } }),
+    prisma.purchase.count({ where: { AND: [baseWhere, { status: 'validé' }] } }),
+    prisma.purchase.count({ where: { AND: [baseWhere, { status: 'visé' }] } }),
+    prisma.purchase.count({ where: { AND: [baseWhere, { status: 'contrôlé' }] } }),
+    prisma.purchase.count({ where: { AND: [baseWhere, { status: 'retourné' }] } }),
+    prisma.purchase.aggregate({ where, _sum: { totalPrice: true } }),
   ]);
   res.json({
     total,
@@ -363,6 +388,8 @@ router.get('/purchases', async (req, res) => {
   const skip = (page - 1) * limit;
   const dateFrom = req.query.dateFrom ? new Date(String(req.query.dateFrom)) : null;
   const dateTo = req.query.dateTo ? new Date(String(req.query.dateTo)) : null;
+  if (dateFrom) dateFrom.setHours(0, 0, 0, 0);
+  if (dateTo) dateTo.setHours(23, 59, 59, 999);
 
   const where = buildPurchaseWhere(q, status, supplierId, chantierId, dateFrom, dateTo, invoiced, tranche);
   const orderBy =
@@ -747,6 +774,7 @@ router.get('/suppliers/:id/print/:docType', async (req, res) => {
       include: { chantier: true },
     });
   }
+  const company = await getOrCreateCompanySettings();
   const html = supplierDocHtml(docType, {
     supplierName: supplier.companyName,
     supplierRef: supplier.reference,
@@ -758,7 +786,7 @@ router.get('/suppliers/:id/print/:docType', async (req, res) => {
     totalPrice: purchase?.totalPrice,
     chantier: purchase?.chantier?.name,
     remark: purchase?.remark || undefined,
-  });
+  }, company);
   await prisma.supplierDocument.create({
     data: {
       supplierId: supplier.id,

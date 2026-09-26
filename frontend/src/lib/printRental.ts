@@ -1,9 +1,6 @@
-function esc(v: unknown) {
-  return String(v ?? '—')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
+import { escHtml, printWithCompany } from './companyPrint';
+
+const esc = (value: unknown) => escHtml(value ?? '—');
 
 function mad(n: unknown) {
   const v = Number(n || 0);
@@ -17,8 +14,7 @@ function dateFr(v: unknown) {
 }
 
 /** Dossier complet location : client + contrat + produit + paiements. */
-export function printRentalReceipt(rental: Record<string, unknown>, opts?: { preview?: boolean }) {
-  const preview = opts?.preview !== false;
+export async function printRentalReceipt(rental: Record<string, unknown>, _opts?: { preview?: boolean }) {
   const payments = (rental.payments as Array<Record<string, unknown>>) || [];
   const client = (rental.client || {}) as Record<string, unknown>;
   const property = (rental.property || {}) as Record<string, unknown>;
@@ -46,22 +42,7 @@ export function printRentalReceipt(rental: Record<string, unknown>, opts?: { pre
         .join('')
     : '<tr><td colspan="9">Aucun paiement</td></tr>';
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Dossier location ${esc(rental.reference)}</title>
-<style>
-  body{font-family:Segoe UI,sans-serif;padding:28px;font-size:12px;color:#111;max-width:900px;margin:0 auto}
-  h1{font-size:18px;margin:0 0 4px} h2{font-size:14px;margin:20px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px}
-  .meta{color:#666;margin-bottom:16px} table{border-collapse:collapse;width:100%;margin-top:8px}
-  td,th{border:1px solid #ddd;padding:6px 8px;text-align:left} th{background:#f5f5f7}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px} .k{color:#666} .toolbar{margin:16px 0}
-  @media print{.toolbar{display:none}}
-</style></head><body>
-  <div class="toolbar">
-    <button onclick="window.print()" style="padding:8px 14px;font-size:13px;cursor:pointer">Imprimer</button>
-    <button onclick="window.close()" style="padding:8px 14px;font-size:13px;cursor:pointer;margin-left:8px">Fermer</button>
-  </div>
-  <h1>GIC — Dossier location</h1>
-  <p class="meta">Réf. ${esc(rental.reference)} · Généré le ${esc(dateFr(new Date()))}</p>
-
+  const bodyHtml = `
   <h2>1. Client / locataire</h2>
   <div class="grid">
     <div><span class="k">Nom :</span> ${esc(client.lastName)}</div>
@@ -106,15 +87,10 @@ export function printRentalReceipt(rental: Record<string, unknown>, opts?: { pre
       <th>Type ope.</th><th>N° ope.</th><th>Banque</th><th>Versant</th><th>Preuve</th>
     </tr></thead>
     <tbody>${paymentRows}</tbody>
-  </table>
-</body></html>`;
-
-  const w = window.open('', '_blank');
-  if (!w) return;
-  w.document.write(html);
-  w.document.close();
-  if (!preview) {
-    w.focus();
-    w.print();
-  }
+  </table>`;
+  return printWithCompany({
+    title: 'Dossier location',
+    subtitle: `Réf. ${String(rental.reference || '—')}`,
+    bodyHtml,
+  });
 }

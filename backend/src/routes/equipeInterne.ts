@@ -9,6 +9,7 @@ import { sendExcel } from '../lib/exportExcel.js';
 import { upload } from '../lib/upload.js';
 import { nextReference } from '../lib/references.js';
 import { staffDocHtml, computeStaffNet, monthLabel } from '../lib/staffPrint.js';
+import { getOrCreateCompanySettings } from '../lib/companySettings.js';
 import { syncStaffSalaryMovement } from '../lib/cashSync.js';
 import {
   baseSalaryForPeriod,
@@ -816,6 +817,7 @@ router.get('/:id/print/:docType', requireRole(...STAFF_ROLES), async (req, res) 
     },
   });
   const salaryFallback = computeStaffNet(staff.monthlySalary);
+  const company = await getOrCreateCompanySettings();
   const html = staffDocHtml(docType, {
     reference: staff.reference,
     firstName: staff.firstName,
@@ -839,7 +841,7 @@ router.get('/:id/print/:docType', requireRole(...STAFF_ROLES), async (req, res) 
     advance: record?.advance ?? 0,
     net: record?.netSalary ?? salaryFallback.net,
     remark: record?.remark,
-  });
+  }, company);
 
   if (docType === 'fiche_paie' || docType === 'attestation') {
     await prisma.internalStaffDocument.create({

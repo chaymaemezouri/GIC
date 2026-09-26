@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -5,7 +6,7 @@ import {
   ArrowLeft, Pencil, Trash2, Printer, Plus, Users, ShoppingCart,
   HardHat, FileText, ExternalLink, Upload, Camera, Video,
   Clock, FolderOpen, Layers, Building2, Image, Package,
-  MapPin, Images, UserMinus, TrendingUp, Truck,
+  MapPin, Images, UserMinus, TrendingUp, Truck, Wallet,
 } from 'lucide-react';
 import { api, fetchSupplierList, fetchWorkforceList, formatDate, formatMad, uploadDocument, uploadForm, type PaginatedResponse } from '../lib/api';
 import { googleMapsSearchUrl } from '../lib/googleMaps';
@@ -31,6 +32,12 @@ import { PurchaseFormFields, emptyPurchaseForm, type PurchaseFormData } from '..
 
 type Tab = ChantierTab;
 
+/** Achats réglés (visa / contrôle / payé) — diminuent le budget global. */
+function isPurchaseSettled(status?: string | null) {
+  const s = String(status || '').toLowerCase();
+  return ['contrôlé', 'controle', 'visé', 'vise', 'payé', 'paye', 'validé', 'valide'].includes(s);
+}
+
 export default function ChantierDetailPage() {
   const { t } = useI18n();
   const { id, trancheId: routeTrancheId } = useParams();
@@ -41,7 +48,12 @@ export default function ChantierDetailPage() {
   const [tranches, setTranches] = useState<TrancheListItem[]>([]);
   const [tranchesLoading, setTranchesLoading] = useState(false);
   const [trancheOpen, setTrancheOpen] = useState(false);
-  const [trancheForm, setTrancheForm] = useState({ name: '', remark: '' });
+  const [trancheForm, setTrancheForm] = useState({
+    name: '',
+    remark: '',
+    estimatedStartDate: '',
+    estimatedEndDate: '',
+  });
   const [history, setHistory] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('vue');
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -109,13 +121,19 @@ export default function ChantierDetailPage() {
     e.preventDefault();
     if (!id || !trancheForm.name.trim()) return;
     try {
-      await api(`/chantiers/${id}/tranches`, {
+      const created = await api<{ id: string }>(`/chantiers/${id}/tranches`, {
         method: 'POST',
-        body: JSON.stringify(trancheForm),
+        body: JSON.stringify({
+          name: trancheForm.name.trim(),
+          remark: trancheForm.remark.trim() || null,
+          estimatedStartDate: trancheForm.estimatedStartDate || null,
+          estimatedEndDate: trancheForm.estimatedEndDate || null,
+        }),
       });
       setTrancheOpen(false);
-      setTrancheForm({ name: '', remark: '' });
+      setTrancheForm({ name: '', remark: '', estimatedStartDate: '', estimatedEndDate: '' });
       loadTranches();
+      if (created?.id) openTranche(created.id);
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
@@ -468,11 +486,10 @@ export default function ChantierDetailPage() {
     }
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!chantier) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>Chantier ${chantier.name}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
+
+    await printWithCompany({ title: `Chantier ${chantier.name}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Chantier ${chantier.name}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>Fiche chantier — GIC</h1>
       <h2>${chantier.name}</h2>
       <p><b>Adresse :</b> ${chantier.address || '—'}</p>
@@ -481,9 +498,7 @@ export default function ChantierDetailPage() {
       <p><b>Statut :</b> ${chantier.status}</p>
       <p><b>Personnel :</b> ${(chantier.assignments || []).length} affectés</p>
       <p><b>Achats :</b> ${(chantier.purchases || []).length}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   const navGroups = buildChantierNavGroups(t, {
@@ -516,6 +531,9 @@ export default function ChantierDetailPage() {
   const documents = chantier.documents || [];
   const cameras = chantier.cameras || [];
   const purchaseTotal = purchases.reduce((s: number, p: any) => s + Number(p.totalPrice || 0), 0);
+  const purchaseSettledTotal = purchases
+    .filter((p: any) => isPurchaseSettled(p.status))
+    .reduce((s: number, p: any) => s + Number(p.totalPrice || 0), 0);
   const recentPurchases = purchases.slice(0, 5).map((p: any) => ({
     id: p.id,
     reference: p.reference,
@@ -528,13 +546,14 @@ export default function ChantierDetailPage() {
   const progressPct = Math.round(chantier.progressPct || 0);
   const initials = chantier.name.split(/\s+/).slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
   const alertCount = overview?.synthèse?.alertes ?? 0;
-  const budgetAchats = chantier.budgetAchats;
+  const budgetGlobal = Number(chantier.budgetAchats || 0);
   const missions = chantier.missions || [];
   const images = chantier.images || [];
   const mapsUrl = chantier.address ? googleMapsSearchUrl(chantier.address) : '';
-  const budgetDelta = budgetAchats
-    ? `${formatMad(purchaseTotal)} / ${formatMad(budgetAchats)}`
-    : formatMad(purchaseTotal);
+  const docsFeesTotal = documents.reduce((s: number, d: any) => s + Number(d.feeAmount || 0), 0);
+  const budgetSpent = purchaseSettledTotal + docsFeesTotal;
+  const budgetRemaining = Math.max(0, budgetGlobal - budgetSpent);
+  const budgetOverrun = budgetSpent > budgetGlobal && budgetGlobal > 0;
 
   return (
     <div className="space-y-0">
@@ -599,7 +618,7 @@ export default function ChantierDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
-          <Btn icon={Plus} onClick={() => { setTrancheForm({ name: '', remark: '' }); setTrancheOpen(true); }}>{t('actions.newTranche')}</Btn>
+          <Btn icon={Plus} onClick={() => { setTrancheForm({ name: '', remark: '', estimatedStartDate: '', estimatedEndDate: '' }); setTrancheOpen(true); }}>{t('actions.newTranche')}</Btn>
           <div className="relative">
             <Btn variant="secondary" onClick={() => setActionsOpen((o) => !o)}>{t('common.actions')}</Btn>
             {actionsOpen && (
@@ -629,7 +648,15 @@ export default function ChantierDetailPage() {
         <div className="mac-kpi-grid mac-kpi-grid-4 mb-4">
           <KpiCard title={t('tabs.tranches')} value={tranches.length} icon={Layers} tone="violet" />
           <KpiCard title={t('columns.progress')} value={`${progressPct} %`} icon={HardHat} tone="emerald" />
-          <KpiCard title={t('fields.budgetPurchases')} value={budgetDelta} icon={ShoppingCart} tone="amber" compact />
+          <KpiCard
+            title={t('fields.budgetRemaining')}
+            value={budgetGlobal > 0 ? formatMad(budgetRemaining) : '—'}
+            icon={Wallet}
+            tone={budgetOverrun ? 'coral' : 'amber'}
+            compact
+            delta={budgetGlobal > 0 ? formatMad(budgetGlobal) : undefined}
+            deltaTone={budgetOverrun ? 'coral' : 'muted'}
+          />
           <KpiCard title={t('tabs.workers')} value={assignments.length} icon={Users} tone="coral" delta={t('msg.equipmentCount', { count: missions.length })} deltaTone="muted" />
         </div>
       )}
@@ -654,7 +681,7 @@ export default function ChantierDetailPage() {
             tranches={tranches}
             loading={tranchesLoading}
             onSelect={openTranche}
-            onAdd={() => { setTrancheForm({ name: '', remark: '' }); setTrancheOpen(true); }}
+            onAdd={() => { setTrancheForm({ name: '', remark: '', estimatedStartDate: '', estimatedEndDate: '' }); setTrancheOpen(true); }}
           />
         )}
 
@@ -688,12 +715,16 @@ export default function ChantierDetailPage() {
               <p className="font-medium">{t('msg.workerCountDeclared', { count: chantier.workerCount })}</p>
             </div>
             <div>
-              <p className="text-[10px] text-gic-muted uppercase">{t('fields.budgetPurchases')}</p>
-              <p className="font-medium">{budgetAchats ? formatMad(budgetAchats) : '—'}</p>
+              <p className="text-[10px] text-gic-muted uppercase">{t('fields.budgetGlobal')}</p>
+              <p className="font-medium">{budgetGlobal > 0 ? formatMad(budgetGlobal) : '—'}</p>
             </div>
             <div>
-              <p className="text-[10px] text-gic-muted uppercase">{t('detail.purchaseSpend')}</p>
-              <p className="font-medium">{formatMad(purchaseTotal)}</p>
+              <p className="text-[10px] text-gic-muted uppercase">{t('fields.purchaseSettled')}</p>
+              <p className="font-medium">{formatMad(purchaseSettledTotal)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-gic-muted uppercase">{t('docs.docsFees')}</p>
+              <p className="font-medium">{formatMad(docsFeesTotal)}</p>
             </div>
             {linkedProject && (
               <div className="sm:col-span-2">
@@ -963,16 +994,23 @@ export default function ChantierDetailPage() {
         )}
 
         {tab === 'achats' && (
-          <div className="mt-2">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <div>
-                <p className="text-[13px] font-medium text-gic-ink tracking-tight">
-                  {t('msg.allPurchasesOnSite', { amount: formatMad(purchaseTotal) })}
-                </p>
-                <p className="text-[11px] text-gic-muted mt-0.5">
-                  {t('msg.purchasesAttachedToSite', { count: purchases.length })}
-                </p>
-              </div>
+          <div className="mt-2 space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <KpiCard title={t('fields.purchaseTotal')} value={formatMad(purchaseTotal)} icon={ShoppingCart} tone="violet" compact />
+              <KpiCard title={t('fields.purchaseSettled')} value={formatMad(purchaseSettledTotal)} icon={Wallet} tone="emerald" compact />
+              <KpiCard title={t('docs.docsFees')} value={formatMad(docsFeesTotal)} icon={FileText} tone="purple" compact />
+              <KpiCard
+                title={t('fields.budgetRemaining')}
+                value={budgetGlobal > 0 ? formatMad(budgetRemaining) : '—'}
+                icon={TrendingUp}
+                tone={budgetOverrun ? 'coral' : 'amber'}
+                compact
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[13px] font-medium text-gic-ink tracking-tight">
+                {t('msg.purchasesAttachedToSite', { count: purchases.length })}
+              </p>
               <Btn icon={Plus} onClick={openPurchase}>{t('actions.addPurchase')}</Btn>
             </div>
             {purchases.length === 0 ? (
@@ -1142,13 +1180,33 @@ export default function ChantierDetailPage() {
       <Modal open={trancheOpen} title={t('actions.newTranche')} onClose={() => setTrancheOpen(false)}
         footer={<><Btn variant="secondary" onClick={() => setTrancheOpen(false)}>{t('common.cancel')}</Btn><Btn form="tranche-form" type="submit">{t('actions.create')}</Btn></>}
       >
-        <form id="tranche-form" onSubmit={saveTranche} className="grid gap-3">
-          <Input label={t('fields.nameRequired')} required value={trancheForm.name} onChange={(e) => setTrancheForm({ ...trancheForm, name: e.target.value })} placeholder={t('msg.trancheNamePlaceholder')} />
+        <form id="tranche-form" onSubmit={saveTranche} className="grid gap-3 sm:grid-cols-2">
           <Input
+            className="sm:col-span-2"
+            label={t('fields.nameRequired')}
+            required
+            value={trancheForm.name}
+            onChange={(e) => setTrancheForm({ ...trancheForm, name: e.target.value })}
+            placeholder={t('msg.trancheNamePlaceholder')}
+          />
+          <Input
+            className="sm:col-span-2"
             label={t('fields.phasesDescription')}
             value={trancheForm.remark}
             onChange={(e) => setTrancheForm({ ...trancheForm, remark: e.target.value })}
             placeholder={t('fields.tranchePhasesPlaceholder')}
+          />
+          <Input
+            label={t('fields.estimatedStartDate')}
+            type="date"
+            value={trancheForm.estimatedStartDate}
+            onChange={(e) => setTrancheForm({ ...trancheForm, estimatedStartDate: e.target.value })}
+          />
+          <Input
+            label={t('fields.estimatedEndDate')}
+            type="date"
+            value={trancheForm.estimatedEndDate}
+            onChange={(e) => setTrancheForm({ ...trancheForm, estimatedEndDate: e.target.value })}
           />
         </form>
       </Modal>

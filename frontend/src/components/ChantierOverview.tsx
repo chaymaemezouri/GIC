@@ -126,22 +126,6 @@ function TranchesStructureSection({
                   <span className="tranche-tree-card-pct">{s.percent}%</span>
                 </div>
                 <ProgressSteps percent={s.percent} size="sm" showLabel={false} />
-                {s.groupes.length > 0 && (
-                  <ul className="tranche-groupe-list">
-                    {s.groupes.map((g) => (
-                      <li key={g.name} className="tranche-groupe-item">
-                        <span className="tranche-groupe-dot" aria-hidden />
-                        <div className="tranche-groupe-body">
-                          <span className="tranche-groupe-name">{g.name}</span>
-                          {g.etages.length > 0 && (
-                            <span className="tranche-groupe-etages">{g.etages.join(' · ')}</span>
-                          )}
-                        </div>
-                        <span className="tranche-groupe-pct">{g.percent}%</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
               </div>
             </li>
           ))}
@@ -165,7 +149,7 @@ export default function ChantierOverviewPanel({
   const purchasesPreview = recentPurchases.slice(0, 3);
 
   const budgetLabel = synthèse.budgetAchats > 0
-    ? `${Math.round((synthèse.depense / synthèse.budgetAchats) * 100)} %`
+    ? formatMad(Math.max(0, synthèse.budgetAchats - synthèse.depense))
     : formatMad(synthèse.depense);
 
   return (
@@ -190,7 +174,7 @@ export default function ChantierOverviewPanel({
           />
         )}
         <MetricChip icon={Users} label={t('tabs.personnel')} value={synthèse.personnel} />
-        <MetricChip icon={ShoppingCart} label={t('detail.purchaseSpend')} value={budgetLabel} tone="accent" />
+        <MetricChip icon={ShoppingCart} label={t('fields.budgetRemaining')} value={budgetLabel} tone="accent" />
         {(synthèse.cnssNonDeclare ?? 0) > 0 && (
           <MetricChip
             icon={Users}

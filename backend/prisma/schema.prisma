@@ -291,6 +291,8 @@ model Project {
   properties    Property[]
   chantiers     Chantier[]
   images        ProjectImage[]
+  /// JSON : { custom:[{key,label,required}], labels:{ [standardKey]: string } }
+  docChecklist  String?
 }
 
 model ProjectImage {
@@ -639,12 +641,14 @@ model ChantierImage {
 }
 
 model ChantierTranche {
-  id         String   @id @default(cuid())
-  name       String
-  chantierId String
-  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
-  remark     String?
-  createdAt  DateTime @default(now())
+  id                 String    @id @default(cuid())
+  name               String
+  chantierId         String
+  chantier           Chantier  @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  remark             String?
+  estimatedStartDate DateTime?
+  estimatedEndDate   DateTime?
+  createdAt          DateTime  @default(now())
 
   @@unique([chantierId, name])
 }
@@ -851,12 +855,20 @@ model Document {
   id          String   @id @default(cuid())
   name        String
   category    String?
+  /// pending | valid | invalid
+  status      String   @default("pending")
   mimeType    String?
   size        Int?
   path        String
   entityType  String?
   entityId    String?
   expiresAt   DateTime?
+  /// Frais du dossier (optionnel) — diminue le budget chantier si lié
+  feeAmount   Float?
+  estimatedStartDate DateTime?
+  estimatedEndDate   DateTime?
+  /// Dernière notif de retard (anti-spam)
+  lateNotifiedAt DateTime?
   clientId    String?
   client      Client?  @relation(fields: [clientId], references: [id])
   propertyId  String?
@@ -960,6 +972,12 @@ model CompanySettings {
   ice              String?
   rc               String?
   logoPath         String?
+  printDocSubtitle String?
+  printFooterText  String?
+  printLegalMentions String?
+  printPrimaryColor String  @default("#007aff")
+  printShowLogo    Boolean  @default(true)
+  receiptTitle     String   @default("Reçu de paiement")
   /// Titre du document liste banque
   bankLetterTitle  String   @default("Demande de virement de salaires")
   /// Paragraphe d'accompagnement pour la banque

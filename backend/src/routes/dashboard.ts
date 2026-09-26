@@ -12,6 +12,8 @@ router.get('/', async (req, res) => {
   const chantierId = String(req.query.chantierId || '');
   const dateFrom = req.query.dateFrom ? new Date(String(req.query.dateFrom)) : null;
   const dateTo = req.query.dateTo ? new Date(String(req.query.dateTo)) : null;
+  if (dateFrom) dateFrom.setHours(0, 0, 0, 0);
+  if (dateTo) dateTo.setHours(23, 59, 59, 999);
 
   const saleDateFilter =
     dateFrom || dateTo
@@ -136,6 +138,15 @@ router.get('/', async (req, res) => {
         lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         gte: new Date(),
       },
+    },
+  });
+
+  const lateCutoff = new Date();
+  lateCutoff.setHours(0, 0, 0, 0);
+  const lateDocs = await prisma.document.count({
+    where: {
+      estimatedEndDate: { lt: lateCutoff },
+      NOT: { status: 'valid' },
     },
   });
 
@@ -291,6 +302,7 @@ router.get('/', async (req, res) => {
       achatsAction: purchasesPending,
       enginsMaintenance: enginsMaint,
       documentsExpirant: expiringDocs,
+      documentsEnRetard: lateDocs,
     },
   });
 });

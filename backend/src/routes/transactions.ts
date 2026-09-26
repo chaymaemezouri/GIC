@@ -161,10 +161,10 @@ router.get('/sales/export/pdf', async (req, res) => {
     orderBy: { createdAt: 'desc' },
     take: 200,
   });
-  sendPdfTable(
+  await sendPdfTable(
     res,
     'ventes-gic.pdf',
-    'Liste des ventes — GIC',
+    'Liste des ventes',
     [
       { key: 'ref', label: 'Réf.' },
       { key: 'client', label: 'Client' },
@@ -631,10 +631,10 @@ router.get('/rentals/export/pdf', async (req, res) => {
     orderBy: { createdAt: 'desc' },
     take: 200,
   });
-  sendPdfTable(
+  await sendPdfTable(
     res,
     'locations-gic.pdf',
-    'Liste des locations — GIC',
+    'Liste des locations',
     [
       { key: 'ref', label: 'Réf.' },
       { key: 'client', label: 'Locataire' },
@@ -652,14 +652,19 @@ router.get('/rentals/export/pdf', async (req, res) => {
   );
 });
 
-router.get('/rentals/stats', async (_req, res) => {
+router.get('/rentals/stats', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const status = String(req.query.status || '');
+  const clientId = String(req.query.clientId || '');
+  const baseWhere = buildRentalWhere(q, status, clientId);
+  const activeFilter = { AND: [baseWhere, { status: 'active' }] };
   const [total, actives, terminees, agg] = await Promise.all([
-    prisma.rental.count(),
-    prisma.rental.count({ where: { status: 'active' } }),
-    prisma.rental.count({ where: { status: 'terminée' } }),
+    prisma.rental.count({ where: baseWhere }),
+    prisma.rental.count({ where: activeFilter }),
+    prisma.rental.count({ where: { AND: [baseWhere, { status: 'terminée' }] } }),
     prisma.rental.aggregate({
       _sum: { totalPaid: true, remaining: true, monthlyRent: true },
-      where: { status: 'active' },
+      where: status ? baseWhere : activeFilter,
     }),
   ]);
   res.json({
@@ -1202,10 +1207,10 @@ router.get('/payments/export/pdf', async (req, res) => {
     orderBy: { date: 'desc' },
     take: 200,
   });
-  sendPdfTable(
+  await sendPdfTable(
     res,
     'paiements-gic.pdf',
-    'Liste des paiements — GIC',
+    'Liste des paiements',
     [
       { key: 'date', label: 'Date' },
       { key: 'recu', label: 'Reçu' },

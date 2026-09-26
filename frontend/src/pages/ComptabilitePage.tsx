@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -180,18 +181,15 @@ export default function ComptabilitePage() {
     setOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
   }
 
-  function printJournal() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('accounting.journalPrintTitle')}</title><style>body{font-family:sans-serif;padding:24px;font-size:12px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px}</style></head><body>
+  async function printJournal() {
+
+    await printWithCompany({ title: t('accounting.journalPrintTitle'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('accounting.journalPrintTitle')}</title><style>body{font-family:sans-serif;padding:24px;font-size:12px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px}</style></head><body>
       <h1>${t('accounting.journalTitle')} — GIC</h1>
       <p>${t('fields.period')} : ${dateFrom} → ${dateTo}</p>
       <p>${t('columns.debit')} ${totals.debit} · ${t('columns.credit')} ${totals.credit}</p>
       <table><tr><th>${t('columns.date')}</th><th>${t('columns.type')}</th><th>${t('columns.ref')}</th><th>${t('columns.label')}</th><th>${t('columns.debit')}</th><th>${t('columns.credit')}</th></tr>
       ${items.map((e) => `<tr><td>${formatDate(e.date)}</td><td>${typeLabel(e.type)}</td><td>${e.reference}</td><td>${e.label}</td><td>${e.debit || ''}</td><td>${e.credit || ''}</td></tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const typeFilters = [

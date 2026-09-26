@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -640,10 +641,9 @@ export default function PointagePage() {
     downloadExcel(`/chantiers/pointage/export/xlsx?${buildExportQuery()}`, 'pointage-gic.xlsx');
   }
 
-  function printList(items: Pointage[]) {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.attendance')} GIC</title></head><body>
+  async function printList(items: Pointage[]) {
+
+    await printWithCompany({ title: t('pages.attendance'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.attendance')} GIC</title></head><body>
       <h1>${t('pages.attendance')} — GIC</h1>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
         <tr><th>${t('common.date')}</th><th>${t('columns.worker')}</th><th>${t('columns.chantier')}</th><th>${t('columns.totalDays')}</th><th>${t('columns.validated')}</th></tr>
@@ -654,9 +654,7 @@ export default function PointagePage() {
           <td>${p.totalDay.toFixed(2)}</td>
           <td>${p.validated ? t('common.yes') : t('common.no')}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const filteredWorkforce = workforce.filter((w) => {

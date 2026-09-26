@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -374,10 +375,9 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
     downloadCsv(`/equipe-interne/salaires/export/csv?${buildStatsQuery()}`, 'salaires-equipe-interne-gic.csv');
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.salariesInternal')} — GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.salariesInternal'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.salariesInternal')} — GIC</title></head><body>
       <h1>${t('pages.salariesInternal')} — GIC</h1>
       <p>${t('fields.period')} : ${periodLabel}</p>
       <p>${t('columns.net')} : ${formatMad(stats.totalNet)} · ${t('columns.paid')} : ${formatMad(stats.totalPaid)} · ${t('columns.remaining')} : ${formatMad(stats.totalRemaining)}</p>
@@ -394,9 +394,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
           <td>${r.salary.status}</td>
         </tr>`).join('')}
       </table>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: false }) });
   }
 
   function switchPayView(next: PayViewFilter) {

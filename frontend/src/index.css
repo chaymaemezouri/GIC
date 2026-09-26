@@ -515,22 +515,8 @@ html[dir="rtl"] .shell-rail-tooltip {
   grid-column: 1;
 }
 
-@media (max-width: 1023px) {
-  .shell-header-start {
-    display: flex;
-  }
-
-  .shell-header-inner {
-    grid-template-columns: auto 1fr auto;
-  }
-
-  .shell-header-center {
-    display: none;
-  }
-}
-
 .shell-header-center {
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
@@ -544,6 +530,28 @@ html[dir="rtl"] .shell-rail-tooltip {
 
 .shell-header-center::-webkit-scrollbar {
   display: none;
+}
+
+@media (max-width: 1023px) {
+  .shell-header-start {
+    display: flex;
+  }
+
+  .shell-header-inner {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .shell-header-center,
+  .shell-header-center-desktop {
+    display: none !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .shell-header-center,
+  .shell-header-center-desktop {
+    display: flex;
+  }
 }
 
 .shell-nav-actions-wrap {
@@ -2781,6 +2789,8 @@ html[dir="rtl"] .shell-dropdown-right {
   align-items: center;
   flex: 1;
   min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .mac-steps-item {
@@ -2887,6 +2897,31 @@ html[dir="rtl"] .shell-dropdown-right {
 
 .mac-steps-dot-current {
   box-shadow: 0 0 0 3px rgba(255, 149, 0, 0.22);
+}
+
+.mac-steps-dot-validation {
+  width: 22px;
+  height: 22px;
+  border-width: 2px;
+  border-color: #34c759;
+  color: #248a3d;
+  background: rgba(52, 199, 89, 0.12);
+}
+
+.mac-steps-dot-validation-pending {
+  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.2);
+}
+
+.mac-steps-dot-validation-done {
+  background: #34c759;
+  border-color: #34c759;
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.28);
+}
+
+.mac-steps-sm .mac-steps-dot-validation {
+  width: 18px;
+  height: 18px;
 }
 
 .mac-steps-label {
@@ -4522,6 +4557,108 @@ html[dir="rtl"] .shell-mobile-drawer {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+}
+
+.shell-mobile-link-muted {
+  color: #636366;
+  margin-top: 6px;
+}
+
+.shell-mobile-link-muted .shell-mobile-link-icon {
+  background: rgba(0, 0, 0, 0.04);
+  color: #636366;
+}
+
+/* ——— Mobile bottom shortcuts bar ——— */
+.shell-bottom-bar {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .shell-bottom-bar {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 90;
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    background: rgba(246, 246, 248, 0.92);
+    backdrop-filter: saturate(180%) blur(22px);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    border-top: 0.5px solid rgba(0, 0, 0, 0.1);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.06);
+  }
+
+  .shell-bottom-bar-inner {
+    display: flex;
+    align-items: stretch;
+    justify-content: space-around;
+    gap: 2px;
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 6px 8px 8px;
+    min-height: 56px;
+  }
+
+  .shell-bottom-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+    border-radius: 12px;
+    text-decoration: none;
+    color: #636366;
+    transition: background 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .shell-bottom-tab:active {
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  .shell-bottom-tab-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    color: inherit;
+  }
+
+  .shell-bottom-tab-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .shell-bottom-tab-active {
+    color: #007aff;
+  }
+
+  .shell-bottom-tab-active .shell-bottom-tab-icon {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+  }
+
+  .shell-main-col-with-bottom main {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+
+  html[dir="rtl"] .shell-bottom-tab-label {
+    font-family: Cairo, "Segoe UI", sans-serif;
+  }
 }
 
 /* ——— Responsive — pages & composants ——— */

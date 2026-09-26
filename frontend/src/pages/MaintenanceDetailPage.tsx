@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 
@@ -320,15 +321,13 @@ export default function MaintenanceDetailPage() {
 
 
 
-  function printFiche() {
+  async function printFiche() {
 
     if (!item) return;
 
-    const w = window.open('', '_blank');
 
-    if (!w) return;
 
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+    await printWithCompany({ title: `Maintenance — ${item.designation}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
 
       <h1>Maintenance — GIC</h1>
 
@@ -346,12 +345,7 @@ export default function MaintenanceDetailPage() {
 
       <p><b>Remarque :</b> ${item.remark || '—'}</p>
 
-    </body></html>`);
-
-    w.document.close();
-
-    w.print();
-
+    </body></html>`, { grid: true }) });
   }
 
 

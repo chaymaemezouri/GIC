@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -223,12 +224,11 @@ export default function ClientDetailPage() {
     load();
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!client) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
+
     const s = client.summary || {};
-    w.document.write(`<html><head><title>Fiche ${client.reference}</title>
+    await printWithCompany({ title: `${client.firstName} ${client.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Fiche ${client.reference}</title>
       <style>body{font-family:sans-serif;padding:24px;font-size:13px}h1{color:#6d28d9}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}</style></head><body>
       <h1>Fiche Client 360° — ${client.firstName} ${client.lastName}</h1>
       <p><strong>Réf.:</strong> ${client.reference}</p>
@@ -238,9 +238,7 @@ export default function ClientDetailPage() {
       <h2>Ventes (${(client.sales || []).length})</h2>
       <table><tr><th>Réf</th><th>Bien</th><th>Net</th><th>Reste</th></tr>
       ${(client.sales || []).map((v: any) => `<tr><td>${v.reference}</td><td>${v.property?.name || ''}</td><td>${v.netPrice}</td><td>${v.remaining}</td></tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: true }) });
   }
 
   if (!client || !form) {

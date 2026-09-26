@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import { LogOut, User, X } from 'lucide-react';
+import { LogOut, SlidersHorizontal, User, X } from 'lucide-react';
 import type { NavGroup, NavItem } from '../lib/navConfig';
 import type { CreateNavGroup } from '../lib/createItems';
 import UserAvatar from './UserAvatar';
@@ -9,7 +9,6 @@ import { useI18n } from '../i18n/I18nContext';
 type MobileNavDrawerProps = {
   open: boolean;
   onClose: () => void;
-  rail: NavItem[];
   homeLink: NavItem;
   showHome: boolean;
   directLinks: NavItem[];
@@ -58,7 +57,6 @@ function DrawerLink({
 export default function MobileNavDrawer({
   open,
   onClose,
-  rail,
   homeLink,
   showHome,
   directLinks,
@@ -111,15 +109,6 @@ export default function MobileNavDrawer({
         </div>
 
         <nav className="shell-mobile-nav">
-          {rail.length > 0 && (
-            <section className="shell-mobile-section-block">
-              <p className="shell-mobile-section">{t('nav.shortcuts')}</p>
-              {rail.map((item) => (
-                <DrawerLink key={`rail-${item.to}`} item={item} onNavigate={onClose} />
-              ))}
-            </section>
-          )}
-
           <section className="shell-mobile-section-block">
             <p className="shell-mobile-section">{t('nav.navigation')}</p>
             {showHome && <DrawerLink item={homeLink} onNavigate={onClose} />}
@@ -142,6 +131,16 @@ export default function MobileNavDrawer({
                 ))}
               </div>
             ))}
+            <Link
+              to="/parametres?tab=navigation"
+              className="shell-mobile-link shell-mobile-link-muted"
+              onClick={onClose}
+            >
+              <span className="shell-mobile-link-icon">
+                <SlidersHorizontal size={18} strokeWidth={1.85} />
+              </span>
+              <span>{t('settings.customizeShortcuts')}</span>
+            </Link>
           </section>
 
           {createGroups.length > 0 && (

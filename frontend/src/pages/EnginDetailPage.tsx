@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 
@@ -357,15 +358,13 @@ export default function EnginDetailPage() {
 
 
 
-  function printFiche() {
+  async function printFiche() {
 
     if (!engin) return;
 
-    const w = window.open('', '_blank');
 
-    if (!w) return;
 
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+    await printWithCompany({ title: `Engin — ${engin.matricule || engin.brand || "—"}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
 
       <h1>Fiche engin — GIC</h1>
 
@@ -379,12 +378,7 @@ export default function EnginDetailPage() {
 
       <p><b>Carburant :</b> ${engin.fuelLevel != null ? engin.fuelLevel + '%' : '—'}</p>
 
-    </body></html>`);
-
-    w.document.close();
-
-    w.print();
-
+    </body></html>`, { grid: true }) });
   }
 
 

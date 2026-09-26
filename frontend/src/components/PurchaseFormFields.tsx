@@ -114,12 +114,20 @@ export function PurchaseFormFields({
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Input className="sm:col-span-2" label={`${t('fields.designation')} *`} required value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} />
-      <Select label={t('fields.family')} value={form.family} onChange={(e) => setForm({ ...form, family: e.target.value, designation: '' })}>
-        <option value="">—</option>
-        {families.map((f) => (
-          <option key={f.id} value={f.name}>{f.name}</option>
-        ))}
-      </Select>
+      <Input
+        label={t('fields.family')}
+        value={form.family}
+        onChange={(e) => setForm({ ...form, family: e.target.value })}
+        placeholder={t('fields.familyManualPlaceholder')}
+        list={families.length ? 'purchase-family-list' : undefined}
+      />
+      {families.length > 0 && (
+        <datalist id="purchase-family-list">
+          {families.map((f) => (
+            <option key={f.id} value={f.name} />
+          ))}
+        </datalist>
+      )}
       {selectedFamily && (selectedFamily.designations || []).length > 0 ? (
         <Select label={t('fields.catalogDesignation')} value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })}>
           <option value="">—</option>

@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -231,19 +232,16 @@ export default function PaiementsPage() {
     setOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>Paiements GIC</title><style>body{font-family:sans-serif;padding:24px;font-size:12px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px}</style></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: 'Paiements', bodyHtml: extractLegacyPrintBody(`<html><head><title>Paiements GIC</title><style>body{font-family:sans-serif;padding:24px;font-size:12px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px}</style></head><body>
       <h1>Paiements GIC</h1><table><tr><th>Date</th><th>Reçu</th><th>Type</th><th>Client</th><th>Montant</th><th>Mode</th></tr>
       ${items.map((p) => {
         const isSale = !!p.sale;
         const client = isSale ? p.sale?.client : p.rental?.client;
         return `<tr><td>${formatDate(p.date)}</td><td>${p.receiptNo}</td><td>${isSale ? 'Vente' : 'Location'}</td><td>${client ? `${client.firstName} ${client.lastName}` : ''}</td><td>${p.amount}</td><td>${p.operationType || ''}</td></tr>`;
       }).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const typeFilters = [

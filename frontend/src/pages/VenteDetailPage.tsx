@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -196,18 +197,15 @@ export default function VenteDetailPage() {
     }
   }
 
-  function printPaymentReceipt(p: any) {
-    const w = window.open('', '_blank');
-    if (!w || !sale) return;
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px">
+  async function printPaymentReceipt(p: any) {
+
+    await printWithCompany({ title: `Reçu ${p.receiptNo}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px">
       <h2>GIC — Reçu ${p.receiptNo}</h2>
       <p>Vente: ${sale.reference}</p>
       <p>Montant: ${formatMad(p.amount)}</p>
       <p>Mode: ${p.operationType || '—'}</p>
       <p>Date: ${formatDate(p.date)}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!sale && !error) {

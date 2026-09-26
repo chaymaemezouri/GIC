@@ -78,10 +78,10 @@ function buildEnginWhere(q: string, status: string, genre: string, alert: string
     alert === 'expiring'
       ? {
           OR: [
-            { insuranceExpiry: { lte: in30, not: null } },
-            { vignetteExpiry: { lte: in30, not: null } },
-            { visitExpiry: { lte: in30, not: null } },
-            { authExpiry: { lte: in30, not: null } },
+            { insuranceExpiry: { gte: now, lte: in30 } },
+            { vignetteExpiry: { gte: now, lte: in30 } },
+            { visitExpiry: { gte: now, lte: in30 } },
+            { authExpiry: { gte: now, lte: in30 } },
           ],
         }
       : alert === 'expired'

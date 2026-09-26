@@ -6,11 +6,11 @@ import {
 } from 'lucide-react';
 import { api, fetchWorkforceList, fetchSupplierList, formatDate, formatMad } from '../lib/api';
 import {
-  Btn, Input, MacActionBtn, Modal, PageBackLink, Select, StatusPill, TableWrap, Td, Th,
+  Btn, Input, MacActionBtn, Modal, PageBackLink, StatusPill, TableWrap, Td, Th,
 } from './ui';
 import ProgressSteps from './ProgressSteps';
 import { TaskPhaseFields } from './TaskPhaseFields';
-import { emptyPhaseForm, validatePhaseForm, type TaskPhaseInput } from '../lib/progressPhases';
+import { emptyPhaseForm, ensureAnchoredPhases, validatePhaseForm, type TaskPhaseInput } from '../lib/progressPhases';
 import { workforceDetailPathForCategory } from '../lib/workforceScope';
 import { PurchaseFormFields, emptyPurchaseForm, type PurchaseFormData } from './PurchaseFormFields';
 import { EntityPickerPanel, enginToPickerItem, workforceToPickerItem } from './EntityPickerPanel';
@@ -21,6 +21,8 @@ export type TrancheListItem = {
   id: string;
   name: string;
   remark?: string | null;
+  estimatedStartDate?: string | null;
+  estimatedEndDate?: string | null;
   percent: number;
   workersCount: number;
   missionsCount: number;
@@ -141,26 +143,18 @@ export function ChantierTranchesList({
                     <div className="min-w-0">
                       <h3 className="tranche-tree-card-name">{tr.name}</h3>
                       {tr.remark && <p className="tranche-tree-card-remark">{tr.remark}</p>}
+                      {(tr.estimatedStartDate || tr.estimatedEndDate) && (
+                        <p className="tranche-tree-card-remark">
+                          {[
+                            tr.estimatedStartDate ? formatDate(tr.estimatedStartDate) : '…',
+                            tr.estimatedEndDate ? formatDate(tr.estimatedEndDate) : '…',
+                          ].join(' → ')}
+                        </p>
+                      )}
                     </div>
                     <span className="tranche-tree-card-pct">{tr.percent}%</span>
                   </div>
                   <ProgressSteps percent={tr.percent} size="sm" showLabel={false} />
-                  {tr.groupes.length > 0 && (
-                    <ul className="tranche-groupe-list">
-                      {tr.groupes.map((g) => (
-                        <li key={g.name} className="tranche-groupe-item">
-                          <span className="tranche-groupe-dot" aria-hidden />
-                          <div className="tranche-groupe-body">
-                            <span className="tranche-groupe-name">{g.name}</span>
-                            {g.etages.length > 0 && (
-                              <span className="tranche-groupe-etages">{g.etages.join(' · ')}</span>
-                            )}
-                          </div>
-                          <span className="tranche-groupe-pct">{g.percent}%</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
                   {meta && <p className="tranche-tree-card-meta">{meta}</p>}
                   <span className="tranche-tree-card-action">
                     {t('actions.openTranche')}
@@ -209,10 +203,7 @@ export function ChantierTrancheView({
   const [assignPickerQuery, setAssignPickerQuery] = useState('');
   const [missionPickerQuery, setMissionPickerQuery] = useState('');
   const [missionForm, setMissionForm] = useState({ enginId: '', mission: '', driverName: '', usage: '' });
-  const [initForm, setInitForm] = useState({ groupe: '', etage: '' });
   const [addTaskForm, setAddTaskForm] = useState({
-    groupe: '',
-    etage: '',
     taskName: '',
     percent: '0',
     phases: emptyPhaseForm(),
@@ -221,14 +212,20 @@ export function ChantierTrancheView({
   const [editPhasesOpen, setEditPhasesOpen] = useState(false);
   const [editPhasesItem, setEditPhasesItem] = useState<TrancheDetail['progress'][number] | null>(null);
   const [editPhasesForm, setEditPhasesForm] = useState<TaskPhaseInput[]>(emptyPhaseForm());
-  const [initOpen, setInitOpen] = useState(false);
+  const [autoSeedDone, setAutoSeedDone] = useState(false);
   const [taskRef, setTaskRef] = useState<string[]>([]);
+  const [standardLots, setStandardLots] = useState<{ name: string; phases: TaskPhaseInput[] }[]>([]);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState<PurchaseFormData>(emptyPurchaseForm());
   const [suppliers, setSuppliers] = useState<{ id: string; reference: string; companyName: string }[]>([]);
   const [families, setFamilies] = useState<any[]>([]);
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', remark: '' });
+  const [editForm, setEditForm] = useState({
+    name: '',
+    remark: '',
+    estimatedStartDate: '',
+    estimatedEndDate: '',
+  });
   const [pointages, setPointages] = useState<any[]>([]);
   const [pointageLoading, setPointageLoading] = useState(false);
 
@@ -240,17 +237,36 @@ export function ChantierTrancheView({
   }
 
   useEffect(() => {
+    setAutoSeedDone(false);
     load();
     fetchWorkforceList().then(setWorkforce).catch(() => {});
     fetchSupplierList().then(setSuppliers).catch(() => {});
     api('/achats/families').then(setFamilies).catch(() => {});
     api<string[]>('/chantiers/tasks/reference').then(setTaskRef).catch(() => {});
+    api<{ name: string; phases: TaskPhaseInput[] }[]>('/chantiers/tasks/standard')
+      .then(setStandardLots)
+      .catch(() => {});
   }, [chantierId, trancheId]);
 
   useEffect(() => {
     if (tab !== 'pointage' || !detail) return;
     loadTranchePointages();
   }, [tab, detail?.id]);
+
+  /** Filet de sécurité : tranche vide → lots standards + phases à 0 %. */
+  useEffect(() => {
+    if (!detail || autoSeedDone || detail.progress.length > 0) return;
+    setAutoSeedDone(true);
+    api(`/chantiers/${chantierId}/progress/init`, {
+      method: 'POST',
+      body: JSON.stringify({ trancheId }),
+    })
+      .then(() => {
+        load();
+        onRefresh();
+      })
+      .catch(() => {});
+  }, [detail?.id, detail?.progress.length, autoSeedDone]);
 
   function loadTranchePointages() {
     if (!detail) return;
@@ -302,7 +318,7 @@ export function ChantierTrancheView({
     try {
       await api(`/chantiers/${chantierId}/progress/init`, {
         method: 'POST',
-        body: JSON.stringify({ trancheId, groupe: initForm.groupe, etage: initForm.etage }),
+        body: JSON.stringify({ trancheId }),
       });
       load();
       onRefresh();
@@ -328,7 +344,12 @@ export function ChantierTrancheView({
     try {
       await api(`/chantiers/${chantierId}/tranches/${trancheId}`, {
         method: 'PUT',
-        body: JSON.stringify(editForm),
+        body: JSON.stringify({
+          name: editForm.name.trim(),
+          remark: editForm.remark.trim() || null,
+          estimatedStartDate: editForm.estimatedStartDate || null,
+          estimatedEndDate: editForm.estimatedEndDate || null,
+        }),
       });
       setEditOpen(false);
       load();
@@ -351,14 +372,20 @@ export function ChantierTrancheView({
 
   function openEditTranche() {
     if (!detail) return;
-    setEditForm({ name: detail.name, remark: detail.remark || '' });
+    setEditForm({
+      name: detail.name,
+      remark: detail.remark || '',
+      estimatedStartDate: detail.estimatedStartDate ? String(detail.estimatedStartDate).slice(0, 10) : '',
+      estimatedEndDate: detail.estimatedEndDate ? String(detail.estimatedEndDate).slice(0, 10) : '',
+    });
     setEditOpen(true);
   }
 
   async function addTask(e: React.FormEvent) {
     e.preventDefault();
     if (!detail || !addTaskForm.taskName.trim()) return;
-    const phaseError = validatePhaseForm(addTaskForm.phases);
+    const phases = ensureAnchoredPhases(addTaskForm.phases);
+    const phaseError = validatePhaseForm(phases);
     if (phaseError) {
       await appAlert(phaseError);
       return;
@@ -368,18 +395,16 @@ export function ChantierTrancheView({
         method: 'POST',
         body: JSON.stringify({
           tranche: detail.name,
-          groupe: addTaskForm.groupe.trim() || null,
-          etage: addTaskForm.etage.trim() || null,
           taskName: addTaskForm.taskName.trim(),
-          percent: Number(addTaskForm.percent) || 0,
-          phases: addTaskForm.phases.map((p) => ({
+          percent: 0,
+          phases: phases.map((p) => ({
             percent: p.percent,
             label: p.label.trim(),
             description: p.description?.trim() || undefined,
           })),
         }),
       });
-      setAddTaskForm({ groupe: '', etage: '', taskName: '', percent: '0', phases: emptyPhaseForm() });
+      setAddTaskForm({ taskName: '', percent: '0', phases: emptyPhaseForm() });
       setAddTaskOpen(false);
       load();
       onRefresh();
@@ -388,40 +413,52 @@ export function ChantierTrancheView({
     }
   }
 
-  async function submitInitTasks(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      await initTasks();
-      setInitOpen(false);
-      setInitForm({ groupe: '', etage: '' });
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
   function openAddTask() {
-    setAddTaskForm({ groupe: '', etage: '', taskName: '', percent: '0', phases: emptyPhaseForm() });
+    setAddTaskForm({ taskName: '', percent: '0', phases: emptyPhaseForm() });
     setAddTaskOpen(true);
   }
 
   function openEditPhases(item: TrancheDetail['progress'][number]) {
-    const phases = item.phases?.length
-      ? emptyPhaseForm().map((empty) => {
-          const existing = item.phases?.find((p) => p.percent === empty.percent);
-          return existing
-            ? { percent: empty.percent, label: existing.label || '', description: existing.description || '' }
-            : empty;
-        })
-      : emptyPhaseForm();
+    const phases =
+      item.phases?.length && item.phases.some((p) => p.label?.trim())
+        ? ensureAnchoredPhases(
+            item.phases.map((p) => ({
+              percent: p.percent,
+              label: p.label || '',
+              description: p.description || '',
+            })),
+          )
+        : emptyPhaseForm(1);
     setEditPhasesItem(item);
     setEditPhasesForm(phases);
     setEditPhasesOpen(true);
   }
 
+  function onAddTaskNameChange(taskName: string) {
+    const standard = standardLots.find((l) => l.name === taskName);
+    setAddTaskForm((prev) => ({
+      ...prev,
+      taskName,
+      percent: '0',
+      phases: standard?.phases?.length
+        ? ensureAnchoredPhases(
+            standard.phases.map((p) => ({
+              percent: p.percent,
+              label: p.label,
+              description: p.description || '',
+            })),
+          )
+        : prev.phases.some((p) => p.label.trim())
+          ? ensureAnchoredPhases(prev.phases)
+          : emptyPhaseForm(1),
+    }));
+  }
+
   async function saveEditPhases(e: React.FormEvent) {
     e.preventDefault();
     if (!editPhasesItem) return;
-    const phaseError = validatePhaseForm(editPhasesForm);
+    const phases = ensureAnchoredPhases(editPhasesForm);
+    const phaseError = validatePhaseForm(phases);
     if (phaseError) {
       await appAlert(phaseError);
       return;
@@ -430,7 +467,7 @@ export function ChantierTrancheView({
       await api(`/chantiers/progress/${editPhasesItem.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          phases: editPhasesForm.map((p) => ({
+          phases: phases.map((p) => ({
             percent: p.percent,
             label: p.label.trim(),
             description: p.description?.trim() || undefined,
@@ -446,9 +483,13 @@ export function ChantierTrancheView({
     }
   }
 
-  function openInitTasks() {
-    setInitForm({ groupe: '', etage: '' });
-    setInitOpen(true);
+  async function openInitTasks() {
+    if (!await appConfirm(t('msg.init19TasksHint'))) return;
+    try {
+      await initTasks();
+    } catch {
+      /* alert déjà affiché */
+    }
   }
 
   function openAssign() {
@@ -600,16 +641,6 @@ export function ChantierTrancheView({
     { id: 'stock', label: t('tabs.stock'), icon: Package, badge: detail.stockCount || undefined },
   ];
 
-  const groupeOptions = [...new Set([
-    ...detail.groupes.map((g) => g.name),
-    ...detail.progress.map((p) => p.groupe).filter(Boolean) as string[],
-  ])].sort();
-
-  const etageOptions = [...new Set([
-    ...detail.groupes.flatMap((g) => g.etages),
-    ...detail.progress.map((p) => p.etage).filter(Boolean) as string[],
-  ])].sort();
-
   return (
     <div className="tranche-detail">
       <div className="tranche-detail-toolbar">
@@ -631,25 +662,20 @@ export function ChantierTrancheView({
             <p className="tranche-detail-eyebrow">{chantierName}</p>
             <h1 className="tranche-detail-title">{detail.name}</h1>
             {detail.remark && <p className="tranche-detail-remark">{detail.remark}</p>}
+            {(detail.estimatedStartDate || detail.estimatedEndDate) && (
+              <p className="tranche-detail-remark">
+                {t('fields.estimatedPeriod')} :{' '}
+                {[
+                  detail.estimatedStartDate ? formatDate(detail.estimatedStartDate) : '…',
+                  detail.estimatedEndDate ? formatDate(detail.estimatedEndDate) : '…',
+                ].join(' → ')}
+              </p>
+            )}
           </div>
           <span className="tranche-detail-pct">{detail.percent}%</span>
         </div>
 
         <ProgressSteps percent={detail.percent} size="sm" showLabel={false} />
-
-        {detail.groupes.length > 0 && (
-          <ul className="tranche-detail-groupes">
-            {detail.groupes.map((g) => (
-              <li key={g.name} className="tranche-detail-groupe">
-                <span className="tranche-detail-groupe-name">{g.name}</span>
-                <span className="tranche-detail-groupe-pct">{g.percent}%</span>
-                {g.etages.length > 0 && (
-                  <span className="tranche-detail-groupe-etages">{g.etages.join(' · ')}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
 
         <div className="tranche-detail-metrics">
           <div className="tranche-detail-metric">
@@ -744,7 +770,9 @@ export function ChantierTrancheView({
                   <div className="mac-task-meta !w-[180px]">
                     <p className="mac-task-name truncate">{p.taskName}</p>
                     <p className="mac-task-sub truncate">
-                      {[p.groupe, p.etage].filter(Boolean).join(' · ') || '—'}
+                      {p.phases?.length
+                        ? t('detail.phasesCount', { count: p.phases.length })
+                        : t('detail.noPhasesShort')}
                     </p>
                   </div>
                   <div className={`flex-1 min-w-0${savingProgress === p.id ? ' opacity-60' : ''}`}>
@@ -754,8 +782,6 @@ export function ChantierTrancheView({
                       task={{
                         taskName: p.taskName,
                         tranche: p.tranche,
-                        groupe: p.groupe,
-                        etage: p.etage,
                         remark: p.remark,
                         updatedAt: p.updatedAt,
                         phases: p.phases,
@@ -1029,45 +1055,24 @@ export function ChantierTrancheView({
         footer={<><Btn variant="secondary" onClick={() => setAddTaskOpen(false)}>{t('common.cancel')}</Btn><Btn form="add-task-form" type="submit">{t('common.add')}</Btn></>}
       >
         <form id="add-task-form" onSubmit={addTask} className="grid gap-3">
-          <Select label={t('fields.lotTaskRequired')} required value={addTaskForm.taskName} onChange={(e) => setAddTaskForm({ ...addTaskForm, taskName: e.target.value })}>
-            <option value="">{t('fields.selectOption')}</option>
-            {taskRef.map((t) => (
-              <option key={t} value={t}>{t}</option>
+          <Input
+            label={t('fields.lotTaskRequired')}
+            required
+            value={addTaskForm.taskName}
+            onChange={(e) => onAddTaskNameChange(e.target.value)}
+            list="tranche-task-ref-list"
+            placeholder={t('fields.selectOrTypeLot')}
+          />
+          <datalist id="tranche-task-ref-list">
+            {(standardLots.length ? standardLots.map((l) => l.name) : taskRef).map((name) => (
+              <option key={name} value={name} />
             ))}
-          </Select>
-          <Input
-            label={t('fields.group')}
-            value={addTaskForm.groupe}
-            onChange={(e) => setAddTaskForm({ ...addTaskForm, groupe: e.target.value })}
-            placeholder={t('fields.groupePlaceholder')}
-            list="tranche-groupe-list"
-          />
-          <datalist id="tranche-groupe-list">
-            {groupeOptions.map((g) => <option key={g} value={g} />)}
-          </datalist>
-          <Input
-            label={t('fields.floor')}
-            value={addTaskForm.etage}
-            onChange={(e) => setAddTaskForm({ ...addTaskForm, etage: e.target.value })}
-            placeholder={t('fields.etagePlaceholder')}
-            list="tranche-etage-list"
-          />
-          <datalist id="tranche-etage-list">
-            {etageOptions.map((e) => <option key={e} value={e} />)}
           </datalist>
           <TaskPhaseFields
             phases={addTaskForm.phases}
             onChange={(phases) => setAddTaskForm({ ...addTaskForm, phases })}
           />
-          <Input
-            label={t('fields.initialProgressPct')}
-            type="number"
-            min="0"
-            max="100"
-            value={addTaskForm.percent}
-            onChange={(e) => setAddTaskForm({ ...addTaskForm, percent: e.target.value })}
-          />
-          <p className="text-[10px] text-gic-muted">{t('detail.trancheLabel')} <strong>{detail.name}</strong></p>
+          <p className="text-[10px] text-gic-muted">{t('detail.trancheLabel')} <strong>{detail.name}</strong> · {t('fields.alwaysStartAtZero')}</p>
         </form>
       </Modal>
 
@@ -1080,48 +1085,37 @@ export function ChantierTrancheView({
       >
         <form id="edit-phases-form" onSubmit={saveEditPhases} className="grid gap-3">
           {editPhasesItem && (
-            <p className="text-[12px] text-gic-muted">
-              {[editPhasesItem.groupe, editPhasesItem.etage].filter(Boolean).join(' · ') || detail.name}
-            </p>
+            <p className="text-[12px] text-gic-muted">{detail.name}</p>
           )}
           <TaskPhaseFields phases={editPhasesForm} onChange={setEditPhasesForm} />
-        </form>
-      </Modal>
-
-      <Modal open={initOpen} title={t('actions.initStandardTasks')} onClose={() => setInitOpen(false)}
-        footer={<><Btn variant="secondary" onClick={() => setInitOpen(false)}>{t('common.cancel')}</Btn><Btn form="init-tasks-form" type="submit">{t('common.initialize')}</Btn></>}
-      >
-        <form id="init-tasks-form" onSubmit={submitInitTasks} className="grid gap-3">
-          <p className="text-[12px] text-gic-muted">
-            {t('msg.init19TasksHint')}
-          </p>
-          <Input
-            label={t('fields.group')}
-            value={initForm.groupe}
-            onChange={(e) => setInitForm({ ...initForm, groupe: e.target.value })}
-            placeholder={t('fields.groupePlaceholderShort')}
-          />
-          <Input
-            label={t('fields.floor')}
-            value={initForm.etage}
-            onChange={(e) => setInitForm({ ...initForm, etage: e.target.value })}
-            placeholder={t('fields.etagePlaceholderShort')}
-          />
         </form>
       </Modal>
 
       <Modal open={editOpen} title={t('detail.trancheInfoTitle')} onClose={() => setEditOpen(false)}
         footer={<><Btn variant="secondary" onClick={() => setEditOpen(false)}>{t('common.cancel')}</Btn><Btn form="edit-tranche-form" type="submit">{t('common.save')}</Btn></>}
       >
-        <form id="edit-tranche-form" onSubmit={saveTrancheEdit} className="grid gap-3">
-          <Input label={t('fields.nameRequired')} required value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+        <form id="edit-tranche-form" onSubmit={saveTrancheEdit} className="grid gap-3 sm:grid-cols-2">
+          <Input className="sm:col-span-2" label={t('fields.nameRequired')} required value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
           <Input
+            className="sm:col-span-2"
             label={t('fields.phasesDescription')}
             value={editForm.remark}
             onChange={(e) => setEditForm({ ...editForm, remark: e.target.value })}
             placeholder={t('fields.tranchePhasesPlaceholder')}
           />
-          <p className="text-[10px] text-gic-muted">{t('msg.trancheRenameHint')}</p>
+          <Input
+            label={t('fields.estimatedStartDate')}
+            type="date"
+            value={editForm.estimatedStartDate}
+            onChange={(e) => setEditForm({ ...editForm, estimatedStartDate: e.target.value })}
+          />
+          <Input
+            label={t('fields.estimatedEndDate')}
+            type="date"
+            value={editForm.estimatedEndDate}
+            onChange={(e) => setEditForm({ ...editForm, estimatedEndDate: e.target.value })}
+          />
+          <p className="sm:col-span-2 text-[10px] text-gic-muted">{t('msg.trancheRenameHint')}</p>
         </form>
       </Modal>
     </div>

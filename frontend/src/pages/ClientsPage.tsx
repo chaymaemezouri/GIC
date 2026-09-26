@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -68,11 +69,14 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  function buildStatsQuery() {
+  function buildStatsQuery(overrides?: { q?: string; type?: string; archived?: string }) {
     const qs = new URLSearchParams();
-    if (q) qs.set('q', q);
-    if (typeFilter) qs.set('type', typeFilter);
-    if (archivedFilter) qs.set('archived', archivedFilter);
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
+    const type = overrides?.type !== undefined ? overrides.type : typeFilter;
+    const archived = overrides?.archived !== undefined ? overrides.archived : archivedFilter;
+    if (qVal) qs.set('q', qVal);
+    if (type) qs.set('type', type);
+    if (archived) qs.set('archived', archived);
     return qs.toString();
   }
 
@@ -112,7 +116,10 @@ export default function ClientsPage() {
   ) {
     setLoading(true);
     setError('');
-    const statsQs = buildStatsQuery();
+    const statsQs = buildStatsQuery({
+      type: overrides?.type,
+      archived: overrides?.archived,
+    });
     Promise.all([
       api<PaginatedClients<Client>>(`/clients?${buildListQuery(pageNum, overrides)}`),
       api<Stats>(`/clients/stats?${statsQs}`),
@@ -205,10 +212,9 @@ export default function ClientsPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.clients')} — GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.clients'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.clients')} — GIC</title></head><body>
       <h1>${t('pages.clients')} — GIC</h1>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
         <tr><th>${t('columns.ref')}</th><th>${t('columns.name')}</th><th>${t('columns.email')}</th><th>${t('columns.phone')}</th><th>${t('columns.cin')}</th><th>${t('columns.type')}</th></tr>
@@ -220,9 +226,7 @@ export default function ClientsPage() {
           <td>${c.identityNumber || '—'}</td>
           <td>${[c.isProspect && t('fields.prospect'), c.isBuyer && t('fields.buyer'), c.isTenant && t('fields.tenant')].filter(Boolean).join(', ')}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const filters = [

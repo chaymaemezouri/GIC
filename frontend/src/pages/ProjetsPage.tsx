@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -214,10 +215,9 @@ export default function ProjetsPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.projects')} — GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.projects'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.projects')} — GIC</title></head><body>
       <h1>${t('pages.projects')} — GIC</h1>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
         <tr><th>${t('columns.project')}</th><th>${t('columns.type')}</th><th>${t('columns.client')}</th><th>${t('columns.city')}</th><th>${t('columns.localization')}</th><th>${t('columns.remark')}</th><th>${t('columns.tranches')}</th><th>${t('columns.properties')}</th><th>${t('columns.status')}</th></tr>
@@ -232,9 +232,7 @@ export default function ProjetsPage() {
           <td>${p._count?.properties ?? 0}</td>
           <td>${p.status}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const statusFilters = [

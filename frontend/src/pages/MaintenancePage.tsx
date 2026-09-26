@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -229,10 +230,9 @@ export default function MaintenancePage() {
     downloadExcel(`/engins/maintenances/export/xlsx?${buildStatsQuery()}`, 'maintenances-gic.xlsx');
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.maintenance')} GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.maintenance'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.maintenance')} GIC</title></head><body>
       <h1>${t('pages.maintenancePrintTitle')}</h1>
       <p>${t('fields.period')} : ${dateFrom} → ${dateTo} · ${t('kpi.budgetFiltered')} : ${formatMad(budgetTotal)}</p>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
@@ -245,9 +245,7 @@ export default function MaintenancePage() {
           <td>${m.responsible || '—'}</td>
           <td>${m.engin.status}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const hasActiveFilters = !!enginFilter;

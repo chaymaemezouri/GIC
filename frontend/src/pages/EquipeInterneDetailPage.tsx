@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -290,11 +291,10 @@ export default function EquipeInterneDetailPage() {
     }
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!item) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+
+    await printWithCompany({ title: `${item.firstName} ${item.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>Fiche collaborateur — GIC</h1>
       <h2>${item.firstName} ${item.lastName}</h2>
       <p><b>Réf. :</b> ${item.reference || '—'}</p>
@@ -303,9 +303,7 @@ export default function EquipeInterneDetailPage() {
       <p><b>Salaire :</b> ${formatMad(item.monthlySalary)} / mois</p>
       <p><b>Contrat :</b> ${item.contractType || '—'}</p>
       <p><b>CNSS :</b> ${item.declared ? 'Déclaré' : 'Non déclaré'}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!item && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;

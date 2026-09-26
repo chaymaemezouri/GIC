@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -156,11 +157,10 @@ export default function BienDetailPage() {
     }
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!bien) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${bien.reference}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
+
+    await printWithCompany({ title: bien.name || bien.reference, bodyHtml: extractLegacyPrintBody(`<html><head><title>${bien.reference}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>Fiche bien — GIC</h1>
       <h2>${bien.name} (${bien.reference})</h2>
       <p><b>Projet :</b> ${bien.project?.name || '—'}</p>
@@ -168,9 +168,7 @@ export default function BienDetailPage() {
       <p><b>Surface :</b> ${bien.surface ? bien.surface + ' m²' : '—'}</p>
       <p><b>Prix :</b> ${bien.price ? bien.price + ' MAD' : '—'}</p>
       <p><b>Titre foncier :</b> ${bien.titleNumber || '—'}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!bien && !error) {

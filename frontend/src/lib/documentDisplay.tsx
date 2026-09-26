@@ -3,16 +3,22 @@ import { useI18n, tStatic } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 export { fileUrl } from './photoUrl';
 import { fileUrl } from './photoUrl';
+import { escHtml, printWithCompany } from './companyPrint';
 
 export type DocEntity = {
   id: string;
   name: string;
   category?: string | null;
+  status?: string | null;
   mimeType?: string | null;
   size?: number | null;
   path: string;
   entityType?: string | null;
   entityId?: string | null;
+  feeAmount?: number | null;
+  estimatedStartDate?: string | null;
+  estimatedEndDate?: string | null;
+  lateNotifiedAt?: string | null;
   expiresAt?: string | null;
   createdAt: string;
   client?: { id: string; firstName: string; lastName: string; reference: string } | null;
@@ -23,6 +29,57 @@ export type DocEntity = {
   rental?: { id: string; reference: string } | null;
   engin?: { id: string; matricule: string; brand?: string } | null;
 };
+
+export type DocStatus = 'pending' | 'valid' | 'invalid';
+
+export function normalizeDocStatus(status?: string | null): DocStatus {
+  if (status === 'valid' || status === 'invalid') return status;
+  return 'pending';
+}
+
+export function isPreviewable(mimeType?: string | null, path?: string | null) {
+  const mime = String(mimeType || '').toLowerCase();
+  const p = String(path || '').toLowerCase();
+  if (mime.startsWith('image/') || mime === 'application/pdf') return true;
+  return /\.(png|jpe?g|gif|webp|bmp|pdf)$/i.test(p);
+}
+
+export function isImageDoc(mimeType?: string | null, path?: string | null) {
+  const mime = String(mimeType || '').toLowerCase();
+  const p = String(path || '').toLowerCase();
+  if (mime.startsWith('image/')) return true;
+  return /\.(png|jpe?g|gif|webp|bmp)$/i.test(p);
+}
+
+export function isPdfDoc(mimeType?: string | null, path?: string | null) {
+  const mime = String(mimeType || '').toLowerCase();
+  const p = String(path || '').toLowerCase();
+  return mime === 'application/pdf' || p.endsWith('.pdf');
+}
+
+export function daysUntilExpiry(date?: string | null): number | null {
+  if (!date) return null;
+  const end = new Date(date);
+  end.setHours(23, 59, 59, 999);
+  const now = new Date();
+  return Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/** Dossier en retard : date estimée de fin dépassée et non validé. */
+export function isDocumentLate(doc: { estimatedEndDate?: string | null; status?: string | null }) {
+  if (!doc.estimatedEndDate || normalizeDocStatus(doc.status) === 'valid') return false;
+  const end = new Date(doc.estimatedEndDate);
+  end.setHours(0, 0, 0, 0);
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  return end.getTime() < startOfToday.getTime();
+}
+
+export function fileExtension(name?: string | null, path?: string | null) {
+  const src = String(name || path || '');
+  const m = src.match(/\.([a-z0-9]+)$/i);
+  return m ? m[1].toUpperCase() : '—';
+}
 
 export function formatSize(bytes?: number | null, t: TranslateFn = tStatic) {
   if (!bytes) return '—';
@@ -64,21 +121,18 @@ export function entityLink(doc: DocEntity): { to: string; label: string } | null
   return null;
 }
 
-export function printDocumentFiche(doc: DocEntity, t: TranslateFn = tStatic) {
+export async function printDocumentFiche(doc: DocEntity, t: TranslateFn = tStatic) {
   const link = entityLink(doc);
-  const w = window.open('', '_blank');
-  if (!w) return;
-  w.document.write(`<html><head><title>${doc.name}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
-    <h1>${t('docs.printTitle')}</h1>
-    <p><b>${t('docs.printName')}</b> ${doc.name}</p>
-    <p><b>${t('docs.printCategory')}</b> ${doc.category || '—'}</p>
-    <p><b>${t('docs.printSize')}</b> ${formatSize(doc.size, t)}</p>
-    <p><b>${t('docs.printExpiry')}</b> ${formatDate(doc.expiresAt)}</p>
-    <p><b>${t('docs.printLinked')}</b> ${link?.label || doc.entityType || '—'}</p>
-    <p><b>${t('docs.printAdded')}</b> ${formatDate(doc.createdAt)}</p>
-  </body></html>`);
-  w.document.close();
-  w.print();
+  const bodyHtml = `<div class="grid">
+    <p><span class="k">${escHtml(t('docs.printName'))}</span> ${escHtml(doc.name)}</p>
+    <p><span class="k">${escHtml(t('docs.printCategory'))}</span> ${escHtml(doc.category || '—')}</p>
+    <p><span class="k">${escHtml(t('docs.printStatus'))}</span> ${escHtml(doc.status || 'pending')}</p>
+    <p><span class="k">${escHtml(t('docs.printSize'))}</span> ${escHtml(formatSize(doc.size, t))}</p>
+    <p><span class="k">${escHtml(t('docs.printExpiry'))}</span> ${escHtml(formatDate(doc.expiresAt))}</p>
+    <p><span class="k">${escHtml(t('docs.printLinked'))}</span> ${escHtml(link?.label || doc.entityType || '—')}</p>
+    <p><span class="k">${escHtml(t('docs.printAdded'))}</span> ${escHtml(formatDate(doc.createdAt))}</p>
+  </div>`;
+  return printWithCompany({ title: t('docs.printTitle'), subtitle: doc.name, bodyHtml });
 }
 
 /** View / download / print links for an attachment */

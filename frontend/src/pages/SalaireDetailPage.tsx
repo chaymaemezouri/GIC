@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
@@ -54,13 +55,12 @@ export default function SalaireDetailPage() {
     load();
   }, [id, dateFrom, dateTo]);
 
-  function printFiche() {
+  async function printFiche() {
     if (!detail) return;
     const worker = detail.worker;
     const s = detail.salary;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+
+    await printWithCompany({ title: `Salaire — ${worker.firstName} ${worker.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>Fiche salaire — GIC</h1>
       <h2>${worker.firstName} ${worker.lastName}</h2>
       <p>Période : ${dateFrom} → ${dateTo}</p>
@@ -74,9 +74,7 @@ export default function SalaireDetailPage() {
           <td>${formatDate(p.date)}</td><td>${p.chantier?.name || '—'}</td><td>${p.totalDay}</td><td>${p.advance}</td><td>${p.bonus}</td>
         </tr>`).join('')}
       </table>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (loading && !detail) {

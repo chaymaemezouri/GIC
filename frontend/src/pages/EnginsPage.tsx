@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -130,11 +131,11 @@ export default function EnginsPage() {
     if (query) qs.set('q', query);
     const st = overrides?.status !== undefined ? overrides.status : statusFilter;
     const gen = overrides?.genre !== undefined ? overrides.genre : genreFilter;
-    const al = overrides?.alert !== undefined ? overrides.alert : alertFilter;
     const own = overrides?.ownershipType !== undefined ? overrides.ownershipType : ownershipFilter;
     if (st) qs.set('status', st);
     if (gen) qs.set('genre', gen);
-    if (al) qs.set('alert', al);
+    // Alert filter applies only on Rappels (passed explicitly) — never on Parc.
+    if (overrides?.alert) qs.set('alert', overrides.alert);
     if (own) qs.set('ownershipType', own);
     if (sort !== 'matricule') qs.set('sort', sort);
     if (order !== 'asc') qs.set('order', order);
@@ -169,6 +170,7 @@ export default function EnginsPage() {
     if (dateFrom) qs.set('dateFrom', dateFrom);
     if (dateTo) qs.set('dateTo', dateTo);
     qs.set('sort', 'date');
+    qs.set('order', 'desc');
     qs.set('page', String(pageNum));
     qs.set('limit', String(PAGE_SIZE));
     return qs;
@@ -212,7 +214,7 @@ export default function EnginsPage() {
     setError('');
     const al = overrides?.alert !== undefined ? overrides.alert : alertFilter;
     loadStats({ alert: al });
-    api<PaginatedResponse<Engin>>(`/engins?${buildParcQuery(pageNum, { alert: al })}`)
+    api<PaginatedResponse<Engin>>(`/engins?${buildParcQuery(pageNum, { alert: al, status: '', genre: '', ownershipType: '' })}`)
       .then((res) => {
         setItems(res.items);
         setPage(res.page);
@@ -365,29 +367,26 @@ export default function EnginsPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
+  async function printList() {
+
     if (tab === 'missions') {
-      w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+      await printWithCompany({ title: t('nav.missions'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
         <h1>${t('nav.missions')} — GIC</h1>
         <p>Période : ${dateFrom} → ${dateTo}</p>
         <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
           <tr><th>${t('columns.date')}</th><th>${t('columns.engin')}</th><th>${t('columns.mission')}</th><th>${t('columns.chauffeur')}</th><th>${t('columns.chantier')}</th></tr>
           ${missions.map((m) => `<tr><td>${formatDate(m.date)}</td><td>${m.engin?.matricule || m.engin?.brand || '—'}</td><td>${m.mission}</td><td>${m.driverName || '—'}</td><td>${m.chantier?.name || '—'}</td></tr>`).join('')}
         </table>
-      </body></html>`);
+      </body></html>`, { grid: false }) });
     } else {
-      w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+      await printWithCompany({ title: t('pages.equipment'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
         <h1>${t('pages.equipment')} — GIC</h1>
         <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
           <tr><th>${t('columns.matricule')}</th><th>${t('columns.brand')}</th><th>${t('columns.genre')}</th><th>${t('columns.status')}</th><th>${t('columns.gps')}</th><th>${t('columns.fuel')}</th></tr>
           ${items.map((e) => `<tr><td>${e.matricule || '—'}</td><td>${e.brand || '—'}</td><td>${e.genre || '—'}</td><td>${e.status}</td><td>${e.gpsNumber || '—'}</td><td>${e.fuelLevel != null ? e.fuelLevel + '%' : '—'}</td></tr>`).join('')}
         </table>
-      </body></html>`);
+      </body></html>`, { grid: false }) });
     }
-    w.document.close();
-    w.print();
   }
 
   const statusFilters = [

@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -247,10 +248,9 @@ export default function BiensPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.properties')} — GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.properties'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.properties')} — GIC</title></head><body>
       <h1>${t('pages.properties')} — GIC</h1>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
         <tr><th>${t('columns.ref')}</th><th>${t('columns.property')}</th><th>${t('columns.project')}</th><th>${t('columns.surface')}</th><th>${t('columns.price')}</th><th>${t('columns.status')}</th></tr>
@@ -262,9 +262,7 @@ export default function BiensPage() {
           <td>${p.price ? p.price + ' MAD' : '—'}</td>
           <td>${p.status}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const statusFilters = [

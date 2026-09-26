@@ -1,6 +1,7 @@
 import { formatDate, formatMad } from './api';
+import { escHtml, printWithCompany } from './companyPrint';
 
-export function printPaymentReceipt(payment: Record<string, unknown>) {
+export async function printPaymentReceipt(payment: Record<string, unknown>) {
   const sale = payment.sale as { reference?: string; client?: { firstName: string; lastName: string } } | null;
   const rental = payment.rental as { reference?: string; client?: { firstName: string; lastName: string } } | null;
   const isSale = !!sale;
@@ -8,24 +9,20 @@ export function printPaymentReceipt(payment: Record<string, unknown>) {
   const txRef = isSale ? sale?.reference : rental?.reference;
   const txType = isSale ? 'Vente' : 'Location';
 
-  const html = `<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
-    <h2>GIC — Reçu de paiement</h2>
-    <p><b>N° reçu :</b> ${payment.receiptNo}</p>
-    <p><b>Date :</b> ${formatDate(String(payment.date || ''))}</p>
-    <p><b>Montant :</b> ${formatMad(Number(payment.amount || 0))}</p>
-    <p><b>Mode :</b> ${payment.operationType || '—'}</p>
-    <p><b>${txType} :</b> ${txRef || '—'}</p>
-    <p><b>Client :</b> ${client ? `${client.firstName} ${client.lastName}` : '—'}</p>
-    ${payment.payerName ? `<p><b>Payeur :</b> ${payment.payerName}</p>` : ''}
-    ${payment.bank ? `<p><b>Banque / réf. :</b> ${payment.bank}</p>` : ''}
-    ${payment.nature ? `<p><b>Nature :</b> ${payment.nature}</p>` : ''}
-    <p style="margin-top:24px;font-size:11px;color:#666">Expertise & Consulting — GIC</p>
-  </body></html>`;
-
-  const w = window.open('', '_blank');
-  if (w) {
-    w.document.write(html);
-    w.document.close();
-    w.print();
-  }
+  const bodyHtml = `<div class="grid">
+    <p><span class="k">N° reçu :</span> <strong>${escHtml(payment.receiptNo || '—')}</strong></p>
+    <p><span class="k">Date :</span> ${escHtml(formatDate(String(payment.date || '')))}</p>
+    <p><span class="k">Montant :</span> <strong>${escHtml(formatMad(Number(payment.amount || 0)))}</strong></p>
+    <p><span class="k">Mode :</span> ${escHtml(payment.operationType || '—')}</p>
+    <p><span class="k">${escHtml(txType)} :</span> ${escHtml(txRef || '—')}</p>
+    <p><span class="k">Client :</span> ${escHtml(client ? `${client.firstName} ${client.lastName}` : '—')}</p>
+    ${payment.payerName ? `<p><span class="k">Payeur :</span> ${escHtml(payment.payerName)}</p>` : ''}
+    ${payment.bank ? `<p><span class="k">Banque / réf. :</span> ${escHtml(payment.bank)}</p>` : ''}
+    ${payment.nature ? `<p><span class="k">Nature :</span> ${escHtml(payment.nature)}</p>` : ''}
+  </div>`;
+  return printWithCompany({
+    title: (settings) => settings.receiptTitle || 'Reçu de paiement',
+    bodyHtml,
+    metaRight: String(payment.receiptNo || ''),
+  });
 }

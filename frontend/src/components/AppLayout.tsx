@@ -18,6 +18,7 @@ import { filterCreateGroups } from '../lib/createItems';
 import NewMenu from './NewMenu';
 import EccBrandFooter from './EccBrandFooter';
 import MobileNavDrawer from './MobileNavDrawer';
+import MobileBottomBar from './MobileBottomBar';
 import { useI18n } from '../i18n/I18nContext';
 
 function NavDirectLink({ item, accent = false }: { item: NavItem; accent?: boolean }) {
@@ -283,7 +284,7 @@ export default function AppLayout() {
       </aside>
       <div className="hidden lg:block w-[68px] shrink-0 shell-rail-spacer" aria-hidden />
 
-      <div className="flex-1 min-w-0 w-full flex flex-col shell-main-col">
+      <div className={`flex-1 min-w-0 w-full flex flex-col shell-main-col${rail.length > 0 ? ' shell-main-col-with-bottom' : ''}`}>
         <BackendStatusBanner />
         <header className="shell-header sticky top-0 z-[100]">
           <div className="shell-header-inner">
@@ -301,15 +302,15 @@ export default function AppLayout() {
                 GIC
               </Link>
             </div>
-            <div className="shell-header-center">
-              <nav className="shell-nav-cluster hidden lg:flex" aria-label={t('nav.modules')}>
+            <div className="shell-header-center shell-header-center-desktop">
+              <nav className="shell-nav-cluster" aria-label={t('nav.modules')}>
                 {showHome && <NavDirectLink item={homeLink} />}
                 {primaryNavGroup && <NavMenu group={primaryNavGroup} />}
                 {otherNavGroups.map((g) => (
                   <NavMenu key={g.id} group={g} />
                 ))}
               </nav>
-              <div className="shell-nav-actions-wrap hidden lg:flex">
+              <div className="shell-nav-actions-wrap">
                 {directLinks.map((item) => (
                   <NavDirectLink key={item.to} item={item} accent />
                 ))}
@@ -332,7 +333,6 @@ export default function AppLayout() {
         <MobileNavDrawer
           open={mobileNavOpen}
           onClose={() => setMobileNavOpen(false)}
-          rail={rail}
           homeLink={homeLink}
           showHome={showHome}
           directLinks={directLinks}
@@ -354,6 +354,8 @@ export default function AppLayout() {
           </RoleRoute>
           <EccBrandFooter variant="app" />
         </main>
+
+        <MobileBottomBar items={rail} />
       </div>
     </div>
   );

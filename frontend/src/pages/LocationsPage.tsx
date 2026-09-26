@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -74,30 +75,35 @@ export default function LocationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  function buildExportQuery() {
+  function buildExportQuery(overrides?: { q?: string; status?: string; clientId?: string }) {
     const qs = new URLSearchParams();
-    if (q) qs.set('q', q);
-    if (statusFilter) qs.set('status', statusFilter);
-    if (clientFilter) qs.set('clientId', clientFilter);
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
+    const status = overrides?.status !== undefined ? overrides.status : statusFilter;
+    const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
+    if (qVal) qs.set('q', qVal);
+    if (status) qs.set('status', status);
+    if (clientId) qs.set('clientId', clientId);
     return qs.toString();
   }
 
-  function load(pageNum = page, overrides?: { status?: string; clientId?: string }) {
+  function load(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string }) {
     setLoading(true);
     setError('');
-    const status = overrides?.status ?? statusFilter;
-    const clientId = overrides?.clientId ?? clientFilter;
+    const status = overrides?.status !== undefined ? overrides.status : statusFilter;
+    const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
     const qs = new URLSearchParams();
-    if (q) qs.set('q', q);
+    if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (clientId) qs.set('clientId', clientId);
     qs.set('sort', sort);
     qs.set('order', order);
     qs.set('page', String(pageNum));
     qs.set('limit', String(PAGE_SIZE));
+    const statsQs = buildExportQuery({ q: qVal, status, clientId });
     Promise.all([
       api<PaginatedResponse<Rental>>(`/transactions/rentals?${qs}`),
-      api<Stats>('/transactions/rentals/stats'),
+      api<Stats>(`/transactions/rentals/stats?${statsQs}`),
     ])
       .then(([res, st]) => {
         setItems(res.items);
@@ -218,10 +224,9 @@ export default function LocationsPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.rentals')} — GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.rentals'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.rentals')} — GIC</title></head><body>
       <h1>${t('pages.rentals')} — GIC</h1>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
         <tr><th>${t('columns.ref')}</th><th>${t('columns.tenant')}</th><th>${t('columns.property')}</th><th>${t('columns.monthly')}</th><th>${t('columns.paid')}</th><th>${t('columns.status')}</th></tr>
@@ -233,9 +238,7 @@ export default function LocationsPage() {
           <td>${r.totalPaid}</td>
           <td>${r.status}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const statusFilters = [

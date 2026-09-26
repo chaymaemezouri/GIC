@@ -96,11 +96,14 @@ export default function UsersPage() {
 
   const roleOptions = rolesForSelect(t, me?.role);
 
-  function buildStatsQuery() {
+  function buildStatsQuery(overrides?: { role?: string; active?: string; q?: string }) {
     const qs = new URLSearchParams();
-    if (q) qs.set('q', q);
-    if (roleFilter) qs.set('role', roleFilter);
-    if (activeFilter) qs.set('active', activeFilter);
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
+    const role = overrides?.role !== undefined ? overrides.role : roleFilter;
+    const active = overrides?.active !== undefined ? overrides.active : activeFilter;
+    if (qVal) qs.set('q', qVal);
+    if (role) qs.set('role', role);
+    if (active) qs.set('active', active);
     return qs.toString();
   }
 
@@ -140,7 +143,10 @@ export default function UsersPage() {
   ) {
     setLoading(true);
     setError('');
-    const statsQs = buildStatsQuery();
+    const statsQs = buildStatsQuery({
+      role: overrides?.role,
+      active: overrides?.active,
+    });
     Promise.all([
       api<PaginatedResponse<UserRow>>(`/auth/users?${buildQuery(pageNum, overrides)}`),
       api<Stats>(`/auth/users/stats?${statsQs}`),

@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -271,10 +272,9 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
     downloadCsv(`/chantiers/salaries/export/csv?${buildStatsQuery()}`, exportName);
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.salaries')} GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.salaries'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.salaries')} GIC</title></head><body>
       <h1>${t('pages.salaries')} — GIC</h1>
       <p>${t('fields.period')} : ${dateFrom} → ${dateTo}</p>
       <p>${t('columns.net')} : ${formatMad(stats.totalNet)} · ${t('columns.brut')} : ${formatMad(stats.totalBrut)}</p>
@@ -291,9 +291,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
         </tr>`).join('')}
       </table>
       <p style="margin-top:16px;font-size:11px">${t('msg.salaryFormulaHint')}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: false }) });
   }
 
   const activeFilters = [

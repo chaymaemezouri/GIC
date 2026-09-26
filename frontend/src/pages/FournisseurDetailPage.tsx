@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -225,11 +226,10 @@ export default function FournisseurDetailPage() {
     }
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!supplier) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>Fournisseur ${supplier.companyName}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
+
+    await printWithCompany({ title: `Fournisseur — ${supplier.companyName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Fournisseur ${supplier.companyName}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>Fiche fournisseur — GIC</h1>
       <h2>${supplier.reference} — ${supplier.companyName}</h2>
       <p><b>Contact :</b> ${supplier.contactName || '—'}</p>
@@ -243,9 +243,7 @@ export default function FournisseurDetailPage() {
       <p><b>Portail :</b> ${supplier.hasPortal ? 'Activé' : 'Non configuré'}</p>
       <h3>Achats (${supplier.purchases?.length || 0})</h3>
       <ul>${(supplier.purchases || []).map((p: any) => `<li>${p.reference} — ${p.designation} — ${p.totalPrice} MAD</li>`).join('')}</ul>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!supplier && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;

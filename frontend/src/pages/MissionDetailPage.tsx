@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -168,11 +169,10 @@ export default function MissionDetailPage() {
     }
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!item) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
+
+    await printWithCompany({ title: `Mission — ${item.mission}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>Mission — GIC</h1>
       <h2>${item.mission}</h2>
       <p><b>Engin :</b> ${item.engin.matricule || '—'} — ${item.engin.brand || ''}</p>
@@ -182,9 +182,7 @@ export default function MissionDetailPage() {
       <p><b>Usage :</b> ${item.usage || '—'}</p>
       <p><b>Demandé par :</b> ${item.requestedBy || '—'}</p>
       <p><b>Remarque :</b> ${item.remark || '—'}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!item && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;

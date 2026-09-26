@@ -1,7 +1,14 @@
 type PurchaseRow = { id: string; reference: string; designation: string; totalPrice: number; status: string; date: Date; updatedAt: Date };
 type ProgressRow = { id: string; tranche: string | null; groupe: string | null; etage: string | null; taskName: string; percent: number; updatedAt: Date };
 type AssignmentRow = { id: string; workforce: { firstName: string; lastName: string } };
-type DocumentRow = { id: string; name: string; expiresAt?: Date | null };
+type DocumentRow = {
+  id: string;
+  name: string;
+  expiresAt?: Date | null;
+  feeAmount?: number | null;
+  estimatedEndDate?: Date | null;
+  status?: string | null;
+};
 type HistoryRow = { id: string; action: string; details: string | null; createdAt: Date; user?: { firstName: string; lastName: string } | null };
 
 const FINISHING_TASKS = ['Carrelage', 'Peinture', 'Finitions', 'Ménage', 'Enduit intérieur', 'Enduit extérieur'];
@@ -26,10 +33,15 @@ export function buildChantierOverview(chantier: {
   const assignments = chantier.assignments || [];
   const documents = chantier.documents || [];
 
-  const depense = purchases
-    .filter((p) => !['brouillon', 'retourné'].includes(p.status))
+  const depenseAchats = purchases
+    .filter((p) => {
+      const s = String(p.status || '').toLowerCase();
+      return ['contrôlé', 'controle', 'visé', 'vise', 'payé', 'paye', 'validé', 'valide'].includes(s);
+    })
     .reduce((s, p) => s + Number(p.totalPrice || 0), 0);
-  const estimatedBudget = Math.round(depense * 1.55) || 0;
+  const docsFees = documents.reduce((s, d) => s + Number(d.feeAmount || 0), 0);
+  const depense = depenseAchats + docsFees;
+  const estimatedBudget = Math.round(depenseAchats * 1.55) || 0;
   const budgetAchats = chantier.budgetAchats != null ? Number(chantier.budgetAchats) : estimatedBudget;
   const achatsOuverts = purchases.filter((p) => ['brouillon', 'retourné'].includes(p.status)).length;
 
@@ -105,7 +117,7 @@ export function buildChantierOverview(chantier: {
     });
   }
   const expiring = documents.filter((d) => {
-    const exp = (d as { expiresAt?: Date | null }).expiresAt ?? null;
+    const exp = d.expiresAt ?? null;
     if (!exp) return false;
     const days = (new Date(exp).getTime() - Date.now()) / 86400000;
     return days >= 0 && days <= 30;
@@ -115,6 +127,28 @@ export function buildChantierOverview(chantier: {
       tone: 'violet',
       title: `${expiring.length} document(s) à échéance`,
       detail: 'Expiration dans les 30 prochains jours',
+    });
+  }
+  const lateCutoff = new Date();
+  lateCutoff.setHours(0, 0, 0, 0);
+  const lateDocs = documents.filter((d) => {
+    if (!d.estimatedEndDate || d.status === 'valid') return false;
+    const end = new Date(d.estimatedEndDate);
+    end.setHours(0, 0, 0, 0);
+    return end.getTime() < lateCutoff.getTime();
+  });
+  if (lateDocs.length) {
+    alerts.push({
+      tone: 'coral',
+      title: `${lateDocs.length} dossier(s) en retard`,
+      detail: 'Date estimée dépassée — voir Documents',
+    });
+  }
+  if (docsFees > 0) {
+    alerts.push({
+      tone: 'amber',
+      title: `Frais dossiers : ${Math.round(docsFees).toLocaleString('fr-MA')} MAD`,
+      detail: 'Déduits du budget chantier',
     });
   }
 
@@ -169,6 +203,8 @@ export function buildChantierOverview(chantier: {
       personnelDeclare: chantier.workerCount,
       budgetAchats,
       depense,
+      depenseAchats,
+      docsFees,
       achatsOuverts,
       alertes: alerts.length,
       costMO: Number(chantier.costMO || 0),

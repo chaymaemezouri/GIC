@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -88,12 +89,21 @@ export default function AuditPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  function buildStatsQuery() {
+  function buildStatsQuery(overrides?: {
+    action?: string;
+    entity?: string;
+    userId?: string;
+    q?: string;
+  }) {
     const qs = new URLSearchParams();
-    if (q) qs.set('q', q);
-    if (actionFilter) qs.set('action', actionFilter);
-    if (entityFilter) qs.set('entity', entityFilter);
-    if (userFilter) qs.set('userId', userFilter);
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
+    const act = overrides?.action !== undefined ? overrides.action : actionFilter;
+    const ent = overrides?.entity !== undefined ? overrides.entity : entityFilter;
+    const uid = overrides?.userId !== undefined ? overrides.userId : userFilter;
+    if (qVal) qs.set('q', qVal);
+    if (act) qs.set('action', act);
+    if (ent) qs.set('entity', ent);
+    if (uid) qs.set('userId', uid);
     if (dateFrom) qs.set('dateFrom', dateFrom);
     if (dateTo) qs.set('dateTo', dateTo);
     return qs.toString();
@@ -142,7 +152,11 @@ export default function AuditPage() {
   ) {
     setLoading(true);
     setError('');
-    const statsQs = buildStatsQuery();
+    const statsQs = buildStatsQuery({
+      action: overrides?.action,
+      entity: overrides?.entity,
+      userId: overrides?.userId,
+    });
     Promise.all([
       api<PaginatedResponse<AuditLog>>(`/audit?${buildQuery(pageNum, overrides)}`),
       api<Stats>(`/audit/stats?${statsQs}`),
@@ -190,10 +204,9 @@ export default function AuditPage() {
     downloadExcel(`/audit/export/xlsx?${buildStatsQuery()}`, 'audit-gic.xlsx');
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
+  async function printList() {
+
+    await printWithCompany({ title: "Journal d'audit", bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
       <h1>Journal d'audit — GIC</h1>
       <p>Période : ${dateFrom} → ${dateTo} · ${total} entrée(s)</p>
       <table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;width:100%">
@@ -207,9 +220,7 @@ export default function AuditPage() {
           <td>${l.ipAddress || '—'}</td>
         </tr>`).join('')}
       </table>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: false }) });
   }
 
   const hasActiveFilters = !!actionFilter || !!entityFilter || !!userFilter;

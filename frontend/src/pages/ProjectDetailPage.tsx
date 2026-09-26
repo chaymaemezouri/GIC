@@ -1,17 +1,27 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Building2, Pencil, Trash2, Printer, Home, Layers, History,
   TrendingUp, KeyRound, FileText, ExternalLink, Upload, MapPin, Image, HardHat, Camera,
-  Images, LayoutGrid, PanelTop, Info, MessageCircle,
+  Images, LayoutGrid, PanelTop, Info, MessageCircle, CheckCircle2, XCircle, CircleDashed,
 } from 'lucide-react';
 import { api, formatDate, formatMad, uploadForm, uploadDocument } from '../lib/api';
 import { googleMapsSearchUrl, projectLocationQuery } from '../lib/googleMaps';
 import { Btn, PageBackLink, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
-import { photoSrc } from '../lib/photoUrl';
+import { fileUrl, photoSrc } from '../lib/photoUrl';
+import {
+  buildProjectDocChecklist,
+  newCustomChecklistKey,
+  parseDocChecklist,
+  serializeDocChecklist,
+  type DocChecklistConfig,
+  type ProjectDocStatus,
+  type ProjectDocumentRow,
+} from '../lib/projectDocuments';
 
 import {
   ProjectFormFields, emptyProjectForm, projectToForm, projectFormToBody,
@@ -26,6 +36,20 @@ import ConversationsPanel from '../components/ConversationsPanel';
 
 type Tab = 'infos' | 'galerie' | 'structure' | 'biens' | 'chantiers' | 'ventes' | 'locations' | 'documents' | 'echanges' | 'historique';
 
+function docStateLabel(t: (k: string) => string, state: ProjectDocStatus) {
+  if (state === 'valid') return t('projectDocs.stateValid');
+  if (state === 'invalid') return t('projectDocs.stateInvalid');
+  if (state === 'pending') return t('projectDocs.statePending');
+  return t('projectDocs.stateMissing');
+}
+
+function docStateClass(state: ProjectDocStatus) {
+  if (state === 'valid') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  if (state === 'invalid') return 'bg-red-50 text-red-700 border-red-200';
+  if (state === 'pending') return 'bg-amber-50 text-amber-700 border-amber-200';
+  return 'bg-gray-50 text-gic-muted border-gic-border';
+}
+
 export default function ProjectDetailPage() {
   const { t } = useI18n();
   const { id } = useParams();
@@ -35,8 +59,20 @@ export default function ProjectDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [rentals, setRentals] = useState<any[]>([]);
-  const [documents, setDocuments] = useState<any[]>([]);
+  const [documents, setDocuments] = useState<ProjectDocumentRow[]>([]);
+  const [checklistConfig, setChecklistConfig] = useState<DocChecklistConfig>({ custom: [], labels: {} });
   const [docUploading, setDocUploading] = useState(false);
+  const [docUploadingKey, setDocUploadingKey] = useState<string | null>(null);
+  const [renameDoc, setRenameDoc] = useState<{ id: string; name: string } | null>(null);
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [checklistItemModal, setChecklistItemModal] = useState<null | {
+    mode: 'add' | 'rename';
+    key?: string;
+    label: string;
+    required: boolean;
+    custom: boolean;
+  }>(null);
+  const [checklistSaving, setChecklistSaving] = useState(false);
   const [galleryUploading, setGalleryUploading] = useState(false);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
@@ -85,15 +121,97 @@ export default function ProjectDetailPage() {
     if (!id) return;
     api(`/immobilier/projects/${id}/sales`).then(setSales).catch(() => setSales([]));
     api(`/immobilier/projects/${id}/rentals`).then(setRentals).catch(() => setRentals([]));
-    api(`/immobilier/projects/${id}/documents`).then(setDocuments).catch(() => setDocuments([]));
+    reloadDocuments();
   }, [id]);
 
   useEffect(() => {
     if (tab === 'historique') loadHistory();
-    if (tab === 'documents' && id) {
-      api(`/immobilier/projects/${id}/documents`).then(setDocuments).catch(() => setDocuments([]));
-    }
+    if (tab === 'documents' && id) reloadDocuments();
   }, [tab, id]);
+
+  async function reloadDocuments() {
+    if (!id) return;
+    try {
+      const res = await api<{ documents: ProjectDocumentRow[]; docChecklist?: string | null } | ProjectDocumentRow[]>(
+        `/immobilier/projects/${id}/documents`,
+      );
+      if (Array.isArray(res)) {
+        setDocuments(res);
+      } else {
+        setDocuments(res.documents || []);
+        setChecklistConfig(parseDocChecklist(res.docChecklist));
+      }
+    } catch {
+      setDocuments([]);
+    }
+  }
+
+  async function saveChecklistConfig(next: DocChecklistConfig) {
+    if (!id) return;
+    setChecklistSaving(true);
+    try {
+      const updated = await api<{ docChecklist?: string | null }>(`/immobilier/projects/${id}/doc-checklist`, {
+        method: 'PUT',
+        body: JSON.stringify(next),
+      });
+      setChecklistConfig(parseDocChecklist(updated.docChecklist ?? serializeDocChecklist(next)));
+      setChecklistItemModal(null);
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setChecklistSaving(false);
+    }
+  }
+
+  async function submitChecklistItem(e: React.FormEvent) {
+    e.preventDefault();
+    if (!checklistItemModal) return;
+    const label = checklistItemModal.label.trim();
+    if (!label) {
+      await appAlert(t('common.required'));
+      return;
+    }
+    if (checklistItemModal.mode === 'add') {
+      const key = newCustomChecklistKey();
+      await saveChecklistConfig({
+        ...checklistConfig,
+        custom: [...checklistConfig.custom, { key, label, required: checklistItemModal.required }],
+      });
+      return;
+    }
+    const key = checklistItemModal.key;
+    if (!key) return;
+    if (checklistItemModal.custom) {
+      await saveChecklistConfig({
+        ...checklistConfig,
+        custom: checklistConfig.custom.map((item) =>
+          item.key === key ? { ...item, label, required: checklistItemModal.required } : item,
+        ),
+      });
+    } else {
+      await saveChecklistConfig({
+        ...checklistConfig,
+        labels: { ...checklistConfig.labels, [key]: label },
+      });
+    }
+  }
+
+  async function removeCustomChecklistItem(key: string) {
+    if (!await appConfirm(t('projectDocs.confirmRemoveChecklist'))) return;
+    const linked = documents.find((d) => d.category === key);
+    if (linked) {
+      try {
+        await api(`/documents/${linked.id}`, { method: 'DELETE' });
+      } catch {
+        /* continue removing checklist row */
+      }
+    }
+    await saveChecklistConfig({
+      ...checklistConfig,
+      custom: checklistConfig.custom.filter((item) => item.key !== key),
+    });
+    await reloadDocuments();
+  }
 
   async function onGalleryUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
@@ -132,25 +250,132 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function onDocUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onDocUpload(e: React.ChangeEvent<HTMLInputElement>, category = 'projet') {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     setDocUploading(true);
+    setDocUploadingKey(category);
     try {
+      const existing = documents.find((d) => d.category === category && d.entityType === 'Project');
       await uploadDocument(file, {
         name: file.name,
-        category: 'projet',
+        category,
         entityType: 'Project',
         entityId: id,
       });
-      api(`/immobilier/projects/${id}/documents`).then(setDocuments).catch(() => setDocuments([]));
+      if (existing?.id) {
+        try {
+          await api(`/documents/${existing.id}`, { method: 'DELETE' });
+        } catch {
+          /* keep new file even if old delete fails */
+        }
+      }
+      await reloadDocuments();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
     } finally {
       setDocUploading(false);
+      setDocUploadingKey(null);
       e.target.value = '';
     }
   }
+
+  async function setDocumentStatus(docId: string, status: 'pending' | 'valid' | 'invalid') {
+    try {
+      await api(`/documents/${docId}`, { method: 'PUT', body: JSON.stringify({ status }) });
+      await reloadDocuments();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function deleteDocument(docId: string) {
+    if (!await appConfirm(t('projectDocs.confirmDelete'))) return;
+    try {
+      await api(`/documents/${docId}`, { method: 'DELETE' });
+      await reloadDocuments();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function saveRenameDocument(e: React.FormEvent) {
+    e.preventDefault();
+    if (!renameDoc?.id) return;
+    const name = renameDoc.name.trim();
+    if (!name) {
+      await appAlert(t('common.required'));
+      return;
+    }
+    setRenameSaving(true);
+    try {
+      await api(`/documents/${renameDoc.id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+      setRenameDoc(null);
+      await reloadDocuments();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setRenameSaving(false);
+    }
+  }
+
+  function renderDocFileActions(doc: ProjectDocumentRow, state: ProjectDocStatus) {
+    return (
+      <div className="inline-flex items-center gap-0.5 shrink-0" title={t('projectDocs.actionsHint')}>
+        <a
+          href={fileUrl(doc.path)}
+          target="_blank"
+          rel="noreferrer"
+          className="mac-action-btn mac-action-btn-blue"
+          title={t('projectDocs.open')}
+          aria-label={t('projectDocs.open')}
+        >
+          <ExternalLink size={14} strokeWidth={2.15} />
+        </a>
+        <MacActionBtn
+          icon={Pencil}
+          tone="gray"
+          title={t('projectDocs.rename')}
+          onClick={() => setRenameDoc({ id: doc.id, name: doc.name })}
+        />
+        {state !== 'valid' && (
+          <MacActionBtn
+            icon={CheckCircle2}
+            tone="green"
+            title={t('projectDocs.markValid')}
+            onClick={() => setDocumentStatus(doc.id, 'valid')}
+          />
+        )}
+        {state !== 'invalid' && (
+          <MacActionBtn
+            icon={XCircle}
+            tone="red"
+            title={t('projectDocs.markInvalid')}
+            onClick={() => setDocumentStatus(doc.id, 'invalid')}
+          />
+        )}
+        {state !== 'pending' && (
+          <MacActionBtn
+            icon={CircleDashed}
+            tone="orange"
+            title={t('projectDocs.resetPending')}
+            onClick={() => setDocumentStatus(doc.id, 'pending')}
+          />
+        )}
+        <MacActionBtn
+          icon={Trash2}
+          tone="red"
+          title={t('projectDocs.delete')}
+          onClick={() => deleteDocument(doc.id)}
+        />
+      </div>
+    );
+  }
+
+  const projectDocBundle = useMemo(
+    () => buildProjectDocChecklist(documents, checklistConfig, (key) => t(key)),
+    [documents, checklistConfig, t],
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -361,9 +586,8 @@ export default function ProjectDetailPage() {
     }
   }
 
-  function printStructure() {
-    const w = window.open('', '_blank');
-    if (!w || !project) return;
+  async function printStructure() {
+
     let html = `<h1>${project.name} — Structure</h1>`;
     for (const t of project.tranches || []) {
       html += `<h3>Tranche ${t.name}</h3>`;
@@ -377,15 +601,12 @@ export default function ProjectDetailPage() {
         }
       }
     }
-    w.document.write(`<html><head><title>${project.name}</title></head><body style="font-family:sans-serif">${html}</body></html>`);
-    w.document.close();
-    w.print();
+    await printWithCompany({ title: `Projet — ${project.name}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>${project.name}</title></head><body style="font-family:sans-serif">${html}</body></html>`, { grid: true }) });
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!project) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
+
     const totalVal = (project.properties || []).reduce((s: number, p: any) => s + Number(p.price || 0), 0);
     const chantiersN = project.chantiers?.length ?? 0;
     const photosN = project.images?.length ?? 0;
@@ -419,7 +640,7 @@ export default function ProjectDetailPage() {
         }
       }
     }
-    w.document.write(`<html><head><title>Projet ${project.name}</title>
+    await printWithCompany({ title: `Projet — ${project.name}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Projet ${project.name}</title>
       <style>body{font-family:sans-serif;padding:24px;font-size:12px}table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #ccc;padding:6px;text-align:left}h1,h2,h3{margin:12px 0 6px}</style>
       </head><body>
       <h1>Fiche projet immobilier 360 — GIC</h1>
@@ -443,9 +664,7 @@ export default function ProjectDetailPage() {
       <h3>{t('detail.patrimonialStructure')}</h3>
       ${structureHtml || '<p>Aucune tranche</p>'}
       <p style="margin-top:24px;font-size:10px;color:#666">Imprimé le ${new Date().toLocaleString('fr-FR')}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   const imageCount = project?.images?.length ?? project?._count?.images ?? 0;
@@ -619,7 +838,7 @@ export default function ProjectDetailPage() {
                 label: t('tabs.media'),
                 items: [
                   { id: 'galerie', label: t('tabs.gallery'), icon: Images, badge: imageCount },
-                  { id: 'documents', label: t('tabs.documents'), icon: FileText, badge: documents.length },
+                  { id: 'documents', label: t('tabs.documents'), icon: FileText, badge: `${projectDocBundle.stats.valid}/${projectDocBundle.stats.required}` },
                   { id: 'echanges', label: t('tabs.exchanges'), icon: MessageCircle },
                 ],
               },
@@ -1049,33 +1268,147 @@ export default function ProjectDetailPage() {
       )}
 
       {tab === 'documents' && (
-        <div className="mt-1">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              <FileText size={16} /> {t('tabs.documents')}
-            </h2>
-            <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
-              <Upload size={14} />
-              {docUploading ? t('auth.sending') : t('actions.deposit')}
-              <input type="file" className="hidden" onChange={onDocUpload} disabled={docUploading} />
-            </label>
+        <div className="mt-1 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <FileText size={16} /> {t('projectDocs.title')}
+              </h2>
+              <p className="text-[11px] text-gic-muted mt-0.5">{t('projectDocs.checklistHint')}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Btn
+                variant="secondary"
+                icon={Plus}
+                onClick={() =>
+                  setChecklistItemModal({ mode: 'add', label: '', required: false, custom: true })
+                }
+              >
+                {t('projectDocs.addChecklistItem')}
+              </Btn>
+              <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
+                <Upload size={14} />
+                {docUploading && !docUploadingKey ? t('auth.sending') : t('projectDocs.depositOther')}
+                <input
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => onDocUpload(e, 'autre')}
+                  disabled={docUploading}
+                />
+              </label>
+            </div>
           </div>
-          {documents.length === 0 ? (
-            <p className="text-[12px] text-gic-muted py-4">{t('msg.emptyDocuments')}</p>
-          ) : (
-            <ul className="space-y-2">
-              {documents.map((d) => (
-                <li key={d.id} className="flex items-center gap-2 text-[12px] rounded-xl bg-gray-50 px-3 py-2">
-                  <FileText size={14} className="text-gic-violet shrink-0" />
-                  <span className="font-medium truncate flex-1">{d.name}</span>
-                  <span className="text-[10px] text-gic-muted">{formatDate(d.createdAt)}</span>
-                  <a href={d.path} target="_blank" rel="noreferrer" className="text-gic-violet hover:underline shrink-0 inline-flex items-center gap-1">
-                    {t('actions.open')} <ExternalLink size={11} />
-                  </a>
-                </li>
-              ))}
-            </ul>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <KpiCard title={t('projectDocs.completion')} value={`${projectDocBundle.stats.completionPct} %`} icon={TrendingUp} tone="violet" compact />
+            <KpiCard title={t('projectDocs.deposited')} value={`${projectDocBundle.stats.deposited}/${projectDocBundle.stats.totalStandard}`} icon={Upload} tone="teal" compact />
+            <KpiCard title={t('projectDocs.valid')} value={projectDocBundle.stats.valid} icon={CheckCircle2} tone="emerald" compact />
+            <KpiCard title={t('projectDocs.invalid')} value={projectDocBundle.stats.invalid} icon={XCircle} tone="coral" compact />
+            <KpiCard title={t('projectDocs.missing')} value={projectDocBundle.stats.missing} icon={CircleDashed} tone="amber" compact />
+            <KpiCard title={t('projectDocs.filesTotal')} value={projectDocBundle.stats.totalFiles} icon={FileText} tone="purple" compact />
+          </div>
+
+          {projectDocBundle.stats.missingRequired > 0 && (
+            <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+              {t('projectDocs.requiredMissing')} : <strong>{projectDocBundle.stats.missingRequired}</strong>
+            </p>
           )}
+
+          <Card className="!p-3">
+            <h3 className="text-[12px] font-semibold mb-2">{t('projectDocs.checklist')}</h3>
+            <ul className="divide-y divide-gic-border/70">
+              {projectDocBundle.checklist.map((item) => {
+                const uploadingThis = docUploading && docUploadingKey === item.key;
+                return (
+                  <li key={item.key} className="flex flex-col sm:flex-row sm:items-center gap-2 py-2.5 first:pt-0 last:pb-0">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[13px] font-medium text-gic-ink">{item.label}</p>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${docStateClass(item.state)}`}>
+                          {docStateLabel(t, item.state)}
+                        </span>
+                        <span className="text-[10px] text-gic-muted">
+                          {item.required ? t('projectDocs.required') : t('projectDocs.optional')}
+                        </span>
+                        {item.custom && (
+                          <span className="text-[10px] text-[#007aff] font-medium">{t('projectDocs.customTag')}</span>
+                        )}
+                      </div>
+                      {item.document && (
+                        <p className="text-[11px] text-gic-muted mt-0.5 truncate">
+                          {item.document.name} · {formatDate(item.document.createdAt)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      <MacActionBtn
+                        icon={Pencil}
+                        tone="gray"
+                        title={t('projectDocs.renameChecklist')}
+                        onClick={() =>
+                          setChecklistItemModal({
+                            mode: 'rename',
+                            key: item.key,
+                            label: item.label,
+                            required: item.required,
+                            custom: item.custom,
+                          })
+                        }
+                      />
+                      {item.custom && (
+                        <MacActionBtn
+                          icon={Trash2}
+                          tone="red"
+                          title={t('projectDocs.removeChecklist')}
+                          onClick={() => removeCustomChecklistItem(item.key)}
+                        />
+                      )}
+                      {item.document && renderDocFileActions(item.document, item.state)}
+                      <label className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
+                        <Upload size={12} />
+                        {uploadingThis
+                          ? t('auth.sending')
+                          : item.document
+                            ? t('projectDocs.replace')
+                            : t('projectDocs.deposit')}
+                        <input
+                          type="file"
+                          className="hidden"
+                          disabled={docUploading}
+                          onChange={(e) => onDocUpload(e, item.key)}
+                        />
+                      </label>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+
+          <div>
+            <h3 className="text-[12px] font-semibold mb-2">{t('projectDocs.otherDocs')}</h3>
+            {projectDocBundle.extras.length === 0 ? (
+              <p className="text-[12px] text-gic-muted py-2">{t('msg.emptyDocuments')}</p>
+            ) : (
+              <ul className="space-y-2">
+                {projectDocBundle.extras.map((d) => {
+                  const state: ProjectDocStatus =
+                    d.status === 'valid' ? 'valid' : d.status === 'invalid' ? 'invalid' : 'pending';
+                  return (
+                    <li key={d.id} className="flex flex-wrap items-center gap-2 text-[12px] rounded-xl bg-gray-50 px-3 py-2">
+                      <FileText size={14} className="text-gic-violet shrink-0" />
+                      <span className="font-medium truncate flex-1 min-w-[120px]">{d.name}</span>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${docStateClass(state)}`}>
+                        {docStateLabel(t, state)}
+                      </span>
+                      <span className="text-[10px] text-gic-muted">{formatDate(d.createdAt)}</span>
+                      {renderDocFileActions(d, state)}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </div>
       )}
 
@@ -1124,6 +1457,76 @@ export default function ProjectDetailPage() {
         </div>
       )}
       </DetailShell>
+
+      <Modal
+        open={!!renameDoc}
+        title={t('projectDocs.renameTitle')}
+        onClose={() => setRenameDoc(null)}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => setRenameDoc(null)}>{t('common.cancel')}</Btn>
+            <Btn form="rename-doc-form" type="submit" disabled={renameSaving}>
+              {renameSaving ? t('auth.saving') : t('common.save')}
+            </Btn>
+          </>
+        }
+      >
+        <form id="rename-doc-form" onSubmit={saveRenameDocument} className="space-y-3">
+          <Input
+            label={t('projectDocs.renamePlaceholder')}
+            value={renameDoc?.name || ''}
+            onChange={(e) => setRenameDoc((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+            required
+            autoFocus
+          />
+        </form>
+      </Modal>
+
+      <Modal
+        open={!!checklistItemModal}
+        title={
+          checklistItemModal?.mode === 'add'
+            ? t('projectDocs.addChecklistItem')
+            : t('projectDocs.renameChecklist')
+        }
+        onClose={() => setChecklistItemModal(null)}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => setChecklistItemModal(null)}>{t('common.cancel')}</Btn>
+            <Btn form="checklist-item-form" type="submit" disabled={checklistSaving}>
+              {checklistSaving ? t('auth.saving') : t('common.save')}
+            </Btn>
+          </>
+        }
+      >
+        <form id="checklist-item-form" onSubmit={submitChecklistItem} className="space-y-3">
+          <Input
+            label={t('projectDocs.checklistItemName')}
+            value={checklistItemModal?.label || ''}
+            onChange={(e) =>
+              setChecklistItemModal((prev) => (prev ? { ...prev, label: e.target.value } : prev))
+            }
+            placeholder={t('projectDocs.checklistItemPlaceholder')}
+            required
+            autoFocus
+          />
+          {(checklistItemModal?.mode === 'add' || checklistItemModal?.custom) && (
+            <label className="flex items-center gap-2 text-[12px] font-medium text-gic-ink">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[#007aff]"
+                checked={checklistItemModal?.required || false}
+                onChange={(e) =>
+                  setChecklistItemModal((prev) =>
+                    prev ? { ...prev, required: e.target.checked } : prev,
+                  )
+                }
+              />
+              {t('projectDocs.markRequired')}
+            </label>
+          )}
+        </form>
+      </Modal>
 
       <Modal
         open={bienOpen}

@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -151,10 +152,9 @@ export default function ReconnusPage() {
     }
   }
 
-  function printList() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${t('pages.reconnus')} — GIC</title></head><body>
+  async function printList() {
+
+    await printWithCompany({ title: t('pages.reconnus'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.reconnus')} — GIC</title></head><body>
       <h1>${t('pages.reconnus')} — GIC</h1>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
         <tr><th>${t('columns.ref')}</th><th>${t('columns.name')}</th><th>${t('columns.relation')}</th><th>${t('columns.phoneFull')}</th><th>${t('columns.movements')}</th><th>${t('columns.status')}</th></tr>
@@ -166,9 +166,7 @@ export default function ReconnusPage() {
           <td>${r._count?.movements ?? 0}</td>
           <td>${r.isActive === false ? 'Inactif' : 'Actif'}</td>
         </tr>`).join('')}
-      </table></body></html>`);
-    w.document.close();
-    w.print();
+      </table></body></html>`, { grid: false }) });
   }
 
   const activeFilters = [

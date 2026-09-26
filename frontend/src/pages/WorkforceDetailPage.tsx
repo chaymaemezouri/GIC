@@ -1,3 +1,4 @@
+import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -261,11 +262,10 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
     }
   }
 
-  function printFiche() {
+  async function printFiche() {
     if (!worker) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><head><title>${worker.firstName} ${worker.lastName}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
+
+    await printWithCompany({ title: `${worker.firstName} ${worker.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>${worker.firstName} ${worker.lastName}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
       <h1>Fiche ouvrier — GIC</h1>
       <h2>${worker.firstName} ${worker.lastName}</h2>
       <p><b>CIN :</b> ${worker.cin || '—'}</p>
@@ -274,9 +274,7 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
       <p><b>Salaire/j :</b> ${worker.dailySalary} MAD</p>
       <p><b>Contrat :</b> ${worker.contractType || '—'}</p>
       <p><b>CNSS :</b> ${worker.declared ? 'Déclaré' : 'Non déclaré'}</p>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    </body></html>`, { grid: true }) });
   }
 
   if (!worker && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;

@@ -110,15 +110,20 @@ router.post('/import/xlsx', uploadExcel.single('file'), async (req, res) => {
   res.json(result);
 });
 
-router.get('/stats', async (_req, res) => {
-  const [total, withEmail, withPhone, linked, unlinked] = await Promise.all([
-    prisma.mandant.count(),
-    prisma.mandant.count({ where: { email: { not: null }, NOT: { email: '' } } }),
-    prisma.mandant.count({ where: { phone1: { not: null }, NOT: { phone1: '' } } }),
-    prisma.mandant.count({ where: { clients: { some: {} } } }),
-    prisma.mandant.count({ where: { clients: { none: {} } } }),
+router.get('/stats', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const identityType = String(req.query.identityType || '');
+  const linked = String(req.query.linked || '');
+  const where = buildMandantWhere(q, identityType, linked);
+
+  const [total, withEmail, withPhone, linkedCount, unlinked] = await Promise.all([
+    prisma.mandant.count({ where }),
+    prisma.mandant.count({ where: { AND: [where, { email: { not: null }, NOT: { email: '' } }] } }),
+    prisma.mandant.count({ where: { AND: [where, { phone1: { not: null }, NOT: { phone1: '' } }] } }),
+    prisma.mandant.count({ where: { AND: [where, { clients: { some: {} } }] } }),
+    prisma.mandant.count({ where: { AND: [where, { clients: { none: {} } }] } }),
   ]);
-  res.json({ total, withEmail, withPhone, linked, unlinked });
+  res.json({ total, withEmail, withPhone, linked: linkedCount, unlinked });
 });
 
 router.get('/', async (req, res) => {

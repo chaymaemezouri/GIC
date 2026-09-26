@@ -10,6 +10,10 @@ import { uploadDir } from '../lib/uploadPaths.js';
 import { sendEmail } from '../lib/email.js';
 import { logConversation } from '../lib/conversations.js';
 import { sendExcel } from '../lib/exportExcel.js';
+import {
+  parseOptionalDate,
+  parseOptionalFee,
+} from '../lib/documentFees.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -38,10 +42,19 @@ function buildDocumentWhere(
 
   const alertFilter =
     alert === 'expiring'
-      ? { expiresAt: { lte: in30, not: null } }
+      ? { expiresAt: { gte: now, lte: in30 } }
       : alert === 'expired'
         ? { expiresAt: { lt: now } }
-        : {};
+        : alert === 'late'
+          ? (() => {
+              const startOfToday = new Date();
+              startOfToday.setHours(0, 0, 0, 0);
+              return {
+                estimatedEndDate: { lt: startOfToday },
+                NOT: { status: 'valid' },
+              };
+            })()
+          : {};
 
   return {
     AND: [
@@ -112,10 +125,21 @@ router.get('/stats', async (req, res) => {
   const dateTo = String(req.query.dateTo || '');
   const archiveWhere = buildArchiveWhere(q, direction, archiveCategory, dateFrom, dateTo);
 
-  const [total, expiring, expired, sizeAgg, categories, archivesTotal, entrant, sortant] = await Promise.all([
+  const [total, expiring, expired, late, sizeAgg, categories, archivesTotal, entrant, sortant] = await Promise.all([
     prisma.document.count({ where: docWhere }),
     prisma.document.count({ where: { AND: [docWhere, { expiresAt: { lte: in30, gte: now } }] } }),
     prisma.document.count({ where: { AND: [docWhere, { expiresAt: { lt: now } }] } }),
+    prisma.document.count({
+      where: {
+        AND: [
+          docWhere,
+          {
+            estimatedEndDate: { lt: (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })() },
+            NOT: { status: 'valid' },
+          },
+        ],
+      },
+    }),
     prisma.document.aggregate({ where: docWhere, _sum: { size: true } }),
     prisma.document.findMany({
       where: { AND: [docWhere, { category: { not: null }, NOT: { category: '' } }] },
@@ -132,6 +156,7 @@ router.get('/stats', async (req, res) => {
     total,
     expiring,
     expired,
+    late,
     totalSize: sizeAgg._sum.size || 0,
     categories: categories.map((c) => c.category).filter(Boolean),
     archivesTotal,
@@ -383,13 +408,19 @@ router.post('/archives/:id/send-email', async (req, res) => {
 
 router.post('/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Fichier requis' });
-  const { name, category, entityType, entityId, clientId, propertyId, chantierId, rentalId, saleId, supplierId, enginId, expiresAt } = req.body;
+  const {
+    name, category, entityType, entityId, clientId, propertyId, chantierId,
+    rentalId, saleId, supplierId, enginId, expiresAt, feeAmount,
+    estimatedStartDate, estimatedEndDate,
+  } = req.body;
   const linkedRentalId =
     rentalId || (entityType === 'Rental' && entityId ? String(entityId) : null);
   const linkedSaleId =
     saleId || (entityType === 'Sale' && entityId ? String(entityId) : null);
   const linkedEnginId =
     enginId || (entityType === 'Engin' && entityId ? String(entityId) : null);
+  const linkedChantierId =
+    chantierId || (entityType === 'Chantier' && entityId ? String(entityId) : null);
   const doc = await prisma.document.create({
     data: {
       name: name || req.file.originalname,
@@ -401,12 +432,15 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       entityId: entityId || null,
       clientId: clientId || null,
       propertyId: propertyId || null,
-      chantierId: chantierId || null,
+      chantierId: linkedChantierId || null,
       rentalId: linkedRentalId || null,
       saleId: linkedSaleId || null,
       supplierId: supplierId || (entityType === 'Supplier' && entityId ? String(entityId) : null),
       enginId: linkedEnginId || null,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
+      feeAmount: parseOptionalFee(feeAmount),
+      estimatedStartDate: parseOptionalDate(estimatedStartDate),
+      estimatedEndDate: parseOptionalDate(estimatedEndDate),
     },
     include: docInclude,
   });
@@ -430,6 +464,79 @@ router.get('/:id/history', async (req, res) => {
   res.json(logs);
 });
 
+router.get('/:id/related', async (req, res) => {
+  const id = String(req.params.id);
+  const doc = await prisma.document.findUnique({ where: { id } });
+  if (!doc) return res.status(404).json({ message: 'Document introuvable' });
+
+  const or: object[] = [];
+  if (doc.clientId) or.push({ clientId: doc.clientId });
+  if (doc.propertyId) or.push({ propertyId: doc.propertyId });
+  if (doc.chantierId) or.push({ chantierId: doc.chantierId });
+  if (doc.supplierId) or.push({ supplierId: doc.supplierId });
+  if (doc.saleId) or.push({ saleId: doc.saleId });
+  if (doc.rentalId) or.push({ rentalId: doc.rentalId });
+  if (doc.enginId) or.push({ enginId: doc.enginId });
+  if (doc.entityType && doc.entityId) {
+    or.push({ entityType: doc.entityType, entityId: doc.entityId });
+  }
+
+  if (!or.length) return res.json([]);
+
+  const related = await prisma.document.findMany({
+    where: {
+      id: { not: id },
+      OR: or,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      status: true,
+      mimeType: true,
+      size: true,
+      path: true,
+      expiresAt: true,
+      createdAt: true,
+    },
+  });
+  res.json(related);
+});
+
+router.put('/:id/file', upload.single('file'), async (req, res) => {
+  const id = String(req.params.id);
+  if (!req.file) return res.status(400).json({ message: 'Fichier requis' });
+  const existing = await prisma.document.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ message: 'Document introuvable' });
+
+  const oldFilename = path.basename(existing.path);
+  const oldFull = path.join(uploadDir, oldFilename);
+  if (fs.existsSync(oldFull) && oldFilename !== req.file.filename) {
+    try {
+      fs.unlinkSync(oldFull);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const keepName = String(req.body.keepName || '') === '1' || String(req.body.keepName || '') === 'true';
+  const doc = await prisma.document.update({
+    where: { id },
+    data: {
+      path: `/uploads/${req.file.filename}`,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      name: keepName ? existing.name : String(req.body.name || req.file.originalname || existing.name),
+      status: 'pending',
+    },
+    include: docInclude,
+  });
+  await audit(req, 'remplacement', 'Document', id, doc.name);
+  res.json(doc);
+});
+
 router.get('/:id', async (req, res) => {
   const doc = await prisma.document.findUnique({
     where: { id: String(req.params.id) },
@@ -444,9 +551,27 @@ router.put('/:id', async (req, res) => {
   const data: Record<string, unknown> = {};
   if (req.body.name != null) data.name = req.body.name;
   if (req.body.category != null) data.category = req.body.category || null;
+  if (req.body.status != null) {
+    const status = String(req.body.status);
+    if (!['pending', 'valid', 'invalid'].includes(status)) {
+      return res.status(400).json({ message: 'Statut document invalide' });
+    }
+    data.status = status;
+    if (status === 'valid') data.lateNotifiedAt = null;
+  }
   if (req.body.entityType != null) data.entityType = req.body.entityType || null;
   if (req.body.entityId != null) data.entityId = req.body.entityId || null;
   if (req.body.expiresAt !== undefined) data.expiresAt = req.body.expiresAt ? new Date(req.body.expiresAt) : null;
+  if (req.body.feeAmount !== undefined) data.feeAmount = parseOptionalFee(req.body.feeAmount);
+  if (req.body.estimatedStartDate !== undefined) {
+    data.estimatedStartDate = parseOptionalDate(req.body.estimatedStartDate);
+  }
+  if (req.body.estimatedEndDate !== undefined) {
+    data.estimatedEndDate = parseOptionalDate(req.body.estimatedEndDate);
+  }
+  if (req.body.chantierId !== undefined) {
+    data.chantierId = req.body.chantierId ? String(req.body.chantierId) : null;
+  }
 
   const doc = await prisma.document.update({ where: { id }, data, include: docInclude });
   await audit(req, 'modification', 'Document', id, doc.name);
@@ -471,7 +596,7 @@ router.get('/', async (req, res) => {
   const entityId = String(req.query.entityId || '');
   const alert = String(req.query.alert || '');
   const sort = String(req.query.sort || 'createdAt');
-  const order = req.query.order === 'desc' ? 'desc' : 'asc';
+  const order = req.query.order === 'asc' ? 'asc' : 'desc';
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(5, Number(req.query.limit) || 20));
   const skip = (page - 1) * limit;
@@ -481,6 +606,7 @@ router.get('/', async (req, res) => {
     req.query.q ||
     req.query.category ||
     req.query.entityType ||
+    req.query.entityId ||
     req.query.alert
   );
 

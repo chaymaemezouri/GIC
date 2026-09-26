@@ -6,7 +6,7 @@ import {
   Languages,
 } from 'lucide-react';
 import { api, downloadCsv, downloadExcel, uploadForm, type PaginatedResponse } from '../lib/api';
-import { useAuth, type User } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import { roleLabel, canAccessRoute } from '../lib/permissions';
 import { ActionBadge, AUDIT_ACTION_FILTERS, AUDIT_ENTITY_FILTERS, auditEntityLabel, auditEntityLink, formatAuditDateTime } from '../lib/auditDisplay';
@@ -17,12 +17,13 @@ import {
 } from '../lib/sidebarPrefs';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
-  PageHeader, Pagination, Select, TableWrap, Td, Th,
+  PageHeader, Pagination, TableWrap, Td, Th,
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import EccBrandFooter from '../components/EccBrandFooter';
 import { fileUrl } from '../lib/documentDisplay';
 import { printBankTransferList } from '../lib/printBankTransferList';
+import { invalidateCompanySettings, printSimpleTable, printWithCompany, escHtml } from '../lib/companyPrint';
 import { useI18n } from '../i18n/I18nContext';
 import type { Lang } from '../i18n/types';
 
@@ -37,6 +38,12 @@ type CompanyForm = {
   ice: string;
   rc: string;
   logoPath: string;
+  printDocSubtitle: string;
+  printFooterText: string;
+  printLegalMentions: string;
+  printPrimaryColor: string;
+  printShowLogo: boolean;
+  receiptTitle: string;
   bankLetterTitle: string;
   bankLetterIntro: string;
   bankLetterFooter: string;
@@ -123,6 +130,12 @@ export default function ParametresPage() {
     ice: '',
     rc: '',
     logoPath: '',
+    printDocSubtitle: '',
+    printFooterText: '',
+    printLegalMentions: '',
+    printPrimaryColor: '#007aff',
+    printShowLogo: true,
+    receiptTitle: 'Reçu de paiement',
     bankLetterTitle: '',
     bankLetterIntro: '',
     bankLetterFooter: '',
@@ -266,6 +279,12 @@ export default function ParametresPage() {
           ice: c.ice || '',
           rc: c.rc || '',
           logoPath: c.logoPath || '',
+          printDocSubtitle: c.printDocSubtitle || '',
+          printFooterText: c.printFooterText || '',
+          printLegalMentions: c.printLegalMentions || '',
+          printPrimaryColor: c.printPrimaryColor || '#007aff',
+          printShowLogo: c.printShowLogo !== false,
+          receiptTitle: c.receiptTitle || 'Reçu de paiement',
           bankLetterTitle: c.bankLetterTitle || '',
           bankLetterIntro: c.bankLetterIntro || '',
           bankLetterFooter: c.bankLetterFooter || '',
@@ -286,6 +305,7 @@ export default function ParametresPage() {
         body: JSON.stringify(company),
       });
       setCompany((prev) => ({ ...prev, ...updated, logoPath: updated.logoPath || prev.logoPath }));
+      invalidateCompanySettings();
       setMsg(t('settings.bankListSaved'));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : t('common.error'));
@@ -304,6 +324,7 @@ export default function ParametresPage() {
       fd.append('logo', file);
       const updated = (await uploadForm('/settings/company/logo', fd)) as CompanyForm;
       setCompany((prev) => ({ ...prev, logoPath: updated.logoPath || '' }));
+      invalidateCompanySettings();
       setMsg(t('settings.logoUpdated'));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : t('settings.uploadLogoError'));
@@ -379,7 +400,7 @@ export default function ParametresPage() {
     try {
       const fd = new FormData();
       fd.append('file', file);
-      await uploadForm<User>('/auth/me/photo', fd);
+      await uploadForm('/auth/me/photo', fd);
       const u = await refreshUser();
       if (u?.photo) {
         patchUser({ photo: u.photo });
@@ -552,18 +573,35 @@ export default function ParametresPage() {
   }
 
   function printActivity() {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
-      <h1>Mon activité — GIC</h1>
-      <p>${user?.firstName} ${user?.lastName} · ${user?.email}</p>
-      <table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;width:100%">
-        <tr><th>Date</th><th>Action</th><th>Entité</th><th>Détails</th></tr>
-        ${activity.map((l) => `<tr><td>${formatAuditDateTime(l.createdAt)}</td><td>${l.action}</td><td>${auditEntityLabel(l.entity)}</td><td>${l.details || '—'}</td></tr>`).join('')}
-      </table>
-    </body></html>`);
-    w.document.close();
-    w.print();
+    void printSimpleTable({
+      title: t('settings.activity'),
+      subtitle: `${user?.firstName || ''} ${user?.lastName || ''} · ${user?.email || ''}`,
+      columns: [t('fields.date'), t('msg.action'), t('msg.entity'), t('msg.details')],
+      rows: activity.map((l) => [
+        formatAuditDateTime(l.createdAt),
+        l.action,
+        auditEntityLabel(l.entity),
+        l.details || '—',
+      ]),
+    });
+  }
+
+  function previewPrintTemplate() {
+    void printWithCompany({
+      title: company.receiptTitle || t('settings.receiptTitle'),
+      subtitle: company.printDocSubtitle || undefined,
+      bodyHtml: `
+        <p class="muted">${escHtml(t('settings.printAppliesAll'))}</p>
+        <table>
+          <thead><tr><th>${escHtml(t('fields.designation'))}</th><th>${escHtml(t('fields.amount'))}</th></tr></thead>
+          <tbody>
+            <tr><td>Exemple — acompte client</td><td class="mono">12 500,00 MAD</td></tr>
+            <tr><td>Exemple — règlement chantier</td><td class="mono">3 200,00 MAD</td></tr>
+          </tbody>
+        </table>
+        <div class="sign"><div class="sign-box">Cachet &amp; signature<div class="sign-line">${escHtml(company.companyName || 'GIC')}</div></div></div>
+      `,
+    });
   }
 
   const qrUrl = setup ? `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(setup.otpauthUrl)}` : '';
@@ -647,7 +685,7 @@ export default function ParametresPage() {
                 id: 'docs',
                 label: t('settings.documents'),
                 items: [
-                  { id: 'liste_banque', label: t('settings.bankList'), icon: Building2 },
+                  { id: 'liste_banque', label: t('settings.printDocuments'), icon: Building2 },
                 ],
               },
               ...(adminModules.length > 0
@@ -919,9 +957,9 @@ export default function ParametresPage() {
                 <Building2 size={18} strokeWidth={2} />
               </span>
               <div>
-                <h2 className="text-sm font-semibold text-gic-ink">{t('settings.bankListCustomize')}</h2>
+                <h2 className="text-sm font-semibold text-gic-ink">{t('settings.printDocuments')}</h2>
                 <p className="text-[12px] text-gic-muted mt-0.5">
-                  {t('settings.bankListDesc')}
+                  {t('settings.printDocumentsDesc')}
                 </p>
               </div>
             </div>
@@ -989,6 +1027,57 @@ export default function ParametresPage() {
                   />
                 </div>
 
+                <div className="rounded-xl border border-gic-border bg-gray-50/60 p-3 space-y-3">
+                  <p className="text-[12px] font-semibold">{t('settings.printTemplate')}</p>
+                  <p className="text-[11px] text-gic-muted">{t('settings.printAppliesAll')}</p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <Input
+                      label={t('settings.printSubtitle')}
+                      value={company.printDocSubtitle}
+                      onChange={(e) => setCompany({ ...company, printDocSubtitle: e.target.value })}
+                    />
+                    <Input
+                      label={t('settings.receiptTitle')}
+                      value={company.receiptTitle}
+                      onChange={(e) => setCompany({ ...company, receiptTitle: e.target.value })}
+                    />
+                    <Input
+                      label={t('settings.primaryColor')}
+                      type="color"
+                      value={company.printPrimaryColor}
+                      onChange={(e) => setCompany({ ...company, printPrimaryColor: e.target.value })}
+                    />
+                    <label className="flex items-center gap-2 self-end min-h-9 text-[12px] font-medium">
+                      <input
+                        type="checkbox"
+                        checked={company.printShowLogo}
+                        onChange={(e) => setCompany({ ...company, printShowLogo: e.target.checked })}
+                        className="h-4 w-4 accent-[#007aff]"
+                      />
+                      {t('settings.showLogo')}
+                    </label>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <label className="block text-[11px] font-medium text-gic-muted">
+                      {t('settings.globalFooter')}
+                      <textarea
+                        className="mt-1 w-full min-h-[72px] rounded-xl border border-gic-border bg-white p-3 text-[12px]"
+                        value={company.printFooterText}
+                        onChange={(e) => setCompany({ ...company, printFooterText: e.target.value })}
+                      />
+                    </label>
+                    <label className="block text-[11px] font-medium text-gic-muted">
+                      {t('settings.legalMentions')}
+                      <textarea
+                        className="mt-1 w-full min-h-[72px] rounded-xl border border-gic-border bg-white p-3 text-[12px]"
+                        value={company.printLegalMentions}
+                        onChange={(e) => setCompany({ ...company, printLegalMentions: e.target.value })}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <h3 className="text-[12px] font-semibold pt-2">{t('settings.bankLetterSection')}</h3>
                 <Input
                   label={t('settings.documentTitle')}
                   value={company.bankLetterTitle}
@@ -1023,8 +1112,11 @@ export default function ParametresPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2 justify-end pt-1">
-                  <Btn type="button" variant="secondary" icon={Eye} onClick={previewBankLetter}>
+                  <Btn type="button" variant="secondary" icon={Eye} onClick={previewPrintTemplate}>
                     {t('settings.previewPrint')}
+                  </Btn>
+                  <Btn type="button" variant="secondary" icon={Printer} onClick={previewBankLetter}>
+                    {t('settings.bankLetterSection')}
                   </Btn>
                   <Btn type="submit" disabled={saving}>
                     {saving ? t('auth.saving') : t('common.save')}
