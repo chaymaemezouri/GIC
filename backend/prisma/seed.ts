@@ -5,13 +5,24 @@ import { PrismaClient } from '@prisma/client';
 import { ensureAvatarFiles, avatarUrl, ensureProjectPlanFiles, projectPlanUrl } from '../src/lib/avatars.js';
 import {
   syncEncaissementMovement,
-  syncPurchaseMovement,
   syncStaffSalaryMovement,
   syncWorkforcePayrollMovement,
   syncMaintenanceMovement,
   syncFuelMovement,
 } from '../src/lib/cashSync.js';
 import { baseSalaryForPeriod, currentWeekOfMonth } from '../src/lib/staffSalaryPeriod.js';
+import {
+  ensureDemoDocumentFiles,
+  PURCHASE_CATALOG,
+  seedChantierExtras,
+  seedCommunications,
+  seedCompanySettings,
+  seedFleet,
+  seedPaymentSchedules,
+  seedPurchases,
+  utcDaysAgo,
+  type SeedContext,
+} from './seedModules.js';
 
 const prisma = new PrismaClient();
 
@@ -58,6 +69,8 @@ const PROPERTY_STATUSES = ['disponible', 'disponible', 'disponible', 'réservé'
 
 const WORKER_CATEGORIES = ['Maçon', 'Manœuvre', 'Chef d\'équipe', 'Électricien', 'Plombier', 'Coffreur', 'Peintre', 'Ferrailleur'];
 const CHAUFFEUR_CATEGORY = 'Chauffeur';
+/** Ouvriers générés (≈ 1/5 payés au mois, hors pointage) */
+const WORKER_COUNT = 60;
 
 const SUPPLIERS = [
   { ref: 'FRN-2026-000001', name: 'Béton Atlas SARL', contact: 'Omar Fassi', email: 'contact@beton-atlas.ma', portal: true },
@@ -70,21 +83,12 @@ const SUPPLIERS = [
   { ref: 'FRN-2026-000008', name: 'Peintures Du Nord', contact: 'Laila Rahmani', email: 'contact@peintures-nord.ma', portal: false },
 ];
 
-const ENGINS = [
-  { mat: '12345-A-6', brand: 'Caterpillar', genre: 'Pelle hydraulique', status: 'disponible', fuel: 75 },
-  { mat: '67890-B-1', brand: 'Volvo', genre: 'Chargeuse', status: 'en_mission', fuel: 45 },
-  { mat: '11223-C-8', brand: 'Mercedes', genre: 'Camion benne', status: 'disponible', fuel: 60 },
-  { mat: '44556-D-2', brand: 'JCB', genre: 'Mini-pelle', status: 'en_maintenance', fuel: 20 },
-  { mat: '77889-E-5', brand: 'Komatsu', genre: 'Bulldozer', status: 'disponible', fuel: 80 },
-  { mat: '33445-F-3', brand: 'Manitou', genre: 'Nacelle', status: 'en_mission', fuel: 55 },
-];
-
 const CHANTIERS = [
-  { id: 'demo-chantier', name: 'Chantier Atlas Bloc A', city: 'Casablanca', progress: 35, workers: 12, manager: 'Hassan Tazi', budget: 3200000 },
-  { id: 'chant-rabat', name: 'Résidence Al Bahia', city: 'Tanger', progress: 74, workers: 87, manager: 'Mohamed El Amrani', budget: 4800000 },
-  { id: 'chant-tanger', name: 'Marina View — Gros œuvre', city: 'Tanger', progress: 48, workers: 22, manager: 'Omar Fassi', budget: 5500000 },
-  { id: 'chant-marrakech', name: 'Oasis Marrakech Phase 1', city: 'Marrakech', progress: 78, workers: 15, manager: 'Nadia Cherkaoui', budget: 4100000 },
-  { id: 'chant-fes', name: 'Horizon Fès — VRD', city: 'Fès', progress: 15, workers: 8, manager: 'Youssef Alaoui', budget: 1800000 },
+  { id: 'demo-chantier', name: 'Chantier Atlas Bloc A', city: 'Casablanca', progress: 35, workers: 12, manager: 'Hassan Tazi', budget: 3200000, projectId: 'demo-project', tranches: ['Tranche 1', 'Tranche 2'] },
+  { id: 'chant-rabat', name: 'Résidence Al Bahia', city: 'Tanger', progress: 74, workers: 87, manager: 'Mohamed El Amrani', budget: 4800000, projectId: 'proj-rabat', tranches: ['Tranche 1', 'Tranche 2'] },
+  { id: 'chant-tanger', name: 'Marina View — Gros œuvre', city: 'Tanger', progress: 48, workers: 22, manager: 'Omar Fassi', budget: 5500000, projectId: 'proj-tanger', tranches: ['Tranche 1', 'Tranche 2', 'Tranche 3'] },
+  { id: 'chant-marrakech', name: 'Oasis Marrakech Phase 1', city: 'Marrakech', progress: 78, workers: 15, manager: 'Nadia Cherkaoui', budget: 4100000, projectId: 'proj-marrakech', tranches: ['Tranche 1', 'Tranche 2'] },
+  { id: 'chant-fes', name: 'Horizon Fès — VRD', city: 'Fès', progress: 15, workers: 8, manager: 'Youssef Alaoui', budget: 1800000, projectId: 'proj-fes', tranches: [] as string[] },
 ];
 
 const TASKS = [
@@ -111,6 +115,12 @@ function computeWorkerNet(
   const advances = pointages.reduce((s, p) => s + p.advance, 0);
   const bonuses = pointages.reduce((s, p) => s + p.bonus, 0);
   return { brut, advances, bonuses, netDue: brut + bonuses - advances };
+}
+
+/** Suffixe stable par ouvrier (worker-12 → W0012, demo-* → W0001), indépendant de l'ordre de tri */
+function payrollRefSuffix(workforceId: string) {
+  const n = Number(workforceId.match(/-(\d+)$/)?.[1] ?? 1);
+  return `W${pad(n, 4)}`;
 }
 
 async function seedWorkforcePayrollBatch(
@@ -143,7 +153,7 @@ async function seedWorkforcePayrollBatch(
 
     const { amountPaid, status } = pay;
     const remaining = Math.max(0, computed.netDue - amountPaid);
-    const ref = `${opts.refPrefix}-${opts.periodYear}${pad(opts.periodMonth, 2)}-${pad(i + 1, 4)}`;
+    const ref = `${opts.refPrefix}-${opts.periodYear}${pad(opts.periodMonth, 2)}-${payrollRefSuffix(w.id)}`;
 
     const record = await prisma.workforcePayrollRecord.upsert({
       where: {
@@ -210,14 +220,7 @@ async function seedFinanceLedger() {
     await syncEncaissementMovement(p);
   }
 
-  // Achats contrôlés → débit caisse
-  const purchases = await prisma.purchase.findMany({
-    where: { status: 'contrôlé' },
-    include: { supplier: { select: { companyName: true } } },
-  });
-  for (const a of purchases) {
-    await syncPurchaseMovement(a);
-  }
+  // Achats : les paiements fournisseurs (avance / solde) sont déjà passés en caisse par seedPurchases
 
   // Main-d'œuvre — bulletins de paie variés (payé / partiel / en attente), hors chauffeurs
   const workers = await prisma.workforce.findMany({
@@ -288,7 +291,7 @@ async function seedFinanceLedger() {
         workforceId_periodYear_periodMonth: { workforceId: w.id, periodYear: prevYear, periodMonth: prevMonth },
       },
       update: {
-        reference: `MO-${prevYear}${pad(prevMonth, 2)}-${pad(i + 1, 4)}`,
+        reference: `MO-${prevYear}${pad(prevMonth, 2)}-${payrollRefSuffix(w.id)}`,
         brut,
         advances,
         bonuses,
@@ -300,7 +303,7 @@ async function seedFinanceLedger() {
         paidAt: daysAgo(25 + i),
       },
       create: {
-        reference: `MO-${prevYear}${pad(prevMonth, 2)}-${pad(i + 1, 4)}`,
+        reference: `MO-${prevYear}${pad(prevMonth, 2)}-${payrollRefSuffix(w.id)}`,
         workforceId: w.id,
         periodYear: prevYear,
         periodMonth: prevMonth,
@@ -345,17 +348,17 @@ async function seedFinanceLedger() {
     await syncFuelMovement(f);
   }
 
-  const [creditAgg, debitAgg, encCount, decCount, achatCtrl, moPaid, chPaid, staffPaid, maintN, fuelN] =
+  const [creditAgg, debitAgg, encCount, decCount, achatPay, moPaid, chPaid, staffPaid, maintN, fuelN, enginExpN] =
     await Promise.all([
     prisma.cashMovement.aggregate({ _sum: { credit: true }, where: { isAutomatic: true } }),
     prisma.cashMovement.aggregate({ _sum: { debit: true }, where: { isAutomatic: true } }),
     prisma.cashMovement.count({ where: { sourceType: 'encaissement' } }),
     prisma.cashMovement.count({
       where: {
-        sourceType: { in: ['achat', 'main_oeuvre', 'equipe_interne', 'maintenance', 'carburant'] },
+        sourceType: { in: ['achat', 'achat_paiement', 'main_oeuvre', 'equipe_interne', 'maintenance', 'carburant', 'engin_depense'] },
       },
     }),
-    prisma.purchase.count({ where: { status: 'contrôlé' } }),
+    prisma.cashMovement.count({ where: { sourceType: 'achat_paiement' } }),
     prisma.workforcePayrollRecord.count({
       where: { amountPaid: { gt: 0 }, workforce: { NOT: { category: CHAUFFEUR_CATEGORY } } },
     }),
@@ -365,12 +368,13 @@ async function seedFinanceLedger() {
     prisma.internalStaffSalaryRecord.count({ where: { status: 'payé' } }),
     prisma.maintenance.count(),
     prisma.fuelLog.count(),
+    prisma.cashMovement.count({ where: { sourceType: 'engin_depense' } }),
   ]);
 
   const credit = creditAgg._sum.credit || 0;
   const debit = debitAgg._sum.debit || 0;
   console.log(`Caisse auto       : ${encCount} encaissements, ${decCount} décaissements`);
-  console.log(`Décaissements demo: achats ${achatCtrl}, MO ${moPaid}, chauffeurs ${chPaid}, équipe ${staffPaid}, maintenance ${maintN}, carburant ${fuelN}`);
+  console.log(`Décaissements demo: paiements achats ${achatPay}, MO ${moPaid}, chauffeurs ${chPaid}, équipe ${staffPaid}, maintenance ${maintN}, carburant ${fuelN}, dépenses engins ${enginExpN}`);
   console.log(`Solde caisse      : ${(credit - debit).toLocaleString('fr-MA')} MAD (crédit ${credit.toLocaleString('fr-MA')} − débit ${debit.toLocaleString('fr-MA')})`);
 }
 
@@ -1132,24 +1136,26 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   for (const c of CHANTIERS) {
     const ch = await prisma.chantier.upsert({
       where: { id: c.id },
-      update: { progressPct: c.progress, workerCount: c.workers, budgetAchats: c.budget },
+      update: { progressPct: c.progress, workerCount: c.workers, budgetAchats: c.budget, projectId: c.projectId, endDate: daysAgo(-240) },
       create: {
         id: c.id,
         name: c.name,
         address: `${c.city} — chantier résidentiel`,
         startDate: daysAgo(120),
+        endDate: daysAgo(-240),
         workerCount: c.workers,
         managerName: c.manager,
-        status: c.progress >= 75 ? 'actif' : 'actif',
+        status: 'actif',
         progressPct: c.progress,
         budgetAchats: c.budget,
+        projectId: c.projectId,
       },
     });
     chantierIds.push(ch.id);
 
     for (let t = 0; t < TASKS.length; t++) {
       const isRabat = c.id === 'chant-rabat';
-      const tranche = isRabat ? (t < 12 ? 'Tranche 1' : 'Tranche 2') : 'Tranche 1';
+      const tranche = c.tranches.length ? c.tranches[Math.floor((t * c.tranches.length) / TASKS.length)] : null;
       const groupe = isRabat ? (t % 2 === 0 ? 'GH1' : 'GH2') : `Groupe ${(t % 3) + 1}`;
       const etage = isRabat && t % 3 === 0 ? ['RDC', 'Étage 1', 'Étage 2', 'Étage 3'][t % 4] : undefined;
       const refPercents = [100, 92, 78, 73, 65, 58, 47, 32, 20, 8];
@@ -1210,10 +1216,19 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     }
   }
 
-  // Main-d'œuvre (28 ouvriers) — ~1/5 au mois (hors pointage) avec banque/RIB
+  // Affectation chantier / tranche de chaque ouvrier — utilisée pour les pointages journaliers
+  const placement = new Map<string, { chantierId: string; tranche: string | null }>();
+  const placeOn = (workforceId: string, chantierIdx: number, seed: number) => {
+    const c = CHANTIERS[chantierIdx % CHANTIERS.length];
+    const tranche = c.tranches.length ? c.tranches[seed % c.tranches.length] : null;
+    placement.set(workforceId, { chantierId: c.id, tranche });
+    return placement.get(workforceId)!;
+  };
+
+  // Main-d'œuvre — ~1/5 au mois (hors pointage) avec banque/RIB
   const workforceIds: string[] = [];
   const monthlyWorkforceIds: string[] = [];
-  for (let i = 1; i <= 28; i++) {
+  for (let i = 1; i <= WORKER_COUNT; i++) {
     const id = i === 1 ? 'demo-worker' : `worker-${i}`;
     const isMonthly = i % 5 === 0;
     const bankName = isMonthly ? MAROC_BANKS[i % MAROC_BANKS.length] : null;
@@ -1251,13 +1266,15 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     workforceIds.push(w.id);
     if (isMonthly) monthlyWorkforceIds.push(w.id);
 
+    const place = placeOn(w.id, i, i);
     await prisma.workforceAssignment.upsert({
       where: { id: `wa-${i}` },
-      update: {},
+      update: { chantierId: place.chantierId, tranche: place.tranche },
       create: {
         id: `wa-${i}`,
         workforceId: w.id,
-        chantierId: randomItem(chantierIds, i),
+        chantierId: place.chantierId,
+        tranche: place.tranche,
         functionRole: randomItem(WORKER_CATEGORIES, i),
         startDate: daysAgo(90),
       },
@@ -1353,13 +1370,15 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     chauffeurNames.push(`${firstName} ${lastName}`);
     if (isMonthly) monthlyChauffeurIds.push(w.id);
 
+    const place = placeOn(w.id, i + 3, i);
     await prisma.workforceAssignment.upsert({
       where: { id: `wa-ch-${i}` },
-      update: {},
+      update: { chantierId: place.chantierId, tranche: place.tranche },
       create: {
         id: `wa-ch-${i}`,
         workforceId: w.id,
-        chantierId: randomItem(chantierIds, i + 3),
+        chantierId: place.chantierId,
+        tranche: place.tranche,
         functionRole: CHAUFFEUR_CATEGORY,
         startDate: daysAgo(60),
       },
@@ -1401,71 +1420,66 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     });
   }
 
-  // Pointages chauffeurs (14 derniers jours) — journaliers seulement
+  // Pointages (14 derniers jours, hors dimanche) — ouvriers et chauffeurs journaliers.
+  // Un pointage journalier (session) par chantier / tranche, chaque ligne rattachée à sa session.
+  const pointageFrom = utcDaysAgo(14);
+  const dailyPointers = [
+    ...workforceIds.filter((id, i) => i !== 26 && !monthlyWorkforceIds.includes(id)).map((id) => ({ id, driver: false })),
+    ...chauffeurIds.filter((id) => !monthlyChauffeurIds.includes(id)).map((id) => ({ id, driver: true })),
+  ];
+  await prisma.pointage.deleteMany({
+    where: { workforceId: { in: dailyPointers.map((p) => p.id) }, date: { gte: daysAgo(15) } },
+  });
+  await prisma.pointageSession.deleteMany({
+    where: { chantierId: { in: chantierIds }, date: { gte: pointageFrom }, lines: { none: {} } },
+  });
+  const dayRates = new Map(
+    (await prisma.workforce.findMany({ where: { id: { in: dailyPointers.map((p) => p.id) } }, select: { id: true, dailySalary: true } }))
+      .map((w) => [w.id, w.dailySalary]),
+  );
+  const SESSION_REMARKS = ['Coulage béton — équipe renforcée', 'Arrêt 2 h pour intempéries', 'Visite du bureau de contrôle', 'Réception livraison acier'];
+  const sessionIds = new Map<string, string>();
   for (let d = 0; d < 14; d++) {
-    const date = daysAgo(d);
-    date.setHours(0, 0, 0, 0);
-    for (let c = 0; c < chauffeurIds.length; c++) {
-      const wid = chauffeurIds[c];
-      if (monthlyChauffeurIds.includes(wid)) continue;
-      const worker = await prisma.workforce.findUnique({ where: { id: wid }, select: { dailySalary: true } });
-      const totalDay = c % 3 === 0 ? 1 : 0.5 + (d % 2) * 0.5;
-      await prisma.pointage.upsert({
-        where: { date_workforceId: { date, workforceId: wid } },
-        update: {
-          validated: d > 0,
-          validatedAt: d > 0 ? daysAgo(d - 1) : null,
-          advance: d === 0 && c === 0 ? 200 : 0,
-          bonus: c === 1 && d % 5 === 0 ? 100 : 0,
-          dayRate: worker?.dailySalary,
-        },
-        create: {
+    const date = utcDaysAgo(d);
+    if (date.getUTCDay() === 0) continue;
+    for (let k = 0; k < dailyPointers.length; k++) {
+      const { id: wid, driver } = dailyPointers[k];
+      if ((k * 3 + d) % 11 === 0) continue; // absence
+      const place = placement.get(wid);
+      if (!place) continue;
+      const tranche = place.tranche || '';
+      const key = `${place.chantierId}|${tranche}|${d}`;
+      let sessionId = sessionIds.get(key);
+      if (!sessionId) {
+        const session = await prisma.pointageSession.upsert({
+          where: { chantierId_tranche_date: { chantierId: place.chantierId, tranche, date } },
+          update: {},
+          create: {
+            chantierId: place.chantierId,
+            tranche,
+            date,
+            remark: (d + sessionIds.size) % 5 === 0 ? SESSION_REMARKS[(d + sessionIds.size) % SESSION_REMARKS.length] : null,
+          },
+        });
+        sessionId = session.id;
+        sessionIds.set(key, sessionId);
+      }
+      const totalDay = (k + d) % 6 === 0 ? 0.5 : 1;
+      await prisma.pointage.create({
+        data: {
           date,
           workforceId: wid,
-          chantierId: randomItem(chantierIds, c + d),
+          chantierId: place.chantierId,
+          tranche: place.tranche,
+          sessionId,
           dayValue: totalDay,
           hours: totalDay * 8,
           totalDay,
-          dayRate: worker?.dailySalary,
-          advance: d === 0 && c === 0 ? 200 : 0,
-          bonus: c === 1 && d % 5 === 0 ? 100 : 0,
+          dayRate: dayRates.get(wid) ?? null,
+          advance: driver ? (d === 0 && k % 2 === 0 ? 200 : 0) : d <= 2 && k % 4 === 0 ? 150 : d === 0 && k % 5 === 0 ? 100 : 0,
+          bonus: driver ? (d % 5 === 0 ? 100 : 0) : k % 6 === 0 ? 80 : k % 7 === 0 ? 50 : 0,
           validated: d > 0,
-          validatedAt: d > 0 ? daysAgo(d - 1) : undefined,
-        },
-      });
-    }
-  }
-
-  // Pointages (14 derniers jours × ouvriers journaliers) — hors mensuels
-  for (let d = 0; d < 14; d++) {
-    const date = daysAgo(d);
-    date.setHours(0, 0, 0, 0);
-    for (let w = 0; w < 20; w++) {
-      const wid = workforceIds[w];
-      if (monthlyWorkforceIds.includes(wid)) continue;
-      const worker = await prisma.workforce.findUnique({ where: { id: wid }, select: { dailySalary: true } });
-      const totalDay = 0.5 + ((w + d) % 2) * 0.5;
-      await prisma.pointage.upsert({
-        where: { date_workforceId: { date, workforceId: wid } },
-        update: {
-          validated: d > 0,
-          validatedAt: d > 0 ? daysAgo(d - 1) : null,
-          advance: d <= 2 && w % 4 === 0 ? 150 : d === 0 && w % 5 === 0 ? 100 : 0,
-          bonus: w % 6 === 0 ? 80 : w % 7 === 0 ? 50 : 0,
-          dayRate: worker?.dailySalary,
-        },
-        create: {
-          date,
-          workforceId: wid,
-          chantierId: randomItem(chantierIds, w + d),
-          dayValue: totalDay,
-          hours: totalDay * 8,
-          totalDay,
-          dayRate: worker?.dailySalary,
-          advance: d <= 2 && w % 4 === 0 ? 150 : d === 0 && w % 5 === 0 ? 100 : 0,
-          bonus: w % 6 === 0 ? 80 : w % 7 === 0 ? 50 : 0,
-          validated: d > 0,
-          validatedAt: d > 0 ? daysAgo(d - 1) : undefined,
+          validatedAt: d > 0 ? utcDaysAgo(d - 1) : null,
         },
       });
     }
@@ -1501,82 +1515,6 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     supplierIds.push(sup.id);
   }
 
-  const purchaseStatuses = ['brouillon', 'validé', 'visé', 'contrôlé', 'retourné', 'validé', 'visé'];
-  const modes = ['especes', 'virement', 'cheque', 'versement'];
-  const purchaseLabels = [
-    'Livraison béton C25/30', 'Ferraillage acier HA', 'Câblage électrique', 'Menuiserie aluminium',
-    'Tuyauterie PVC', 'Carrelage sol 60×60', 'Location nacelle', 'Peinture façade',
-    'Gravier concassé', 'Parpaings creux', 'Coffrage métallique', 'Échafaudage',
-    'Ciment CPJ45', 'Sable de dune', 'Isolation laine de roche', 'Portes blindées',
-  ];
-  for (let i = 1; i <= 22; i++) {
-    const ref = `ACH-2026-${pad(i)}`;
-    const qty = 10 + (i % 20);
-    const unitPrice = 150 + i * 85;
-    const status = i <= 15 ? 'contrôlé' : randomItem(purchaseStatuses, i);
-    const purchaseDate = i <= 15 ? daysAgo(i % 22) : daysAgo(40 - i);
-    await prisma.purchase.upsert({
-      where: { reference: ref },
-      update: { status, date: purchaseDate },
-      create: {
-        reference: ref,
-        date: purchaseDate,
-        designation: purchaseLabels[i % purchaseLabels.length],
-        quantity: qty,
-        unit: i % 3 === 0 ? 'm³' : i % 3 === 1 ? 'kg' : 'u',
-        unitPrice,
-        totalPrice: qty * unitPrice,
-        supplierId: randomItem(supplierIds, i),
-        chantierId: randomItem(chantierIds, i),
-        status,
-        paymentMode: randomItem(modes, i),
-        author: 'admin@gic.ma',
-        family: 'Travaux',
-      },
-    });
-
-    if (i <= 8) {
-      await prisma.purchaseHistory.upsert({
-        where: { id: `ph-${i}` },
-        update: {},
-        create: {
-          id: `ph-${i}`,
-          purchaseId: (await prisma.purchase.findUnique({ where: { reference: ref } }))!.id,
-          userName: 'Super Administrateur',
-          oldStatus: 'brouillon',
-          newStatus: randomItem(purchaseStatuses, i),
-          comment: 'Validation workflow GIC',
-        },
-      });
-    }
-  }
-
-  for (let i = 23; i <= 30; i++) {
-    const ref = `ACH-2026-${pad(i)}`;
-    const qty = 8 + (i % 15);
-    const unitPrice = 220 + i * 70;
-    const purchaseDate = daysAgo((i - 22) * 2 + (i % 5));
-    await prisma.purchase.upsert({
-      where: { reference: ref },
-      update: { status: 'contrôlé', date: purchaseDate },
-      create: {
-        reference: ref,
-        date: purchaseDate,
-        designation: purchaseLabels[i % purchaseLabels.length],
-        quantity: qty,
-        unit: i % 2 === 0 ? 'u' : 'kg',
-        unitPrice,
-        totalPrice: qty * unitPrice,
-        supplierId: randomItem(supplierIds, i),
-        chantierId: randomItem(chantierIds, i),
-        status: 'contrôlé',
-        paymentMode: randomItem(modes, i),
-        author: 'admin@gic.ma',
-        family: i % 2 === 0 ? 'Travaux' : 'Fournitures',
-      },
-    });
-  }
-
   // Familles achats + catalogue désignations
   const familyDesignations: Record<string, string[]> = {
     'Gros œuvre': ['Livraison béton C25/30', 'Ferraillage acier HA', 'Coffrage métallique', 'Gravier concassé'],
@@ -1591,7 +1529,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
       update: {},
       create: { name: fam },
     });
-    for (const label of labels) {
+    for (const label of [...labels, ...(PURCHASE_CATALOG[fam] || []).map((item) => item.product)]) {
       const exists = await prisma.purchaseDesignation.findFirst({ where: { familyId: family.id, label } });
       if (!exists) {
         await prisma.purchaseDesignation.create({ data: { familyId: family.id, label } });
@@ -1599,127 +1537,26 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     }
   }
 
-  // Engins
-  const enginIds: string[] = [];
-  const MAINT_JOBS = [
-    'Vidange + filtres', 'Révision moteur', 'Changement pneus', 'Freins + plaquettes',
-    'Hydraulique — joints', 'Climatisation', 'Graissage général', 'Contrôle technique interne',
-    'Remplacement courroie', 'Réparation carrosserie', 'Batterie + alternateur', 'Pneumatiques avant',
-  ];
-  const FUEL_STATIONS = ['Total Energies', 'Afriquia', 'Shell', 'Winxo', 'Station chantier GIC'];
-  const in30 = new Date();
-  in30.setDate(in30.getDate() + 20);
+  // Contexte partagé par les modules du seed (achats, parc, chantiers, échéanciers)
+  const seedCtx: SeedContext = {
+    prisma,
+    uploadDir,
+    chantiers: CHANTIERS.map((c) => ({ id: c.id, name: c.name, city: c.city, manager: c.manager, projectId: c.projectId, tranches: c.tranches })),
+    supplierIds,
+    chauffeurs: chauffeurIds.map((id, i) => ({ id, name: chauffeurNames[i] })),
+    projects: PROJECTS.map((p) => ({ id: p.id, name: p.name, city: p.city })),
+    clientIds,
+    adminId: admin.id,
+  };
+
+  // Achats — cycle complet : lignes, livraisons, factures, paiements → caisse
+  const purchaseStats = await seedPurchases(seedCtx);
+
+  // Parc Engins & Matériels — fiches, affectations, utilisation, carburant, entretiens, réparations, dépenses, documents
+  const fleetStats = await seedFleet(seedCtx);
+
+  const in30 = daysAgo(-20);
   const expired = daysAgo(10);
-  for (let i = 0; i < ENGINS.length; i++) {
-    const e = ENGINS[i];
-    const engin = await prisma.engin.upsert({
-      where: { matricule: e.mat },
-      update: { status: e.status, fuelLevel: e.fuel, groupe: `Flotte ${String.fromCharCode(65 + (i % 3))}`, workPassport: `PO-${pad(i + 1, 4)}` },
-      create: {
-        brand: e.brand,
-        genre: e.genre,
-        matricule: e.mat,
-        status: e.status,
-        fuelLevel: e.fuel,
-        groupe: `Flotte ${String.fromCharCode(65 + (i % 3))}`,
-        workPassport: `PO-${pad(i + 1, 4)}`,
-        purchasePrice: 400000 + i * 120000,
-        counterValue: 800 + i * 340,
-        counterUnit: i % 2 === 0 ? 'Hr' : 'KM',
-        gpsNumber: `GPS-${pad(i + 1, 4)}`,
-        insuranceExpiry: i === 3 ? expired : in30,
-        vignetteExpiry: i === 1 ? in30 : daysAgo(-60),
-        visitExpiry: daysAgo(-90),
-      },
-    });
-    enginIds.push(engin.id);
-
-    for (let f = 0; f < 5; f++) {
-      await prisma.fuelLog.upsert({
-        where: { id: f === 0 ? `fuel-${i}` : `fuel-${i}-${f}` },
-        update: {
-          date: daysAgo(f * 4 + i),
-          liters: 55 + f * 18 + i * 5,
-          cost: 850 + f * 140 + i * 65,
-          remark: FUEL_STATIONS[(f + i) % FUEL_STATIONS.length],
-        },
-        create: {
-          id: f === 0 ? `fuel-${i}` : `fuel-${i}-${f}`,
-          enginId: engin.id,
-          date: daysAgo(f * 4 + i),
-          liters: 55 + f * 18 + i * 5,
-          cost: 850 + f * 140 + i * 65,
-          remark: FUEL_STATIONS[(f + i) % FUEL_STATIONS.length],
-          counterValue: engin.counterValue + f * 12,
-        },
-      });
-    }
-
-    await prisma.gpsPosition.upsert({
-      where: { id: `gps-${i}` },
-      update: {},
-      create: {
-        id: `gps-${i}`,
-        enginId: engin.id,
-        lat: 33.5731 + i * 0.01,
-        lng: -7.5898 + i * 0.01,
-        source: i % 2 === 0 ? 'gps_tracker' : 'manual',
-        recordedAt: daysAgo(i),
-      },
-    });
-
-    await prisma.mission.upsert({
-      where: { id: `mission-${i}` },
-      update: {
-        driverName: chauffeurNames[i % chauffeurNames.length] || randomItem(FIRST_NAMES, i),
-      },
-      create: {
-        id: `mission-${i}`,
-        enginId: engin.id,
-        date: daysAgo(i * 3),
-        driverName: chauffeurNames[i % chauffeurNames.length] || randomItem(FIRST_NAMES, i),
-        mission: `Transport / terrassement chantier ${i + 1}`,
-        chantierId: randomItem(chantierIds, i),
-        requestedBy: 'Hassan Tazi',
-      },
-    });
-
-    await prisma.maintenance.upsert({
-      where: { id: `maint-${i}` },
-      update: {
-        date: daysAgo(8 + i * 2),
-        budget: 3200 + i * 480,
-        designation: MAINT_JOBS[i % MAINT_JOBS.length],
-      },
-      create: {
-        id: `maint-${i}`,
-        enginId: engin.id,
-        date: daysAgo(8 + i * 2),
-        designation: MAINT_JOBS[i % MAINT_JOBS.length],
-        budget: 3200 + i * 480,
-        responsible: 'Atelier GIC',
-      },
-    });
-  }
-
-  for (let j = 0; j < 18; j++) {
-    await prisma.maintenance.upsert({
-      where: { id: `maint-extra-${j}` },
-      update: {
-        date: daysAgo(j % 27),
-        budget: 1600 + j * 380,
-        designation: MAINT_JOBS[(j + 3) % MAINT_JOBS.length],
-      },
-      create: {
-        id: `maint-extra-${j}`,
-        enginId: enginIds[j % enginIds.length],
-        date: daysAgo(j % 27),
-        designation: MAINT_JOBS[(j + 3) % MAINT_JOBS.length],
-        budget: 1600 + j * 380,
-        responsible: ['Atelier GIC', 'Garage Partenaire', 'Technicien externe'][j % 3],
-      },
-    });
-  }
 
   // Documents (30)
   for (let i = 1; i <= 30; i++) {
@@ -1770,7 +1607,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   const notifs = [
     { title: 'Bienvenue sur GIC', message: 'La plateforme est prête. Explorez le tableau de bord.', type: 'info', link: '/' },
     { title: 'Encaissements en attente', message: '3 ventes ont un reste à encaisser > 100 000 MAD', type: 'finance', link: '/encaissements' },
-    { title: 'Achats à valider', message: '4 bons d’achat sont encore en brouillon', type: 'achat', link: '/achats' },
+    { title: 'Achats à traiter', message: '3 demandes d’achat sont encore au statut Élaboré', type: 'achat', link: '/achats' },
     { title: 'Documents expirants', message: '5 documents arrivent à échéance sous 30 jours', type: 'doc', link: '/documents' },
     { title: 'Pointage du jour', message: 'Validez les pointages avant 18h', type: 'chantier', link: '/pointage' },
     { title: 'Engin en maintenance', message: 'JCB Mini-pelle — maintenance en cours', type: 'alert', link: '/engins' },
@@ -1832,7 +1669,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     { id: 'VTE-2026', prefix: 'VTE', year: 2026, value: 35 },
     { id: 'LOC-2026', prefix: 'LOC', year: 2026, value: 13 },
     { id: 'FRN-2026', prefix: 'FRN', year: 2026, value: 8 },
-    { id: 'ACH-2026', prefix: 'ACH', year: 2026, value: 30 },
+    { id: 'ACH-2026', prefix: 'ACH', year: 2026, value: purchaseStats.purchases },
     { id: 'COL-2026', prefix: 'COL', year: 2026, value: 8 },
     { id: 'REC-2026', prefix: 'REC', year: 2026, value: 4 },
   ];
@@ -1883,6 +1720,12 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     if (!exists) await prisma.dropdownOption.create({ data: d });
   }
 
+  const chantierExtras = await seedChantierExtras(seedCtx);
+  const schedules = await seedPaymentSchedules(seedCtx);
+  const messages = await seedCommunications(seedCtx);
+  await seedCompanySettings(seedCtx);
+  const demoFiles = await ensureDemoDocumentFiles(seedCtx);
+
   await seedFinanceLedger();
 
   console.log('\n✅ Seed GIC complet — plateforme remplie\n');
@@ -1899,16 +1742,19 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   console.log('Biens            : 90');
   console.log('Ventes           : 35 (liées aux clients)');
   console.log('Locations        : 13 (liées aux clients)');
-  console.log('Chantiers        : 5');
-  console.log('Ouvriers         : 28 (+ pointages 14 jours)');
-  console.log('Chauffeurs       : 6 (+ pointages, salaires CH-*, décaissements)');
+  console.log(`Chantiers        : 5 (tranches, ${chantierExtras.subcontractors} sous-traitants, galeries photos)`);
+  console.log(`Pointage         : ${sessionIds.size} pointages journaliers (chantier / tranche) sur 14 jours`);
+  console.log(`Ouvriers         : ${WORKER_COUNT} (affectés chantier + tranche)`);
+  console.log('Chauffeurs       : 6 (+ pointages, salaires CH-*, conducteurs attitrés)');
   console.log('Fournisseurs     : 8');
-  console.log('Achats           : 30 (23 contrôlés → décaissements caisse)');
-  console.log('Maintenance      : 24 entrées (décaissements onglet maintenance)');
-  console.log('Carburant        : 30 pleins (décaissements onglet carburant)');
+  console.log(`Achats           : ${purchaseStats.purchases} (tous les statuts, ${purchaseStats.deliveries} livraisons, ${purchaseStats.payments} paiements)`);
+  console.log(`Engins & Mat.    : ${fleetStats.engins} (propriété + location) — ${fleetStats.assignments} affectations, ${fleetStats.usages} relevés d'utilisation`);
+  console.log(`Maintenance      : ${fleetStats.maintenances} entretiens, ${fleetStats.repairs} réparations`);
+  console.log(`Carburant        : ${fleetStats.fuel} pleins — Dépenses engins : ${fleetStats.expenses} — Documents engins : ${fleetStats.documents}`);
+  console.log(`Échéanciers      : ${schedules.saleItems} échéances ventes, ${schedules.rentalItems} loyers`);
+  console.log(`Échanges         : ${messages} messages (clients, fournisseurs)`);
   console.log('Finance          : encaissements + décaissements → caisse auto (voir ci-dessus)');
-  console.log('Engins           : 6');
-  console.log('Documents        : 30');
+  console.log(`Documents        : 30 GED + documents engins / factures achats (${demoFiles} aperçus PDF de démonstration)`);
   console.log('Bureau d\'ordre   : 20');
   console.log('Notifications    : 12');
   console.log('Reconnus         : 4 (+ 5 mouvements caisse bureau)');
