@@ -1,4 +1,4 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -14,6 +14,8 @@ import {
 import {
   entityLink, expiryClass, formatSize, fileUrl, isDocumentLate, type DocEntity,
 } from '../lib/documentDisplay';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Doc = DocEntity;
@@ -106,6 +108,8 @@ export default function DocumentsPage() {
     date: new Date().toISOString().slice(0, 10), remark: '',
   });
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const docSelection = useRowSelection<Doc>();
+  const archiveSelection = useRowSelection<Archive>();
 
   function buildStatsQuery(overrides?: DocOverrides & ArchiveOverrides) {
     const qs = new URLSearchParams();
@@ -340,20 +344,82 @@ export default function DocumentsPage() {
     }
   }
 
-  async function printList() {
+  const alertOptions = [
+    { id: '', label: t('common.all') },
+    { id: 'expiring', label: t('filters.expiring30d') },
+    { id: 'expired', label: t('status.expiredPlural') },
+    { id: 'late', label: t('docs.lateDossiers') },
+  ];
+  const directionOptions = [
+    { id: '', label: t('common.all') },
+    { id: 'entrant', label: t('fields.incomingPlural') },
+    { id: 'sortant', label: t('fields.outgoingPlural') },
+  ];
+  const docSortOptions = [
+    { value: 'createdAt', label: t('fields.dateAdded') },
+    { value: 'name', label: t('columns.name') },
+    { value: 'category', label: t('columns.category') },
+    { value: 'size', label: t('columns.size') },
+    { value: 'expiresAt', label: t('columns.deadline') },
+  ];
+  const archiveSortOptions = [
+    { value: 'date', label: t('fields.date') },
+    { value: 'subject', label: t('columns.subject') },
+    { value: 'registerNo', label: t('columns.registerNo') },
+  ];
 
+  function sortPrintLabel(options: { value: string; label: string }[]) {
+    const label = options.find((o) => o.value === sort)?.label || sort;
+    return `${label} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`;
+  }
+
+  function printList() {
     if (tab === 'documents') {
-      await printWithCompany({ title: t('pages.documents'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
-        <h1>Documents GIC</h1><table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
-        <tr><th>Nom</th><th>Catégorie</th><th>Taille</th><th>Échéance</th><th>Date</th></tr>
-        ${docs.map((d) => `<tr><td>${d.name}</td><td>${d.category || '—'}</td><td>${formatSize(d.size)}</td><td>${formatDate(d.expiresAt)}</td><td>${formatDate(d.createdAt)}</td></tr>`).join('')}
-        </table></body></html>`, { grid: false }) });
+      printRows<Doc>({
+        title: t('pages.documents'),
+        filters: [
+          [t('listPrint.search'), q],
+          [t('dashboard.alerts'), alertFilter && alertOptions.find((f) => f.id === alertFilter)?.label],
+          [t('fields.category'), categoryFilter],
+          [t('listPrint.sort'), sortPrintLabel(docSortOptions)],
+        ],
+        columns: [
+          { label: t('columns.name'), value: (d) => (isDocumentLate(d) ? `${d.name} (${t('docs.lateDossier')})` : d.name) },
+          { label: t('columns.category'), value: (d) => d.category },
+          { label: t('columns.size'), value: (d) => formatSize(d.size) },
+          { label: t('columns.linkedTo'), value: (d) => entityLink(d)?.label || d.entityType },
+          { label: t('columns.deadline'), value: (d) => formatDate(d.estimatedEndDate || d.expiresAt) },
+          { label: t('columns.date'), value: (d) => formatDate(d.createdAt) },
+          {
+            label: t('columns.amount'),
+            value: (d) => (d.feeAmount ? formatMad(d.feeAmount) : ''),
+            align: 'right',
+            total: (rows) => formatMad(rows.reduce((s, d) => s + (d.feeAmount || 0), 0)),
+          },
+        ],
+        rows: docSelection.count ? docSelection.rows : () => fetchAllRows<Doc>('/documents', buildDocQuery(1)),
+        selectedCount: docSelection.count,
+      });
     } else {
-      await printWithCompany({ title: t('pages.documents'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
-        <h1>Bureau d'ordre GIC</h1><table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
-        <tr><th>N°</th><th>Date</th><th>Objet</th><th>Direction</th></tr>
-        ${archives.map((a) => `<tr><td>${a.registerNo || '—'}</td><td>${formatDate(a.date)}</td><td>${a.subject}</td><td>${a.direction}</td></tr>`).join('')}
-        </table></body></html>`, { grid: false }) });
+      printRows<Archive>({
+        title: t('kpi.bureauOrdre'),
+        filters: [
+          [t('listPrint.search'), q],
+          [t('fields.direction'), directionFilter && directionOptions.find((f) => f.id === directionFilter)?.label],
+          [t('listPrint.period'), dateFrom || dateTo ? `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}` : ''],
+          [t('listPrint.sort'), sortPrintLabel(archiveSortOptions)],
+        ],
+        columns: [
+          { label: t('columns.registerNo'), value: (a) => a.registerNo },
+          { label: t('columns.date'), value: (a) => formatDate(a.date) },
+          { label: t('columns.subject'), value: (a) => a.subject },
+          { label: t('columns.sender'), value: (a) => a.sender },
+          { label: t('columns.recipient'), value: (a) => a.recipient },
+          { label: t('columns.direction'), value: (a) => directionLabel(a.direction) },
+        ],
+        rows: archiveSelection.count ? archiveSelection.rows : () => fetchAllRows<Archive>('/documents/archives', buildArchiveQuery(1)),
+        selectedCount: archiveSelection.count,
+      });
     }
   }
 
@@ -442,13 +508,7 @@ export default function DocumentsPage() {
                   setPage(1);
                   load(1, { sort: v, order: nextOrder });
                 }}
-                options={[
-                  { value: 'createdAt', label: t('fields.dateAdded') },
-                  { value: 'name', label: t('columns.name') },
-                  { value: 'category', label: t('columns.category') },
-                  { value: 'size', label: t('columns.size') },
-                  { value: 'expiresAt', label: t('columns.deadline') },
-                ]}
+                options={docSortOptions}
                 className="w-36 shrink-0"
               />
             )}
@@ -463,11 +523,7 @@ export default function DocumentsPage() {
                     setPage(1);
                     load(1, { sort: v, order: nextOrder });
                   }}
-                  options={[
-                    { value: 'date', label: t('fields.date') },
-                    { value: 'subject', label: t('columns.subject') },
-                    { value: 'registerNo', label: t('columns.registerNo') },
-                  ]}
+                  options={archiveSortOptions}
                   className="w-36 shrink-0"
                 />
                 <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
@@ -502,12 +558,7 @@ export default function DocumentsPage() {
                   {tab === 'documents' ? (
                     <>
                       <p className="mac-filter-menu-section">{t('dashboard.alerts')}</p>
-                      {[
-                        { id: '', label: t('common.all') },
-                        { id: 'expiring', label: t('filters.expiring30d') },
-                        { id: 'expired', label: t('status.expiredPlural') },
-                        { id: 'late', label: t('docs.lateDossiers') },
-                      ].map((f) => (
+                      {alertOptions.map((f) => (
                         <button
                           key={f.id || 'all-alert'}
                           type="button"
@@ -559,11 +610,7 @@ export default function DocumentsPage() {
                   ) : (
                     <>
                       <p className="mac-filter-menu-section">{t('fields.direction')}</p>
-                      {[
-                        { id: '', label: t('common.all') },
-                        { id: 'entrant', label: t('fields.incomingPlural') },
-                        { id: 'sortant', label: t('fields.outgoingPlural') },
-                      ].map((f) => (
+                      {directionOptions.map((f) => (
                         <button
                           key={f.id || 'all-dir'}
                           type="button"
@@ -626,6 +673,10 @@ export default function DocumentsPage() {
         </Card>
       )}
 
+      {tab === 'documents'
+        ? <SelectionBar selection={docSelection} onPrint={printList} />
+        : <SelectionBar selection={archiveSelection} onPrint={printList} />}
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -636,6 +687,7 @@ export default function DocumentsPage() {
             <TableWrap mac>
               <thead>
                 <tr>
+                  <SelectAllTh selection={docSelection} rows={docs} />
                   <Th mac>{t('columns.name')}</Th>
                   <Th mac>{t('columns.category')}</Th>
                   <Th mac>{t('columns.size')}</Th>
@@ -655,6 +707,7 @@ export default function DocumentsPage() {
                       className="cursor-pointer"
                       onClick={() => navigate(`/documents/${d.id}`)}
                     >
+                      <SelectTd selection={docSelection} row={d} />
                       <Td mac className="font-medium max-w-[220px]">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="truncate">{d.name}</span>
@@ -708,6 +761,7 @@ export default function DocumentsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={archiveSelection} rows={archives} />
                 <Th mac>{t('columns.registerNo')}</Th>
                 <Th mac>{t('columns.date')}</Th>
                 <Th mac>{t('columns.subject')}</Th>
@@ -724,6 +778,7 @@ export default function DocumentsPage() {
                   className="cursor-pointer"
                   onClick={() => navigate(`/documents/bureau/${a.id}`)}
                 >
+                  <SelectTd selection={archiveSelection} row={a} />
                   <Td mac className="font-medium">{a.registerNo || '—'}</Td>
                   <Td mac className="mac-table-muted">{formatDate(a.date)}</Td>
                   <Td mac>{a.subject}</Td>

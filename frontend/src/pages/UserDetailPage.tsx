@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Pencil, Shield, Clock, Link2, Info, History
+import { Pencil, Shield, Clock, Link2, Info, History, Printer
 } from 'lucide-react';
 import { api, formatDate } from '../lib/api';
+import { escHtml, printWithCompany } from '../lib/companyPrint';
 import { useAuth } from '../context/AuthContext';
 import { roleLabel } from '../lib/permissions';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, Select, PageBackLink } from '../components/ui';
@@ -109,6 +110,33 @@ export default function UserDetailPage() {
     }
   }
 
+  function printFiche() {
+    if (!item || !id) return;
+    const row = (label: string, value: unknown) => `<p><span class="k">${escHtml(label)} :</span> ${escHtml(value ?? '—')}</p>`;
+    void printWithCompany({
+      title: `${t('detail.platformAccount')} — ${item.firstName} ${item.lastName}`,
+      subtitle: item.email,
+      bodyHtml: async () => {
+        const rows = history.length ? history : await api<any[]>(`/auth/users/${id}/history`).catch(() => []);
+        return `<div class="grid">
+          ${row(t('fields.email'), item.email)}
+          ${row(t('fields.username'), item.username || '—')}
+          ${row(t('fields.role'), roleLabel(item.role))}
+          ${row(t('fields.status'), item.isActive ? t('status.active') : t('status.inactive'))}
+          ${row(t('settings.twoFaTotp'), item.twoFactorEnabled ? t('common.yes') : t('common.no'))}
+          ${row(t('fields.lastLogin'), item.lastLoginAt ? formatDate(item.lastLoginAt) : '—')}
+          ${row(t('fields.createdAt'), formatDate(item.createdAt))}
+          ${row(t('msg.managedSites'), item._count?.managedChantiers ?? 0)}
+          ${row(t('fields.internalTeamFiche'), item.internalStaff ? item.internalStaff.reference || t('common.yes') : t('msg.noRhLinked'))}
+        </div>
+        <h2>${escHtml(t('tabs.history'))}</h2>
+        ${rows.length ? `<table><thead><tr><th>${escHtml(t('columns.date'))}</th><th>${escHtml(t('columns.action'))}</th><th>${escHtml(t('columns.entity'))}</th><th>${escHtml(t('columns.details'))}</th></tr></thead><tbody>${rows
+          .map((h) => `<tr><td>${escHtml(formatDate(h.createdAt))}</td><td>${escHtml(h.action || '—')}</td><td>${escHtml(h.entity || '—')}</td><td>${escHtml(h.details || '—')}</td></tr>`)
+          .join('')}</tbody></table>` : `<p class="muted">${escHtml(t('msg.emptyHistoryShort'))}</p>`}`;
+      },
+    });
+  }
+
   if (!item && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
 
   if (error && !item) {
@@ -142,6 +170,7 @@ export default function UserDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
+          <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
           <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
         </div>
       </div>

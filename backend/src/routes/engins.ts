@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Prisma } from '@prisma/client';
 import path from 'path';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -11,6 +12,26 @@ import {
   syncFuelMovement,
   syncMaintenanceMovement,
 } from '../lib/cashSync.js';
+import { CHAUFFEUR_CATEGORY } from '../lib/workforceScope.js';
+import { nextReference } from '../lib/references.js';
+import {
+  ENGIN_KINDS,
+  ENGIN_STATUSES,
+  MAINTENANCE_KINDS,
+  MAINTENANCE_TYPES,
+  RENTAL_UNITS,
+  DEPRECIATION_METHODS,
+  annualDepreciation,
+  depreciationDailyAt,
+  enginLabel as fleetLabel,
+  isAssignmentActive,
+  netBookValue,
+  refreshEnginStatus,
+  rentalDailyRate,
+  round2,
+  todayUtc,
+} from '../lib/enginCosts.js';
+import enginFleetRoutes, { buildFuelData, parseAllocation } from './enginFleet.js';
 
 const router = Router();
 
@@ -37,6 +58,7 @@ router.post('/gps/webhook', async (req, res) => {
 
 router.use(requireAuth);
 router.use(requirePermission);
+router.use(enginFleetRoutes);
 
 const ENGIN_DATE_FIELDS = [
   'gpsMountDate',
@@ -46,6 +68,10 @@ const ENGIN_DATE_FIELDS = [
   'vignetteExpiry',
   'visitExpiry',
   'authExpiry',
+  'commissioningDate',
+  'acquisitionDate',
+  'rentalStart',
+  'rentalEnd',
 ];
 
 function parseEnginDates(data: Record<string, unknown>) {
@@ -69,7 +95,7 @@ function normalizeOwnershipType(v: unknown) {
   return s === 'loue' || s === 'loué' || s === 'rented' ? 'loue' : 'personnel';
 }
 
-function buildEnginWhere(q: string, status: string, genre: string, alert: string, ownershipType = '') {
+function buildEnginWhere(q: string, status: string, genre: string, alert: string, ownershipType = '', kind = '') {
   const now = new Date();
   const in30 = new Date(now);
   in30.setDate(in30.getDate() + 30);
@@ -100,17 +126,22 @@ function buildEnginWhere(q: string, status: string, genre: string, alert: string
       q
         ? {
             OR: [
+              { code: { contains: q } },
+              { designation: { contains: q } },
+              { model: { contains: q } },
               { brand: { contains: q } },
               { genre: { contains: q } },
               { matricule: { contains: q } },
               { gpsNumber: { contains: q } },
               { chassisNo: { contains: q } },
+              { location: { contains: q } },
             ],
           }
         : {},
-      status ? { status } : {},
+      status === 'affecte' ? { status: { in: ['affecte', 'en_utilisation'] } } : status ? { status } : {},
       genre ? { genre } : {},
       ownershipType ? { ownershipType: normalizeOwnershipType(ownershipType) } : {},
+      kind ? { kind } : {},
       alertFilter,
     ],
   };
@@ -157,16 +188,19 @@ function buildMissionWhere(
 async function syncEnginMissionStatus(enginId: string) {
   const count = await prisma.mission.count({ where: { enginId } });
   const engin = await prisma.engin.findUnique({ where: { id: enginId }, select: { status: true } });
-  if (engin?.status === 'en_mission' && count === 0) {
+  if (engin?.status === 'en_utilisation' && count === 0) {
     await prisma.engin.update({ where: { id: enginId }, data: { status: 'disponible' } });
+    await refreshEnginStatus(enginId);
   }
 }
 
-function buildMaintenanceWhere(q: string, enginId: string, dateFrom: string, dateTo: string) {
+function buildMaintenanceWhere(q: string, enginId: string, dateFrom: string, dateTo: string, kind = '', chantierId = '') {
   const { from, to } = parseDateRange(dateFrom, dateTo);
   return {
     AND: [
       enginId ? { enginId } : {},
+      kind ? { kind } : {},
+      chantierId ? { chantierId } : {},
       q
         ? {
             OR: [
@@ -207,14 +241,14 @@ router.get('/stats', async (req, res) => {
   const genre = String(req.query.genre || '');
   const alert = String(req.query.alert || '');
   const ownershipType = String(req.query.ownershipType || '');
-  const where = buildEnginWhere(q, status, genre, alert, ownershipType);
+  const where = buildEnginWhere(q, status, genre, alert, ownershipType, String(req.query.kind || ''));
 
-  const [total, disponibles, enMission, enMaintenance, personnel, loue, missionsTotal, maintenanceBudget, genres, filteredEngins] =
+  const [total, disponibles, enMission, enMaintenance, personnel, loue, missionsTotal, maintenanceBudget, genres, filteredEngins, horsService, materiels] =
     await Promise.all([
       prisma.engin.count({ where }),
       prisma.engin.count({ where: { ...where, status: 'disponible' } }),
-      prisma.engin.count({ where: { ...where, status: 'en_mission' } }),
-      prisma.engin.count({ where: { ...where, status: 'en_maintenance' } }),
+      prisma.engin.count({ where: { ...where, status: { in: ['affecte', 'en_utilisation'] } } }),
+      prisma.engin.count({ where: { ...where, status: { in: ['en_maintenance', 'en_reparation'] } } }),
       prisma.engin.count({ where: { ...where, ownershipType: 'personnel' } }),
       prisma.engin.count({ where: { ...where, ownershipType: 'loue' } }),
       prisma.mission.count(),
@@ -229,13 +263,19 @@ router.get('/stats', async (req, res) => {
         where,
         select: { insuranceExpiry: true, vignetteExpiry: true, visitExpiry: true, authExpiry: true },
       }),
+      prisma.engin.count({ where: { ...where, status: 'hors_service' } }),
+      prisma.engin.count({ where: { ...where, kind: 'materiel' } }),
     ]);
   const alerts = countPaperAlerts(filteredEngins);
   res.json({
     total,
     disponibles,
     enMission,
+    affectes: enMission,
     enMaintenance,
+    horsService,
+    materiels,
+    enginsCount: total - materiels,
     personnel,
     loue,
     missionsTotal,
@@ -252,7 +292,7 @@ router.get('/export/csv', async (req, res) => {
   const genre = String(req.query.genre || '');
   const alert = String(req.query.alert || '');
   const ownershipType = String(req.query.ownershipType || '');
-  const where = buildEnginWhere(q, status, genre, alert, ownershipType);
+  const where = buildEnginWhere(q, status, genre, alert, ownershipType, String(req.query.kind || ''));
 
   const engins = await prisma.engin.findMany({
     where,
@@ -297,7 +337,7 @@ router.get('/export/xlsx', async (req, res) => {
   const genre = String(req.query.genre || '');
   const alert = String(req.query.alert || '');
   const ownershipType = String(req.query.ownershipType || '');
-  const where = buildEnginWhere(q, status, genre, alert, ownershipType);
+  const where = buildEnginWhere(q, status, genre, alert, ownershipType, String(req.query.kind || ''));
 
   const engins = await prisma.engin.findMany({
     where,
@@ -339,8 +379,27 @@ router.get('/export/xlsx', async (req, res) => {
 router.get('/list', async (_req, res) => {
   res.json(
     await prisma.engin.findMany({
-      orderBy: [{ matricule: 'asc' }, { brand: 'asc' }],
-      select: { id: true, brand: true, genre: true, matricule: true, status: true },
+      orderBy: [{ code: 'asc' }, { matricule: 'asc' }, { brand: 'asc' }],
+      select: {
+        id: true,
+        code: true,
+        designation: true,
+        kind: true,
+        ownershipType: true,
+        brand: true,
+        genre: true,
+        model: true,
+        matricule: true,
+        status: true,
+        photo: true,
+        counterUnit: true,
+        counterValue: true,
+        driverAssignments: {
+          where: { endDate: null },
+          take: 1,
+          select: { id: true, workforce: { select: { id: true, firstName: true, lastName: true } } },
+        },
+      },
     })
   );
 });
@@ -489,7 +548,7 @@ router.post('/missions', async (req, res) => {
     },
     include: { engin: true, chantier: true },
   });
-  await prisma.engin.update({ where: { id: req.body.enginId }, data: { status: 'en_mission' } });
+  await prisma.engin.update({ where: { id: req.body.enginId }, data: { status: 'en_utilisation' } });
   await audit(req, 'création', 'Mission', mission.id, mission.mission);
   res.status(201).json(mission);
 });
@@ -543,7 +602,7 @@ router.put('/missions/:id', async (req, res) => {
   });
 
   if (newEnginId !== previousEnginId) {
-    await prisma.engin.update({ where: { id: newEnginId }, data: { status: 'en_mission' } });
+    await prisma.engin.update({ where: { id: newEnginId }, data: { status: 'en_utilisation' } });
     await syncEnginMissionStatus(previousEnginId);
   }
 
@@ -620,17 +679,22 @@ router.get('/maintenances/stats', async (req, res) => {
   const enginId = String(req.query.enginId || '');
   const dateFrom = String(req.query.dateFrom || '');
   const dateTo = String(req.query.dateTo || '');
-  const where = buildMaintenanceWhere(q, enginId, dateFrom, dateTo);
+  const where = buildMaintenanceWhere(q, enginId, dateFrom, dateTo, String(req.query.kind || ''), String(req.query.chantierId || ''));
 
-  const [total, budgetAgg, enginsEnMaint] = await Promise.all([
+  const [total, budgetAgg, enginsEnMaint, enginsEnRep] = await Promise.all([
     prisma.maintenance.count({ where }),
-    prisma.maintenance.aggregate({ where, _sum: { budget: true } }),
+    prisma.maintenance.aggregate({ where, _sum: { budget: true, downtimeDays: true, partsCost: true, laborCost: true } }),
     prisma.engin.count({ where: { status: 'en_maintenance' } }),
+    prisma.engin.count({ where: { status: 'en_reparation' } }),
   ]);
   res.json({
     total,
     budgetTotal: Math.round(budgetAgg._sum.budget || 0),
+    downtimeDays: budgetAgg._sum.downtimeDays || 0,
+    partsCost: Math.round(budgetAgg._sum.partsCost || 0),
+    laborCost: Math.round(budgetAgg._sum.laborCost || 0),
     enginsEnMaintenance: enginsEnMaint,
+    enginsEnReparation: enginsEnRep,
   });
 });
 
@@ -639,7 +703,7 @@ router.get('/maintenances/export/csv', async (req, res) => {
   const enginId = String(req.query.enginId || '');
   const dateFrom = String(req.query.dateFrom || '');
   const dateTo = String(req.query.dateTo || '');
-  const where = buildMaintenanceWhere(q, enginId, dateFrom, dateTo);
+  const where = buildMaintenanceWhere(q, enginId, dateFrom, dateTo, String(req.query.kind || ''), String(req.query.chantierId || ''));
 
   const items = await prisma.maintenance.findMany({
     where,
@@ -668,7 +732,7 @@ router.get('/maintenances/export/xlsx', async (req, res) => {
   const enginId = String(req.query.enginId || '');
   const dateFrom = String(req.query.dateFrom || '');
   const dateTo = String(req.query.dateTo || '');
-  const where = buildMaintenanceWhere(q, enginId, dateFrom, dateTo);
+  const where = buildMaintenanceWhere(q, enginId, dateFrom, dateTo, String(req.query.kind || ''), String(req.query.chantierId || ''));
 
   const items = await prisma.maintenance.findMany({
     where,
@@ -703,7 +767,7 @@ router.get('/maintenances', async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(5, Number(req.query.limit) || 20));
   const skip = (page - 1) * limit;
-  const where = buildMaintenanceWhere(q, enginId, dateFrom, dateTo);
+  const where = buildMaintenanceWhere(q, enginId, dateFrom, dateTo, String(req.query.kind || ''), String(req.query.chantierId || ''));
 
   const orderBy =
     sort === 'designation'
@@ -716,7 +780,8 @@ router.get('/maintenances', async (req, res) => {
     prisma.maintenance.findMany({
       where,
       include: {
-        engin: { select: { id: true, brand: true, matricule: true, status: true } },
+        engin: { select: { id: true, code: true, designation: true, genre: true, brand: true, matricule: true, status: true, kind: true } },
+        chantier: { select: { id: true, name: true } },
       },
       orderBy,
       skip,
@@ -756,21 +821,15 @@ router.put('/maintenances/:id', async (req, res) => {
   const existing = await prisma.maintenance.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ message: 'Maintenance introuvable' });
 
-  const data: Record<string, unknown> = {};
-  if (req.body.date) data.date = new Date(req.body.date);
-  if (req.body.designation != null) data.designation = String(req.body.designation).trim();
-  if (req.body.responsible !== undefined) data.responsible = req.body.responsible ? String(req.body.responsible).trim() : null;
-  if (req.body.supervisor !== undefined) data.supervisor = req.body.supervisor ? String(req.body.supervisor).trim() : null;
-  if (req.body.budget !== undefined) data.budget = req.body.budget != null && req.body.budget !== '' ? Number(req.body.budget) : null;
-  if (req.body.counterValue !== undefined) data.counterValue = req.body.counterValue != null && req.body.counterValue !== '' ? Number(req.body.counterValue) : null;
-  if (req.body.remark !== undefined) data.remark = req.body.remark ? String(req.body.remark).trim() : null;
+  const built = await buildMaintenanceData(req.body, existing);
+  if ('error' in built) return res.status(400).json({ message: built.error });
 
   const maintenance = await prisma.maintenance.update({
     where: { id },
-    data,
+    data: built.data,
     include: { engin: { select: { id: true, brand: true, matricule: true, status: true, genre: true } } },
   });
-  await syncMaintenanceMovement(maintenance, req);
+  await syncMaintenanceMovement({ ...maintenance, engin: { brand: maintenance.engin.brand || '', matricule: maintenance.engin.matricule || '' } }, req);
   await audit(req, 'modification', 'Maintenance', id, maintenance.designation);
   res.json(maintenance);
 });
@@ -839,6 +898,134 @@ router.delete('/maintenances/:id/documents/:docId', async (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Affectations chauffeur ↔ véhicule (historisées) ---
+const driverAssignmentInclude = {
+  workforce: {
+    select: { id: true, reference: true, firstName: true, lastName: true, phone1: true, photo: true, category: true },
+  },
+  engin: { select: { id: true, brand: true, genre: true, matricule: true, status: true, photo: true } },
+} as const;
+
+function enginLabel(e: { brand?: string | null; genre?: string | null; matricule?: string | null }) {
+  return [e.matricule, e.brand, e.genre].filter(Boolean).join(' — ') || 'Engin';
+}
+
+router.get('/driver-assignments', async (req, res) => {
+  const workforceId = String(req.query.workforceId || '').trim();
+  const enginId = String(req.query.enginId || '').trim();
+  const current = String(req.query.current || '') === 'true';
+  res.json(
+    await prisma.driverAssignment.findMany({
+      where: {
+        ...(workforceId ? { workforceId } : {}),
+        ...(enginId ? { enginId } : {}),
+        ...(current ? { endDate: null } : {}),
+      },
+      include: driverAssignmentInclude,
+      orderBy: { startDate: 'desc' },
+      take: 500,
+    }),
+  );
+});
+
+router.post('/driver-assignments', async (req, res) => {
+  const workforceId = String(req.body.workforceId || '').trim();
+  const enginId = String(req.body.enginId || '').trim();
+  if (!workforceId || !enginId) return res.status(400).json({ message: 'Chauffeur et véhicule requis' });
+  const [driver, engin] = await Promise.all([
+    prisma.workforce.findUnique({ where: { id: workforceId } }),
+    prisma.engin.findUnique({ where: { id: enginId } }),
+  ]);
+  if (!driver) return res.status(404).json({ message: 'Chauffeur introuvable' });
+  if (!engin) return res.status(404).json({ message: 'Véhicule introuvable' });
+  if (driver.category !== CHAUFFEUR_CATEGORY) {
+    return res.status(400).json({ message: `${driver.firstName} ${driver.lastName} n'est pas enregistré comme chauffeur` });
+  }
+  if (!driver.isActive) return res.status(400).json({ message: 'Chauffeur inactif' });
+  const startDate = req.body.startDate ? new Date(String(req.body.startDate)) : new Date();
+  if (Number.isNaN(startDate.getTime())) return res.status(400).json({ message: 'Date invalide' });
+
+  const same = await prisma.driverAssignment.findFirst({ where: { workforceId, enginId, endDate: null } });
+  if (same) return res.status(400).json({ message: 'Ce chauffeur est déjà affecté à ce véhicule' });
+
+  const open = await prisma.driverAssignment.findMany({
+    where: { endDate: null, OR: [{ enginId }, { workforceId }] },
+  });
+  const tooLate = open.find((a) => a.startDate.getTime() > startDate.getTime());
+  if (tooLate) {
+    return res.status(400).json({
+      message: "La date d'affectation doit être postérieure au début de l'affectation en cours",
+    });
+  }
+  const created = await prisma.$transaction(async (tx) => {
+    if (open.length) {
+      await tx.driverAssignment.updateMany({
+        where: { id: { in: open.map((a) => a.id) } },
+        data: { endDate: startDate },
+      });
+    }
+    return tx.driverAssignment.create({
+      data: {
+        workforceId,
+        enginId,
+        startDate,
+        remark: req.body.remark ? String(req.body.remark).trim() : null,
+      },
+      include: driverAssignmentInclude,
+    });
+  });
+  await audit(
+    req,
+    'affectation',
+    'Engin',
+    enginId,
+    `${driver.firstName} ${driver.lastName} → ${enginLabel(engin)} (${workforceId})`,
+  );
+  await audit(req, 'affectation véhicule', 'Workforce', workforceId, `Véhicule : ${enginLabel(engin)}`);
+  res.status(201).json(created);
+});
+
+router.put('/driver-assignments/:id/end', async (req, res) => {
+  const id = String(req.params.id);
+  const a = await prisma.driverAssignment.findUnique({ where: { id }, include: driverAssignmentInclude });
+  if (!a) return res.status(404).json({ message: 'Affectation introuvable' });
+  if (a.endDate) return res.status(400).json({ message: 'Affectation déjà terminée' });
+  const endDate = req.body.endDate ? new Date(String(req.body.endDate)) : new Date();
+  if (Number.isNaN(endDate.getTime())) return res.status(400).json({ message: 'Date invalide' });
+  if (endDate.getTime() < a.startDate.getTime()) {
+    return res.status(400).json({ message: "La date de fin doit être postérieure à la date d'affectation" });
+  }
+  const updated = await prisma.driverAssignment.update({
+    where: { id },
+    data: { endDate },
+    include: driverAssignmentInclude,
+  });
+  await audit(
+    req,
+    'désaffectation',
+    'Engin',
+    a.enginId,
+    `${a.workforce.firstName} ${a.workforce.lastName} — ${enginLabel(a.engin)} (${a.workforceId})`,
+  );
+  await audit(req, 'fin affectation véhicule', 'Workforce', a.workforceId, `Véhicule : ${enginLabel(a.engin)}`);
+  res.json(updated);
+});
+
+router.delete('/driver-assignments/:id', async (req, res) => {
+  const id = String(req.params.id);
+  const a = await prisma.driverAssignment.findUnique({ where: { id }, include: driverAssignmentInclude });
+  if (!a) return res.status(404).json({ message: 'Affectation introuvable' });
+  await prisma.driverAssignment.delete({ where: { id } });
+  await audit(
+    req,
+    'suppression',
+    'DriverAssignment',
+    id,
+    `${a.workforce.firstName} ${a.workforce.lastName} — ${enginLabel(a.engin)} (${a.workforceId}, ${a.enginId})`,
+  );
+  res.json({ ok: true });
+});
+
 router.get('/', async (req, res) => {
   const q = String(req.query.q || '').trim();
   const status = String(req.query.status || '');
@@ -850,7 +1037,7 @@ router.get('/', async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(5, Number(req.query.limit) || 20));
   const skip = (page - 1) * limit;
-  const where = buildEnginWhere(q, status, genre, alert, ownershipType);
+  const where = buildEnginWhere(q, status, genre, alert, ownershipType, String(req.query.kind || ''));
 
   const orderBy =
     sort === 'brand'
@@ -861,44 +1048,166 @@ router.get('/', async (req, res) => {
           ? { createdAt: order as 'asc' | 'desc' }
           : sort === 'fuelLevel'
             ? { fuelLevel: order as 'asc' | 'desc' }
-            : { matricule: order as 'asc' | 'desc' };
+            : sort === 'code'
+              ? { code: order as 'asc' | 'desc' }
+              : sort === 'designation'
+                ? { designation: order as 'asc' | 'desc' }
+                : { matricule: order as 'asc' | 'desc' };
 
-  const [items, total] = await Promise.all([
+  const [rows, total] = await Promise.all([
     prisma.engin.findMany({
       where,
-      include: { _count: { select: { missions: true, maintenances: true } } },
+      include: {
+        _count: { select: { missions: true, maintenances: true, assignments: true } },
+        driverAssignments: {
+          where: { endDate: null },
+          include: { workforce: { select: { id: true, firstName: true, lastName: true } } },
+          take: 1,
+        },
+        assignments: {
+          where: { returnedAt: null },
+          include: { chantier: { select: { id: true, name: true } } },
+          orderBy: { startDate: 'desc' },
+          take: 5,
+        },
+        rentalSupplierRef: { select: { id: true, companyName: true } },
+      },
       orderBy,
       skip,
       take: limit,
     }),
     prisma.engin.count({ where }),
   ]);
+  const today = todayUtc();
+  const items = rows.map(({ assignments, ...e }) => {
+    const current = assignments.find((a) => isAssignmentActive(a, today)) || null;
+    const isRented = e.ownershipType === 'loue';
+    return {
+      ...e,
+      label: fleetLabel(e),
+      currentAssignment: current
+        ? { id: current.id, chantierId: current.chantierId, chantierName: current.chantier?.name || null, tranche: current.tranche, startDate: current.startDate, endDate: current.endDate }
+        : null,
+      costInfo: isRented
+        ? { dailyRate: rentalDailyRate(e) != null ? round2(rentalDailyRate(e)!) : null }
+        : {
+            annualDepreciation: round2(annualDepreciation(e, 0)),
+            dailyDepreciation: round2(depreciationDailyAt(e, today)),
+            netBookValue: netBookValue(e, today),
+          },
+    };
+  });
   res.json({ items, total, page, limit, pages: Math.ceil(total / limit) || 1 });
 });
 
+const ENGIN_NUMBER_FIELDS = [
+  'fuelLevel',
+  'counterValue',
+  'purchasePrice',
+  'rentalMonthly',
+  'emptyWeight',
+  'totalWeight',
+  'residualValue',
+  'depreciationYears',
+  'usageCostPerHour',
+  'rentalPrice',
+  'rentalDeposit',
+  'rentalTransport',
+  'rentalExtraFees',
+  'rentalInsurance',
+  'rentalTvaRate',
+];
+
+const PROPERTY_FIELDS = ['purchasePrice', 'acquisitionDate', 'residualValue', 'depreciationYears', 'usageCostPerHour'];
+const RENTAL_FIELDS = [
+  'rentalSupplier',
+  'rentalSupplierId',
+  'rentalMonthly',
+  'rentalContractRef',
+  'rentalStart',
+  'rentalEnd',
+  'rentalPrice',
+  'rentalUnit',
+  'rentalDeposit',
+  'rentalTransport',
+  'rentalExtraFees',
+  'rentalInsurance',
+  'rentalTvaRate',
+  'rentalPaymentTerms',
+];
+
+/** Champs modifiables de la fiche (les relations et calculs sont ignorés). */
+const ENGIN_WRITABLE_FIELDS = [
+  'kind', 'designation', 'model', 'acquisitionYear', 'commissioningDate', 'location', 'ownershipType', 'depreciationMethod',
+  'brand', 'genre', 'groupe', 'workPassport', 'matricule', 'chassisNo', 'emptyWeight', 'totalWeight', 'gsmNumber', 'gpsNumber',
+  'gpsMountDate', 'transferDate', 'counterValue', 'counterUnit', 'counterDate', 'status', 'fuelLevel',
+  'insuranceExpiry', 'vignetteExpiry', 'visitExpiry', 'authExpiry',
+  ...PROPERTY_FIELDS,
+  ...RENTAL_FIELDS,
+];
+
 function parseEnginNumbers(data: Record<string, unknown>) {
-  for (const key of ['fuelLevel', 'counterValue', 'purchasePrice', 'rentalMonthly', 'emptyWeight', 'totalWeight']) {
+  for (const key of ENGIN_NUMBER_FIELDS) {
     if (data[key] !== undefined) data[key] = data[key] === '' || data[key] == null ? null : Number(data[key]);
+  }
+  if (data.acquisitionYear !== undefined) {
+    data.acquisitionYear = data.acquisitionYear === '' || data.acquisitionYear == null ? null : Math.trunc(Number(data.acquisitionYear));
   }
 }
 
 function applyOwnershipRules(data: Record<string, unknown>) {
   data.ownershipType = normalizeOwnershipType(data.ownershipType);
-  if (data.ownershipType === 'loue') {
-    data.purchasePrice = null;
-  } else {
-    data.rentalSupplier = null;
-    data.rentalMonthly = null;
+  const cleared = data.ownershipType === 'loue' ? PROPERTY_FIELDS : RENTAL_FIELDS;
+  for (const key of cleared) data[key] = null;
+}
+
+function pickWritable(body: Record<string, unknown>) {
+  const data: Record<string, unknown> = {};
+  for (const key of ENGIN_WRITABLE_FIELDS) {
+    if (body[key] !== undefined) data[key] = typeof body[key] === 'string' ? (body[key] as string).trim() || null : body[key];
   }
+  return data;
+}
+
+async function validateEnginData(data: Record<string, unknown>, existingId?: string) {
+  if (data.kind !== undefined && !(ENGIN_KINDS as readonly string[]).includes(String(data.kind))) return 'Type invalide (engin ou matériel)';
+  if (data.status !== undefined && data.status !== null && !(ENGIN_STATUSES as readonly string[]).includes(String(data.status))) return 'État invalide';
+  if (data.rentalUnit && !(RENTAL_UNITS as readonly string[]).includes(String(data.rentalUnit))) return 'Unité de facturation invalide';
+  if (data.depreciationMethod && !(DEPRECIATION_METHODS as readonly string[]).includes(String(data.depreciationMethod))) return 'Méthode d\'amortissement invalide';
+  for (const key of ENGIN_NUMBER_FIELDS) {
+    const v = data[key];
+    if (v != null && (Number.isNaN(v as number) || (v as number) < 0)) return `Valeur invalide : ${key}`;
+  }
+  if (data.purchasePrice != null && data.residualValue != null && Number(data.residualValue) > Number(data.purchasePrice)) {
+    return 'La valeur résiduelle ne peut pas dépasser le prix d\'acquisition';
+  }
+  if (data.rentalStart && data.rentalEnd && new Date(String(data.rentalEnd)) < new Date(String(data.rentalStart))) {
+    return 'La fin de location doit être postérieure au début';
+  }
+  if (data.matricule) {
+    const dup = await prisma.engin.findFirst({ where: { matricule: String(data.matricule), ...(existingId ? { id: { not: existingId } } : {}) } });
+    if (dup) return `Immatriculation déjà utilisée (${dup.code || dup.brand || dup.id})`;
+  }
+  if (data.rentalSupplierId) {
+    const supplier = await prisma.supplier.findUnique({ where: { id: String(data.rentalSupplierId) }, select: { companyName: true } });
+    if (!supplier) return 'Fournisseur introuvable';
+    data.rentalSupplier = supplier.companyName;
+  }
+  return null;
 }
 
 router.post('/', async (req, res) => {
-  const data = { ...req.body };
+  const data = pickWritable(req.body);
+  data.kind = data.kind || 'engin';
   parseEnginDates(data);
   parseEnginNumbers(data);
   applyOwnershipRules(data);
-  const engin = await prisma.engin.create({ data });
-  await audit(req, 'création', 'Engin', engin.id, `${engin.matricule || ''} ${engin.brand || ''}`.trim());
+  const error = await validateEnginData(data);
+  if (error) return res.status(400).json({ message: error });
+  data.code = await nextReference(data.kind === 'materiel' ? 'MAT' : 'ENG');
+  if (!data.designation) data.designation = [data.genre, data.brand].filter(Boolean).join(' ') || null;
+  const engin = await prisma.engin.create({ data: data as Prisma.EnginUncheckedCreateInput });
+  await audit(req, 'création', 'Engin', engin.id, fleetLabel(engin));
   res.status(201).json(engin);
 });
 
@@ -911,25 +1220,80 @@ router.get('/:id/maintenances', async (req, res) => {
   );
 });
 
+function optNum(v: unknown) {
+  if (v === '' || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function optText(v: unknown) {
+  const s = v == null ? '' : String(v).trim();
+  return s || null;
+}
+
+/** Entretien ou réparation : validation + coût total = pièces + main-d'œuvre si non saisi. */
+async function buildMaintenanceData(body: Record<string, unknown>, existing?: { kind: string; designation: string }) {
+  const kind = body.kind !== undefined ? String(body.kind) : existing?.kind || 'entretien';
+  if (!(MAINTENANCE_KINDS as readonly string[]).includes(kind)) return { error: 'Type invalide (entretien ou réparation)' };
+  const maintenanceType = body.maintenanceType !== undefined ? optText(body.maintenanceType) : undefined;
+  if (maintenanceType && !(MAINTENANCE_TYPES as readonly string[]).includes(maintenanceType)) return { error: 'Nature d\'entretien invalide' };
+  const designation = body.designation !== undefined ? optText(body.designation) : existing?.designation;
+  if (!designation) return { error: 'Désignation obligatoire' };
+
+  const data: Record<string, unknown> = { kind, designation };
+  if (body.date !== undefined) data.date = body.date ? new Date(String(body.date)) : new Date();
+  if (maintenanceType !== undefined) data.maintenanceType = maintenanceType;
+  for (const key of ['breakdownNature', 'description', 'repairer', 'invoiceRef', 'responsible', 'supervisor', 'remark']) {
+    if (body[key] !== undefined) data[key] = optText(body[key]);
+  }
+  for (const key of ['partsCost', 'laborCost', 'downtimeDays', 'counterValue', 'budget']) {
+    if (body[key] !== undefined) {
+      const n = optNum(body[key]);
+      if (n != null && n < 0) return { error: `Valeur négative : ${key}` };
+      data[key] = n;
+    }
+  }
+  if ((data.budget === null || data.budget === undefined) && (data.partsCost != null || data.laborCost != null)) {
+    data.budget = round2(Number(data.partsCost || 0) + Number(data.laborCost || 0));
+  }
+  if (body.allocation !== undefined || body.chantierId !== undefined) {
+    const alloc = await parseAllocation(body);
+    if ('error' in alloc) return { error: alloc.error };
+    data.allocation = alloc.allocation;
+    data.chantierId = alloc.chantierId;
+    data.tranche = alloc.tranche;
+  }
+  return { data };
+}
+
 router.post('/:id/maintenances', async (req, res) => {
   const enginId = String(req.params.id);
+  const engin = await prisma.engin.findUnique({ where: { id: enginId }, select: { id: true } });
+  if (!engin) return res.status(404).json({ message: 'Engin introuvable' });
+  const built = await buildMaintenanceData({ date: req.body.date || new Date().toISOString(), ...req.body });
+  if ('error' in built) return res.status(400).json({ message: built.error });
   const maintenance = await prisma.maintenance.create({
-    data: {
-      enginId,
-      date: req.body.date ? new Date(req.body.date) : new Date(),
-      responsible: req.body.responsible || null,
-      supervisor: req.body.supervisor || null,
-      designation: req.body.designation,
-      budget: req.body.budget ? Number(req.body.budget) : null,
-      counterValue: req.body.counterValue ? Number(req.body.counterValue) : null,
-      remark: req.body.remark || null,
-    },
+    data: { ...(built.data as Prisma.MaintenanceUncheckedCreateInput), enginId },
     include: { engin: { select: { brand: true, matricule: true } } },
   });
-  await prisma.engin.update({ where: { id: enginId }, data: { status: 'en_maintenance' } });
-  await syncMaintenanceMovement(maintenance, req);
-  await audit(req, 'création', 'Maintenance', maintenance.id, maintenance.designation);
+  const nextStatus = maintenance.kind === 'reparation' ? 'en_reparation' : 'en_maintenance';
+  if (req.body.setStatus !== false) await prisma.engin.update({ where: { id: enginId }, data: { status: nextStatus } });
+  await syncMaintenanceMovement({ ...maintenance, engin: { brand: maintenance.engin.brand || '', matricule: maintenance.engin.matricule || '' } }, req);
+  await audit(req, 'création', 'Maintenance', maintenance.id, `${maintenance.kind} — ${maintenance.designation} [${enginId}]`);
   res.status(201).json(maintenance);
+});
+
+/** Remise en service après entretien / réparation : disponible, ou affecté si une affectation est en cours. */
+router.post('/:id/release', async (req, res) => {
+  const id = String(req.params.id);
+  const engin = await prisma.engin.findUnique({ where: { id } });
+  if (!engin) return res.status(404).json({ message: 'Engin introuvable' });
+  if (engin.status === 'restitue') return res.status(400).json({ message: 'Location restituée — remise en service impossible' });
+  await prisma.engin.update({ where: { id }, data: { status: 'disponible' } });
+  await refreshEnginStatus(id);
+  const updated = await prisma.engin.findUnique({ where: { id } });
+  await audit(req, 'remise en service', 'Engin', id, fleetLabel(engin));
+  res.json(updated);
 });
 
 router.get('/:id/history', async (req, res) => {
@@ -962,30 +1326,22 @@ router.get('/:id/fuel', async (req, res) => {
 
 router.post('/:id/fuel', async (req, res) => {
   const enginId = String(req.params.id);
-  const { liters, cost, counterValue, remark, date } = req.body;
-  if (liters == null) return res.status(400).json({ message: 'Litres requis' });
   const engin = await prisma.engin.findUnique({
     where: { id: enginId },
-    select: { brand: true, matricule: true },
+    select: { brand: true, matricule: true, code: true },
   });
-  const log = await prisma.fuelLog.create({
-    data: {
-      enginId,
-      liters: Number(liters),
-      cost: cost != null ? Number(cost) : null,
-      counterValue: counterValue != null ? Number(counterValue) : null,
-      remark: remark || null,
-      date: date ? new Date(date) : new Date(),
-    },
-  });
-  if (counterValue != null) {
+  if (!engin) return res.status(404).json({ message: 'Engin introuvable' });
+  const built = await buildFuelData(req.body);
+  if ('error' in built) return res.status(400).json({ message: built.error });
+  const log = await prisma.fuelLog.create({ data: { ...built.data, enginId } });
+  if (log.counterValue != null) {
     await prisma.engin.update({
       where: { id: enginId },
-      data: { counterValue: Number(counterValue), counterDate: new Date(), fuelLevel: Number(liters) },
+      data: { counterValue: log.counterValue, counterDate: log.date },
     });
   }
-  await syncFuelMovement({ ...log, engin }, req);
-  await audit(req, 'carburant', 'Engin', enginId, `${liters} L`);
+  await syncFuelMovement({ ...log, engin: { brand: engin.brand || '', matricule: engin.matricule || engin.code || '' } }, req);
+  await audit(req, 'carburant', 'FuelLog', log.id, `${log.liters} L [${enginId}]`);
   res.status(201).json(log);
 });
 
@@ -1023,13 +1379,27 @@ router.get('/:id', async (req, res) => {
         take: 20,
         include: { chantier: { select: { id: true, name: true } } },
       },
-      maintenances: { orderBy: { date: 'desc' }, take: 20 },
-      documents: { orderBy: { createdAt: 'desc' }, take: 10 },
-      _count: { select: { missions: true, maintenances: true, documents: true } },
+      maintenances: { orderBy: { date: 'desc' }, take: 50, include: { chantier: { select: { id: true, name: true } } } },
+      documents: { orderBy: { createdAt: 'desc' }, take: 50 },
+      driverAssignments: { include: driverAssignmentInclude, orderBy: { startDate: 'desc' } },
+      rentalSupplierRef: { select: { id: true, companyName: true, phone1: true, email: true } },
+      assignments: {
+        orderBy: { startDate: 'desc' },
+        include: { chantier: { select: { id: true, name: true } } },
+      },
+      _count: { select: { missions: true, maintenances: true, documents: true, assignments: true, usages: true, expenses: true, fuelLogs: true } },
     },
   });
   if (!engin) return res.status(404).json({ message: 'Engin introuvable' });
-  res.json(engin);
+  const today = todayUtc();
+  const current = engin.assignments.find((a) => isAssignmentActive(a, today)) || null;
+  res.json({
+    ...engin,
+    label: fleetLabel(engin),
+    currentAssignment: current
+      ? { id: current.id, chantierId: current.chantierId, chantierName: current.chantier?.name || null, tranche: current.tranche, startDate: current.startDate, endDate: current.endDate }
+      : null,
+  });
 });
 
 router.post('/:id/photo', upload.single('file'), async (req, res) => {
@@ -1058,17 +1428,20 @@ router.delete('/:id/photo', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const id = String(req.params.id);
-  const data = { ...req.body };
-  delete data.id;
-  delete data._count;
-  delete data.missions;
-  delete data.maintenances;
-  delete data.documents;
+  const existing = await prisma.engin.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ message: 'Engin introuvable' });
+  const data = pickWritable(req.body);
   parseEnginDates(data);
   parseEnginNumbers(data);
   if (data.ownershipType !== undefined) applyOwnershipRules(data);
-  const engin = await prisma.engin.update({ where: { id }, data });
-  await audit(req, 'modification', 'Engin', id, `${engin.matricule || ''} ${engin.brand || ''}`.trim());
+  const error = await validateEnginData(data, id);
+  if (error) return res.status(400).json({ message: error });
+  if (data.kind && data.kind !== existing.kind && existing.code?.startsWith(existing.kind === 'materiel' ? 'MAT-' : 'ENG-')) {
+    data.code = await nextReference(data.kind === 'materiel' ? 'MAT' : 'ENG');
+  }
+  const engin = await prisma.engin.update({ where: { id }, data: data as Prisma.EnginUncheckedUpdateInput });
+  await audit(req, 'modification', 'Engin', id, fleetLabel(engin));
+  if (data.status === undefined) await refreshEnginStatus(id);
   res.json(engin);
 });
 
@@ -1077,13 +1450,16 @@ router.delete('/:id', async (req, res) => {
   const motif = String(req.body?.motif || '').trim();
   if (!motif) return res.status(400).json({ message: 'Motif de suppression obligatoire' });
 
-  const [missions, maintenances] = await Promise.all([
+  const [missions, maintenances, assignments, usages, expenses] = await Promise.all([
     prisma.mission.count({ where: { enginId: id } }),
     prisma.maintenance.count({ where: { enginId: id } }),
+    prisma.enginAssignment.count({ where: { enginId: id } }),
+    prisma.enginUsage.count({ where: { enginId: id } }),
+    prisma.enginExpense.count({ where: { enginId: id } }),
   ]);
-  if (missions > 0 || maintenances > 0) {
+  if (missions + maintenances + assignments + usages + expenses > 0) {
     return res.status(400).json({
-      message: `Engin lié à ${missions} mission(s) et ${maintenances} maintenance(s) — suppression impossible`,
+      message: `Engin lié à ${missions} mission(s), ${maintenances} entretien(s)/réparation(s), ${assignments} affectation(s), ${usages} pointage(s) et ${expenses} dépense(s) — suppression impossible (utilisez l’état « Hors service » ou « Restitué »)`,
     });
   }
 

@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -11,9 +11,11 @@ import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
-import { ClientFormFields, emptyClientForm, clientToForm, type ClientFormData } from '../components/ClientFormFields';
+import { ClientFormFields, emptyClientForm, type ClientFormData } from '../components/ClientFormFields';
 import MacAvatar from '../components/MacAvatar';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Client = {
@@ -68,6 +70,7 @@ export default function ClientsPage() {
   const [form, setForm] = useState<ClientFormData>(emptyClientForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Client>();
 
   function buildStatsQuery(overrides?: { q?: string; type?: string; archived?: string }) {
     const qs = new URLSearchParams();
@@ -212,21 +215,26 @@ export default function ClientsPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.clients'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.clients')} — GIC</title></head><body>
-      <h1>${t('pages.clients')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.ref')}</th><th>${t('columns.name')}</th><th>${t('columns.email')}</th><th>${t('columns.phone')}</th><th>${t('columns.cin')}</th><th>${t('columns.type')}</th></tr>
-        ${items.map((c) => `<tr>
-          <td>${c.reference}</td>
-          <td>${c.firstName} ${c.lastName}</td>
-          <td>${c.email}</td>
-          <td>${c.phone1}</td>
-          <td>${c.identityNumber || '—'}</td>
-          <td>${[c.isProspect && t('fields.prospect'), c.isBuyer && t('fields.buyer'), c.isTenant && t('fields.tenant')].filter(Boolean).join(', ')}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    printRows<Client>({
+      title: t('pages.clients'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('common.type'), typeFilter && filters.find((f) => f.id === typeFilter)?.label],
+        [t('common.status'), archivedFilter && archivedFilters.find((f) => f.id === archivedFilter)?.label],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (c) => c.reference },
+        { label: t('columns.name'), value: (c) => `${c.firstName} ${c.lastName}` },
+        { label: t('columns.email'), value: (c) => c.email },
+        { label: t('columns.phone'), value: (c) => c.phone1 },
+        { label: t('columns.cin'), value: (c) => c.identityNumber },
+        { label: t('columns.agent'), value: (c) => (c.agent ? `${c.agent.firstName} ${c.agent.lastName}` : '') },
+        { label: t('columns.type'), value: (c) => [c.isProspect && t('fields.prospect'), c.isBuyer && t('fields.buyer'), c.isTenant && t('fields.tenant')].filter(Boolean).join(', ') },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Client>('/clients', buildListQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const filters = [
@@ -386,6 +394,8 @@ export default function ClientsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -395,6 +405,7 @@ export default function ClientsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.photo')}</Th>
                 <Th mac>{t('columns.reference')}</Th>
                 <Th mac>{t('columns.fullName')}</Th>
@@ -414,6 +425,7 @@ export default function ClientsPage() {
                   className="cursor-pointer"
                   onClick={() => navigate(`/clients/${c.id}`)}
                 >
+                  <SelectTd selection={selection} row={c} />
                   <Td mac>
                     <MacAvatar photo={c.photo} firstName={c.firstName} lastName={c.lastName} />
                   </Td>

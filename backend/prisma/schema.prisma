@@ -290,6 +290,8 @@ model Project {
   tranches      Tranche[]
   properties    Property[]
   chantiers     Chantier[]
+  purchases     Purchase[]
+  enginAssignments EnginAssignment[]
   images        ProjectImage[]
   /// JSON : { custom:[{key,label,required}], labels:{ [standardKey]: string } }
   docChecklist  String?
@@ -539,6 +541,7 @@ model Supplier {
   purchases     Purchase[]
   documents     Document[]
   supplierDocs  SupplierDocument[]
+  rentedEngins  Engin[]
 }
 
 model PurchaseFamily {
@@ -578,12 +581,84 @@ model Purchase {
   chantierId    String?
   chantier      Chantier? @relation(fields: [chantierId], references: [id])
   tranche       String?
-  status        String   @default("brouillon")
+  projectId     String?
+  project       Project? @relation(fields: [projectId], references: [id])
+  /// elabore | soumis | livre | valide | facture | paye | archive
+  status        String   @default("elabore")
+  requester     String?
+  responsible   String?
+  expectedDeliveryDate DateTime?
+  advanceAmount Float    @default(0)
+  advanceMode   String?
+  paidAmount    Float    @default(0)
+  /// non_paye | partiel | paye
+  paymentStatus String   @default("non_paye")
+  /// non_livre | partiel | livre
+  deliveryStatus String  @default("non_livre")
   remark        String?
   proofFile     String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   history       PurchaseHistory[]
+  lines         PurchaseLine[]
+  deliveries    PurchaseDelivery[]
+  payments      PurchasePayment[]
+}
+
+model PurchaseLine {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product    String
+  reference  String?
+  family     String?
+  quantity   Float
+  unit       String?
+  unitPrice  Float
+  tvaRate    Float    @default(20)
+  amountHT   Float    @default(0)
+  tvaAmount  Float    @default(0)
+  amountTTC  Float    @default(0)
+  sortOrder  Int      @default(0)
+  deliveryItems PurchaseDeliveryItem[]
+}
+
+model PurchaseDelivery {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  date       DateTime @default(now())
+  number     String?
+  remark     String?
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  items      PurchaseDeliveryItem[]
+}
+
+model PurchaseDeliveryItem {
+  id               String   @id @default(cuid())
+  deliveryId       String
+  delivery         PurchaseDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  lineId           String
+  line             PurchaseLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  quantity         Float    @default(0)
+  rejectedQuantity Float    @default(0)
+  remark           String?
+}
+
+model PurchasePayment {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  /// avance | complement | solde
+  kind       String   @default("complement")
+  date       DateTime @default(now())
+  amount     Float
+  mode       String?
+  reference  String?
+  remark     String?
+  createdBy  String?
+  createdAt  DateTime @default(now())
 }
 
 model PurchaseHistory {
@@ -619,8 +694,14 @@ model Chantier {
   purchases    Purchase[]
   assignments  WorkforceAssignment[]
   pointages    Pointage[]
+  pointageSessions PointageSession[]
   progress     WorkProgress[]
   missions     Mission[]
+  enginAssignments EnginAssignment[]
+  enginUsages  EnginUsage[]
+  enginExpenses EnginExpense[]
+  enginMaintenances Maintenance[]
+  enginFuelLogs FuelLog[]
   documents    Document[]
   cameras      ChantierCamera[]
   tranches     ChantierTranche[]
@@ -723,6 +804,21 @@ model Workforce {
   pointages     Pointage[]
   generatedDocs WorkforceDocument[]
   payrollRecords WorkforcePayrollRecord[]
+  vehicleAssignments DriverAssignment[]
+  enginUsages   EnginUsage[]
+}
+
+/// Affectation chauffeur ↔ véhicule / engin (historisée)
+model DriverAssignment {
+  id          String    @id @default(cuid())
+  workforceId String
+  workforce   Workforce @relation(fields: [workforceId], references: [id], onDelete: Cascade)
+  enginId     String
+  engin       Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  remark      String?
+  createdAt   DateTime  @default(now())
 }
 
 model WorkforceDocument {
@@ -747,6 +843,22 @@ model WorkforceAssignment {
   endDate      DateTime?
 }
 
+/// Un pointage (opération) = une journée pour un chantier ou une tranche.
+model PointageSession {
+  id          String     @id @default(cuid())
+  chantierId  String
+  chantier    Chantier   @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  /// "" = chantier entier, sinon nom de la tranche
+  tranche     String     @default("")
+  date        DateTime
+  remark      String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  lines       Pointage[]
+
+  @@unique([chantierId, tranche, date])
+}
+
 model Pointage {
   id            String    @id @default(cuid())
   date          DateTime
@@ -754,6 +866,9 @@ model Pointage {
   workforce     Workforce @relation(fields: [workforceId], references: [id])
   chantierId    String?
   chantier      Chantier? @relation(fields: [chantierId], references: [id])
+  sessionId     String?
+  session       PointageSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  tranche       String?
   dayValue      Float     @default(0)
   hours         Float     @default(0)
   totalDay      Float     @default(0)
@@ -786,10 +901,39 @@ model WorkProgress {
 
 model Engin {
   id            String   @id @default(cuid())
+  code          String?  @unique
+  /// engin | materiel
+  kind          String   @default("engin")
+  designation   String?
+  model         String?
+  acquisitionYear   Int?
+  commissioningDate DateTime?
+  location      String?
   photo         String?
   ownershipType String   @default("personnel") // personnel | loue
+  acquisitionDate    DateTime?
+  residualValue      Float?
+  depreciationYears  Float?
+  /// lineaire | degressif
+  depreciationMethod String?  @default("lineaire")
+  /// Coût d'utilisation standard (MAD / heure), hors amortissement
+  usageCostPerHour   Float?
   rentalSupplier String?
+  rentalSupplierId String?
+  rentalSupplierRef Supplier? @relation(fields: [rentalSupplierId], references: [id])
   rentalMonthly  Float?
+  rentalContractRef String?
+  rentalStart    DateTime?
+  rentalEnd      DateTime?
+  rentalPrice    Float?
+  /// jour | semaine | mois | projet | tranche
+  rentalUnit     String?
+  rentalDeposit  Float?
+  rentalTransport Float?
+  rentalExtraFees Float?
+  rentalInsurance Float?
+  rentalTvaRate  Float?
+  rentalPaymentTerms String?
   brand         String?
   genre         String?
   groupe        String?
@@ -819,6 +963,99 @@ model Engin {
   documents     Document[]
   fuelLogs      FuelLog[]
   gpsPositions  GpsPosition[]
+  driverAssignments DriverAssignment[]
+  assignments   EnginAssignment[]
+  usages        EnginUsage[]
+  expenses      EnginExpense[]
+}
+
+/// Affectation d'un engin / matériel à un projet, chantier ou tranche (historisée)
+model EnginAssignment {
+  id            String    @id @default(cuid())
+  enginId       String
+  engin         Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
+  projectId     String?
+  project       Project?  @relation(fields: [projectId], references: [id])
+  chantierId    String?
+  chantier      Chantier? @relation(fields: [chantierId], references: [id])
+  tranche       String?
+  responsible   String?
+  startDate     DateTime
+  endDate       DateTime?
+  /// propriete | location
+  mode          String    @default("propriete")
+  /// journalier | horaire | forfait
+  costMethod    String    @default("journalier")
+  dailyCost     Float     @default(0)
+  hourlyCost    Float?
+  flatAmount    Float?
+  /// Frais ponctuels (transport, montage…) imputés une fois
+  extraCost     Float     @default(0)
+  plannedCost   Float     @default(0)
+  remark        String?
+  returnedAt    DateTime?
+  returnCondition String?
+  returnCounter Float?
+  returnRemark  String?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  usages        EnginUsage[]
+
+  @@index([enginId, startDate])
+  @@index([chantierId])
+}
+
+/// Pointage d'utilisation (heures / kilométrage)
+model EnginUsage {
+  id            String    @id @default(cuid())
+  enginId       String
+  engin         Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
+  assignmentId  String?
+  assignment    EnginAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  date          DateTime
+  chantierId    String?
+  chantier      Chantier? @relation(fields: [chantierId], references: [id])
+  tranche       String?
+  driverId      String?
+  driver        Workforce? @relation(fields: [driverId], references: [id])
+  driverName    String?
+  startTime     String?
+  endTime       String?
+  hours         Float     @default(0)
+  kmStart       Float?
+  kmEnd         Float?
+  counterStart  Float?
+  counterEnd    Float?
+  remark        String?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+
+  @@index([enginId, date])
+}
+
+/// Dépenses liées à l'engin / matériel (hors entretien, réparation, carburant)
+model EnginExpense {
+  id            String    @id @default(cuid())
+  enginId       String
+  engin         Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
+  date          DateTime
+  category      String
+  designation   String
+  amount        Float
+  supplier      String?
+  /// direct = imputée au chantier/tranche ; reparti = répartie selon les affectations
+  allocation    String    @default("reparti")
+  chantierId    String?
+  chantier      Chantier? @relation(fields: [chantierId], references: [id])
+  tranche       String?
+  invoiceRef    String?
+  paymentMode   String?
+  remark        String?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+
+  @@index([enginId, date])
 }
 
 model Maintenance {
@@ -826,6 +1063,20 @@ model Maintenance {
   enginId       String
   engin         Engin    @relation(fields: [enginId], references: [id])
   date          DateTime @default(now())
+  /// entretien | reparation
+  kind          String   @default("entretien")
+  maintenanceType String?
+  breakdownNature String?
+  description   String?
+  repairer      String?
+  partsCost     Float?
+  laborCost     Float?
+  downtimeDays  Float?
+  allocation    String   @default("reparti")
+  chantierId    String?
+  chantier      Chantier? @relation(fields: [chantierId], references: [id])
+  tranche       String?
+  invoiceRef    String?
   responsible   String?
   supervisor    String?
   designation   String
@@ -883,6 +1134,11 @@ model Document {
   chantier    Chantier? @relation(fields: [chantierId], references: [id])
   enginId     String?
   engin       Engin?   @relation(fields: [enginId], references: [id])
+  docNumber   String?
+  docDate     DateTime?
+  amount      Float?
+  uploadedById   String?
+  uploadedByName String?
   createdAt   DateTime @default(now())
 }
 
@@ -938,6 +1194,11 @@ model FuelLog {
   liters       Float
   cost         Float?
   counterValue Float?
+  station      String?
+  allocation   String   @default("reparti")
+  chantierId   String?
+  chantier     Chantier? @relation(fields: [chantierId], references: [id])
+  tranche      String?
   remark       String?
   createdAt    DateTime @default(now())
 }

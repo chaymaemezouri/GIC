@@ -660,6 +660,11 @@ export function StatusPill({ status, quiet = false }: { status: string; quiet?: 
       suspendu: 'mac-status mac-status-warn',
       réservé: 'mac-status mac-status-warn',
       en_mission: 'mac-status mac-status-warn',
+      en_utilisation: 'mac-status mac-status-warn',
+      affecte: 'mac-status mac-status-info',
+      en_reparation: 'mac-status mac-status-danger',
+      hors_service: 'mac-status',
+      restitue: 'mac-status',
       validé: 'mac-status mac-status-info',
       termine: 'mac-status mac-status-info',
       vendu: 'mac-status mac-status-info',
@@ -693,6 +698,11 @@ export function StatusPill({ status, quiet = false }: { status: string; quiet?: 
     réservé: 'bg-gic-amber-soft text-gic-amber',
     en_maintenance: 'bg-gic-coral-soft text-gic-coral',
     en_mission: 'bg-gic-amber-soft text-gic-amber',
+    en_utilisation: 'bg-gic-amber-soft text-gic-amber',
+    affecte: 'bg-gic-violet-soft text-gic-violet',
+    en_reparation: 'bg-gic-coral-soft text-gic-coral',
+    hors_service: 'bg-black/[0.04] text-gic-muted',
+    restitue: 'bg-black/[0.04] text-gic-muted',
     retourné: 'bg-gic-coral-soft text-gic-coral',
     visé: 'bg-gic-pink-soft text-gic-pink',
     contrôlé: 'bg-gic-emerald-soft text-gic-emerald',
@@ -938,7 +948,7 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  size?: 'md' | 'lg';
+  size?: 'md' | 'lg' | 'xl';
 }) {
   const { t } = useI18n();
   useEffect(() => {
@@ -952,7 +962,7 @@ export function Modal({
 
   if (!open) return null;
 
-  const maxW = size === 'lg' ? 'max-w-2xl' : 'max-w-lg';
+  const maxW = size === 'xl' ? 'max-w-5xl' : size === 'lg' ? 'max-w-2xl' : 'max-w-lg';
 
   return createPortal(
     <div

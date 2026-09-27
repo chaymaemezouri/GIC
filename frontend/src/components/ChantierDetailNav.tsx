@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  LayoutDashboard, Info, Layers, Users, Clock, ShoppingCart, Package, Briefcase,
+  LayoutDashboard, Info, Layers, Clock, ShoppingCart, Briefcase,
   Images, FileText, Video, History, Truck,
 } from 'lucide-react';
 import DetailSectionNav, { type DetailNavGroup } from './DetailSectionNav';
@@ -8,8 +8,8 @@ import { useI18n } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 
 export type ChantierTab =
-  | 'vue' | 'infos' | 'tranches' | 'galerie' | 'personnel' | 'engins' | 'pointage'
-  | 'achats' | 'stock' | 'subcontractors' | 'documents' | 'cameras' | 'historique';
+  | 'vue' | 'infos' | 'tranches' | 'galerie' | 'engins' | 'pointage'
+  | 'achats' | 'subcontractors' | 'documents' | 'cameras' | 'historique';
 
 export type ChantierNavItem = {
   id: ChantierTab;
@@ -29,7 +29,6 @@ export function buildChantierNavGroups(
   counts: {
     tranches: number;
     galerie: number;
-    personnel: number;
     engins: number;
     achats: number;
     documents: number;
@@ -50,9 +49,8 @@ export function buildChantierNavGroups(
       label: t('tabs.exploitation'),
       items: [
         { id: 'tranches', label: t('tabs.tranches'), icon: Layers, badge: counts.tranches || undefined },
-        { id: 'personnel', label: t('tabs.workers'), icon: Users, badge: counts.personnel || undefined },
-        { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: counts.engins || undefined },
         { id: 'pointage', label: t('tabs.attendance'), icon: Clock },
+        { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: counts.engins || undefined },
       ],
     },
     {
@@ -60,7 +58,6 @@ export function buildChantierNavGroups(
       label: t('tabs.supply'),
       items: [
         { id: 'achats', label: t('tabs.purchases'), icon: ShoppingCart, badge: counts.achats || undefined },
-        { id: 'stock', label: t('tabs.stock'), icon: Package },
         { id: 'subcontractors', label: t('tabs.subcontractors'), icon: Briefcase },
       ],
     },

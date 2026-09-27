@@ -1,4 +1,4 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -16,6 +16,8 @@ import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacSearch,
   PageHeader, Pagination, Tabs, TableWrap, Td, Th,
 } from '../components/ui';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 
@@ -71,6 +73,7 @@ export default function NotificationsPage() {
   const filtersRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<AppNotification>();
 
   function buildQuery(pageNum = page, overrides?: { q?: string; category?: string; unread?: boolean }) {
     const qs = new URLSearchParams();
@@ -150,6 +153,7 @@ export default function NotificationsPage() {
   }, [showFilters]);
 
   function switchTab(next: TabFilter) {
+    selection.clear();
     setTab(next);
     setPage(1);
     load(1, { unread: next === 'unread' });
@@ -187,18 +191,24 @@ export default function NotificationsPage() {
     if (n.link) navigate(n.link);
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.notifications'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
-      <h1>Notifications — GIC</h1>
-      <table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;width:100%">
-        <tr><th>Date</th><th>Type</th><th>Titre</th><th>Message</th><th>Lu</th></tr>
-        ${items.map((n) => {
-          const meta = getNotificationTypeMeta(n.type);
-          return `<tr><td>${formatNotificationDateTime(n.createdAt)}</td><td>${meta.label}</td><td>${n.title}</td><td>${n.message}</td><td>${n.isRead ? 'Oui' : 'Non'}</td></tr>`;
-        }).join('')}
-      </table>
-    </body></html>`, { grid: false }) });
+  function printList() {
+    printRows<AppNotification>({
+      title: t('pages.notifications'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.type'), categoryFilter && notifCategoryLabel(categoryFilter, t)],
+        [t('listPrint.status'), tab === 'unread' ? t('kpi.unread') : ''],
+      ],
+      columns: [
+        { label: t('columns.type'), value: (n) => notifTypeChipLabel(n.type, t) },
+        { label: t('columns.titleCol'), value: (n) => n.title },
+        { label: t('columns.message'), value: (n) => n.message },
+        { label: t('columns.date'), value: (n) => formatNotificationDateTime(n.createdAt) },
+        { label: t('columns.status'), value: (n) => (n.isRead ? t('status.readOne') : t('status.unreadOne')) },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<AppNotification>('/notifications', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const hasActiveFilters = !!q || !!categoryFilter;
@@ -313,6 +323,8 @@ export default function NotificationsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -322,6 +334,7 @@ export default function NotificationsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.type')}</Th>
                 <Th mac>{t('columns.titleCol')}</Th>
                 <Th mac>{t('columns.message')}</Th>
@@ -340,6 +353,7 @@ export default function NotificationsPage() {
                     className={`cursor-pointer${!n.isRead ? ' bg-[#007aff]/[0.04]' : ''}`}
                     onClick={() => openNotification(n)}
                   >
+                    <SelectTd selection={selection} row={n} />
                     <Td mac>
                       <span className={`mac-chip inline-flex items-center gap-1 ${meta.chip}`}>
                         <Icon size={10} />

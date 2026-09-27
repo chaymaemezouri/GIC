@@ -73,17 +73,29 @@ function NavMenu({ group }: { group: NavGroup }) {
   const groupLabel = t(group.label);
   const groupDesc = t(group.description);
 
-  const isActiveGroup = group.items.some((item) =>
-    item.end
-      ? location.pathname === item.to
-      : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`),
-  );
+  const wide = group.items.length > 8;
+
+  const isActiveGroup = group.items.some((item) => {
+    const path = item.to.split('?')[0];
+    return item.end
+      ? location.pathname === path
+      : location.pathname === path || location.pathname.startsWith(`${path}/`);
+  });
+
+  function isItemActive(item: NavItem, navActive: boolean) {
+    const [path, query] = item.to.split('?');
+    if (!query) return navActive;
+    if (location.pathname !== path) return false;
+    const current = new URLSearchParams(location.search);
+    return [...new URLSearchParams(query)].every(([k, v]) => current.get(k) === v);
+  }
 
   useEffect(() => {
     if (!open || !btnRef.current) return;
     const updatePos = () => {
       const rect = btnRef.current!.getBoundingClientRect();
-      setMenuPos({ top: rect.bottom + 8, left: rect.left });
+      const menuWidth = wide ? 480 : 240;
+      setMenuPos({ top: rect.bottom + 8, left: Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 12)) });
     };
     updatePos();
     window.addEventListener('scroll', updatePos, true);
@@ -138,24 +150,26 @@ function NavMenu({ group }: { group: NavGroup }) {
             </div>
           </div>
           <div className="shell-nav-menu-sep" />
-          {group.items.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                role="menuitem"
-                onClick={() => setOpen(false)}
-                className={({ isActive }) => `shell-nav-menu-item ${isActive ? 'shell-nav-menu-item-active' : ''}`}
-              >
-                <span className="shell-nav-menu-icon-wrap">
-                  <Icon size={15} strokeWidth={1.85} className="shell-nav-menu-icon" />
-                </span>
-                <span className="shell-nav-menu-item-label">{t(item.label)}</span>
-              </NavLink>
-            );
-          })}
+          <div className={wide ? 'shell-nav-menu-grid' : undefined}>
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  role="menuitem"
+                  onClick={() => setOpen(false)}
+                  className={({ isActive }) => `shell-nav-menu-item ${isItemActive(item, isActive) ? 'shell-nav-menu-item-active' : ''}`}
+                >
+                  <span className="shell-nav-menu-icon-wrap">
+                    <Icon size={15} strokeWidth={1.85} className="shell-nav-menu-icon" />
+                  </span>
+                  <span className="shell-nav-menu-item-label">{t(item.label)}</span>
+                </NavLink>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

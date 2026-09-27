@@ -1,5 +1,6 @@
 import { prisma } from './prisma.js';
 import { TASKS_REFERENCE } from './tasks.js';
+import { chantierEnginCosts, trancheEnginCosts } from './enginCosts.js';
 
 type ProgressRow = {
   tranche: string | null;
@@ -62,18 +63,20 @@ function buildGroupes(progress: ProgressRow[], trancheName: string) {
 export async function listChantierTranches(chantierId: string) {
   await syncChantierTranchesFromProgress(chantierId);
 
-  const [tranches, progress, assignments, missions, purchases] = await Promise.all([
+  const [tranches, progress, pointedWorkers, missions, purchases, enginCosts] = await Promise.all([
     prisma.chantierTranche.findMany({ where: { chantierId }, orderBy: { name: 'asc' } }),
     prisma.workProgress.findMany({ where: { chantierId } }),
-    prisma.workforceAssignment.findMany({
-      where: { chantierId },
-      include: { workforce: true },
+    prisma.pointage.findMany({
+      where: { chantierId, tranche: { not: null } },
+      distinct: ['tranche', 'workforceId'],
+      select: { tranche: true, workforceId: true },
     }),
     prisma.mission.findMany({ where: { chantierId }, include: { engin: true } }),
     prisma.purchase.findMany({
       where: { chantierId },
       select: { tranche: true, totalPrice: true },
     }),
+    chantierEnginCosts(chantierId),
   ]);
 
   return tranches.map((t) => {
@@ -87,11 +90,12 @@ export async function listChantierTranches(chantierId: string) {
       estimatedStartDate: t.estimatedStartDate,
       estimatedEndDate: t.estimatedEndDate,
       percent: avg(trancheProgress.map((p) => p.percent)),
-      workersCount: assignments.filter((a) => a.tranche === t.name).length,
+      workersCount: pointedWorkers.filter((p) => p.tranche === t.name).length,
       missionsCount: missions.filter((m) => m.tranche === t.name).length,
       tasksCount: trancheProgress.length,
       purchasesCount: tranchePurchases.length,
       purchasesTotal: tranchePurchases.reduce((s, p) => s + Number(p.totalPrice || 0), 0),
+      enginsCost: enginCosts.byTranche.find((x) => x.tranche === t.name)?.total || 0,
       groupes,
     };
   });
@@ -103,7 +107,7 @@ export async function getChantierTrancheDetail(chantierId: string, trancheId: st
   });
   if (!tranche) return null;
 
-  const [progress, assignments, missions, purchases, stockItems] = await Promise.all([
+  const [progress, assignments, pointedWorkers, missions, purchases] = await Promise.all([
     prisma.workProgress.findMany({
       where: { chantierId, tranche: tranche.name },
     }),
@@ -111,6 +115,11 @@ export async function getChantierTrancheDetail(chantierId: string, trancheId: st
       where: { chantierId, tranche: tranche.name },
       include: { workforce: true },
       orderBy: { startDate: 'desc' },
+    }),
+    prisma.pointage.findMany({
+      where: { chantierId, tranche: tranche.name },
+      distinct: ['workforceId'],
+      select: { workforceId: true },
     }),
     prisma.mission.findMany({
       where: { chantierId, tranche: tranche.name },
@@ -122,16 +131,20 @@ export async function getChantierTrancheDetail(chantierId: string, trancheId: st
       include: { supplier: true },
       orderBy: { date: 'desc' },
     }),
-    prisma.chantierStockItem.findMany({
-      where: { chantierId, tranche: tranche.name },
-      orderBy: { name: 'asc' },
-    }),
   ]);
 
   const orderedProgress = sortProgressByStandardOrder(progress);
 
   const groupes = buildGroupes(orderedProgress as ProgressRow[], tranche.name);
   const purchasesTotal = purchases.reduce((s, p) => s + Number(p.totalPrice || 0), 0);
+  const [enginCosts, enginAssignments] = await Promise.all([
+    trancheEnginCosts(chantierId, tranche.name),
+    prisma.enginAssignment.findMany({
+      where: { chantierId, tranche: tranche.name },
+      include: { engin: { select: { id: true, code: true, designation: true, brand: true, genre: true, matricule: true, kind: true, ownershipType: true, status: true } } },
+      orderBy: { startDate: 'desc' },
+    }),
+  ]);
 
   return {
     id: tranche.id,
@@ -140,17 +153,18 @@ export async function getChantierTrancheDetail(chantierId: string, trancheId: st
     estimatedStartDate: tranche.estimatedStartDate,
     estimatedEndDate: tranche.estimatedEndDate,
     percent: avg(orderedProgress.map((p) => p.percent)),
-    workersCount: assignments.length,
+    workersCount: pointedWorkers.length,
     missionsCount: missions.length,
     tasksCount: orderedProgress.length,
     purchasesCount: purchases.length,
     purchasesTotal,
-    stockCount: stockItems.length,
+    enginsCost: enginCosts.total,
+    enginCosts,
+    enginAssignments,
     groupes,
     progress: orderedProgress,
     assignments,
     missions,
     purchases,
-    stockItems,
   };
 }

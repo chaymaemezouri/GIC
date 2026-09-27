@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -12,8 +12,10 @@ import {
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { RentalFormFields, emptyRentalForm, rentalToForm, rentalFormToBody, type RentalFormData } from '../components/RentalFormFields';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { printRentalReceipt } from '../lib/printRental';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Rental = {
@@ -74,6 +76,7 @@ export default function LocationsPage() {
   const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Rental>();
 
   function buildExportQuery(overrides?: { q?: string; status?: string; clientId?: string }) {
     const qs = new URLSearchParams();
@@ -86,9 +89,7 @@ export default function LocationsPage() {
     return qs.toString();
   }
 
-  function load(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string }) {
-    setLoading(true);
-    setError('');
+  function buildListQuery(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string }) {
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
     const qVal = overrides?.q !== undefined ? overrides.q : q;
@@ -100,9 +101,18 @@ export default function LocationsPage() {
     qs.set('order', order);
     qs.set('page', String(pageNum));
     qs.set('limit', String(PAGE_SIZE));
+    return qs.toString();
+  }
+
+  function load(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string }) {
+    setLoading(true);
+    setError('');
+    const status = overrides?.status !== undefined ? overrides.status : statusFilter;
+    const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
+    const qVal = overrides?.q !== undefined ? overrides.q : q;
     const statsQs = buildExportQuery({ q: qVal, status, clientId });
     Promise.all([
-      api<PaginatedResponse<Rental>>(`/transactions/rentals?${qs}`),
+      api<PaginatedResponse<Rental>>(`/transactions/rentals?${buildListQuery(pageNum, { q: qVal, status, clientId })}`),
       api<Stats>(`/transactions/rentals/stats?${statsQs}`),
     ])
       .then(([res, st]) => {
@@ -224,21 +234,27 @@ export default function LocationsPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.rentals'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.rentals')} — GIC</title></head><body>
-      <h1>${t('pages.rentals')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.ref')}</th><th>${t('columns.tenant')}</th><th>${t('columns.property')}</th><th>${t('columns.monthly')}</th><th>${t('columns.paid')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((r) => `<tr>
-          <td>${r.reference}</td>
-          <td>${r.client.firstName} ${r.client.lastName}</td>
-          <td>${r.property.name}</td>
-          <td>${r.monthlyRent}</td>
-          <td>${r.totalPaid}</td>
-          <td>${r.status}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    const client = clientFilter ? clients.find((c) => c.id === clientFilter) : null;
+    printRows<Rental>({
+      title: t('pages.rentals'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('fields.tenant'), client ? `${client.reference} — ${client.lastName}` : ''],
+        [t('listPrint.status'), statusFilter && statusFilters.find((f) => f.id === statusFilter)?.label],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (r) => r.reference },
+        { label: t('columns.tenant'), value: (r) => `${r.client.firstName} ${r.client.lastName}` },
+        { label: t('columns.property'), value: (r) => r.property.name },
+        { label: t('columns.monthly'), value: (r) => formatMad(r.monthlyRent), align: 'right', total: (rows) => formatMad(rows.reduce((s, r) => s + Number(r.monthlyRent || 0), 0)) },
+        { label: t('columns.paid'), value: (r) => formatMad(r.totalPaid), align: 'right', total: (rows) => formatMad(rows.reduce((s, r) => s + Number(r.totalPaid || 0), 0)) },
+        { label: t('columns.remaining'), value: (r) => formatMad(r.remaining), align: 'right', total: (rows) => formatMad(rows.reduce((s, r) => s + Number(r.remaining || 0), 0)) },
+        { label: t('columns.status'), value: (r) => (r.status ?? '').replace(/_/g, ' ') },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Rental>('/transactions/rentals', buildListQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const statusFilters = [
@@ -411,6 +427,8 @@ export default function LocationsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -420,6 +438,7 @@ export default function LocationsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.tenant')}</Th>
                 <Th mac>{t('columns.property')}</Th>
@@ -433,6 +452,7 @@ export default function LocationsPage() {
             <tbody>
               {items.map((r) => (
                 <tr key={r.id} className="cursor-pointer" onClick={() => navigate(`/locations/${r.id}`)}>
+                  <SelectTd selection={selection} row={r} />
                   <Td mac>
                     <Link to={`/locations/${r.id}`} className="mac-table-ref">{r.reference}</Link>
                   </Td>

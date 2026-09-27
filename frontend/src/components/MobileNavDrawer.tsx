@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { LogOut, SlidersHorizontal, User, X } from 'lucide-react';
 import type { NavGroup, NavItem } from '../lib/navConfig';
 import type { CreateNavGroup } from '../lib/createItems';
@@ -36,14 +36,20 @@ function DrawerLink({
   onNavigate: () => void;
 }) {
   const { t } = useI18n();
+  const location = useLocation();
   const Icon = item.icon;
+  const [path, query] = item.to.split('?');
+  const queryActive =
+    !!query &&
+    location.pathname === path &&
+    [...new URLSearchParams(query)].every(([k, v]) => new URLSearchParams(location.search).get(k) === v);
   return (
     <NavLink
       to={item.to}
       end={item.end}
       onClick={onNavigate}
       className={({ isActive }) =>
-        `shell-mobile-link${isActive ? ' shell-mobile-link-active' : ''}`
+        `shell-mobile-link${(query ? queryActive : isActive) ? ' shell-mobile-link-active' : ''}`
       }
     >
       <span className="shell-mobile-link-icon">

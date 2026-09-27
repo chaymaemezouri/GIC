@@ -1,9 +1,9 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus, Pencil, Users, Download, Printer, Eye, SlidersHorizontal, Check,
-  ArrowUp, ArrowDown, UserCheck, Wallet, BadgeCheck, Link2,
+  ArrowUp, ArrowDown, UserCheck, Wallet, Link2,
 } from 'lucide-react';
 import { api, downloadCsv, downloadExcel, formatMad, type PaginatedResponse } from '../lib/api';
 import {
@@ -13,7 +13,9 @@ import {
 import {
   InternalStaffFormFields, emptyInternalStaffForm, staffFormToBody,
 } from '../components/InternalStaffFormFields';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { roleLabel } from '../lib/permissions';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -72,6 +74,7 @@ export default function EquipeInternePage() {
   const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<StaffRow>();
 
   function buildStatsQuery(overrides?: { active?: string; q?: string }) {
     const qs = new URLSearchParams();
@@ -183,23 +186,48 @@ export default function EquipeInternePage() {
     downloadExcel(`/equipe-interne/export/xlsx?${buildStatsQuery()}`, 'equipe-interne-gic.xlsx');
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.internalTeam'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
-      <h1>${t('pages.internalTeam')} — GIC</h1>
-      <p>${stats.total} collaborateur(s) · ${stats.actifs} actifs</p>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
-        <tr><th>${t('columns.name')}</th><th>${t('columns.function')}</th><th>${t('columns.salary')}</th><th>${t('columns.account')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((s) => `<tr>
-          <td>${s.firstName} ${s.lastName}</td>
-          <td>${s.jobTitle || '—'}</td>
-          <td>${s.monthlySalary ?? 0} MAD</td>
-          <td>${s.user ? t('common.yes') : t('common.no')}</td>
-          <td>${s.isActive ? t('status.active') : t('status.inactive')}</td>
-        </tr>`).join('')}
-      </table>
-    </body></html>`, { grid: false }) });
+  function printList() {
+    printRows<StaffRow>({
+      title: t('pages.internalTeam'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.status'), activeFilter && activeFilters.find((f) => f.id === activeFilter)?.label],
+        [t('listPrint.sort'), `${sortOptions.find((o) => o.value === sort)?.label ?? sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (s) => s.reference || s.email },
+        { label: t('columns.collaborator'), value: (s) => `${s.firstName} ${s.lastName}` },
+        { label: t('columns.function'), value: (s) => s.jobTitle },
+        { label: t('columns.service'), value: (s) => s.department },
+        {
+          label: t('columns.salary'),
+          value: (s) => formatMad(s.monthlySalary),
+          align: 'right',
+          total: (rows) => formatMad(rows.reduce((sum, s) => sum + (s.monthlySalary ?? 0), 0)),
+        },
+        { label: t('columns.cnss'), value: (s) => !!s.declared, align: 'center' },
+        { label: t('columns.platformAccount'), value: (s) => (s.user ? roleLabel(s.user.role) : t('common.none')) },
+        { label: t('columns.status'), value: (s) => (s.isActive ? t('status.active') : t('status.inactive')) },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<StaffRow>('/equipe-interne', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
+
+  const sortOptions = [
+    { value: 'lastName', label: t('common.name') },
+    { value: 'firstName', label: t('fields.firstName') },
+    { value: 'jobTitle', label: t('fields.function') },
+    { value: 'department', label: t('fields.serviceField') },
+    { value: 'monthlySalary', label: t('fields.salary') },
+    { value: 'createdAt', label: t('msg.dateCreated') },
+  ];
+
+  const activeFilters = [
+    { id: '', label: t('common.all') },
+    { id: 'true', label: t('kpi.active') },
+    { id: 'false', label: t('common.inactivePlural') },
+  ];
 
   const hasActiveFilters = !!activeFilter;
 
@@ -244,14 +272,7 @@ export default function EquipeInternePage() {
                 setPage(1);
                 load(1, { sort: v });
               }}
-              options={[
-                { value: 'lastName', label: t('common.name') },
-                { value: 'firstName', label: t('fields.firstName') },
-                { value: 'jobTitle', label: t('fields.function') },
-                { value: 'department', label: t('fields.serviceField') },
-                { value: 'monthlySalary', label: t('fields.salary') },
-                { value: 'createdAt', label: t('msg.dateCreated') },
-              ]}
+              options={sortOptions}
               className="w-40 shrink-0"
             />
             <Btn
@@ -280,11 +301,7 @@ export default function EquipeInternePage() {
               {showFilters && (
                 <div className="mac-filter-menu" role="menu">
                   <p className="mac-filter-menu-section">Statut RH</p>
-                  {[
-                    { id: '', label: t('common.all') },
-                    { id: 'true', label: t('kpi.active') },
-                    { id: 'false', label: t('common.inactivePlural') },
-                  ].map((f) => (
+                  {activeFilters.map((f) => (
                     <button
                       key={f.id || 'all-status'}
                       type="button"
@@ -332,6 +349,8 @@ export default function EquipeInternePage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -341,6 +360,7 @@ export default function EquipeInternePage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.collaborator')}</Th>
                 <Th mac>{t('columns.function')}</Th>
                 <Th mac>{t('columns.salary')}</Th>
@@ -356,6 +376,7 @@ export default function EquipeInternePage() {
                   className="cursor-pointer"
                   onClick={() => navigate(`/equipe-interne/${s.id}`)}
                 >
+                  <SelectTd selection={selection} row={s} />
                   <Td mac className="font-medium">
                     <p>{s.firstName} {s.lastName}</p>
                     <p className="text-[10px] text-gic-muted font-normal">{s.reference || s.email || '—'}</p>

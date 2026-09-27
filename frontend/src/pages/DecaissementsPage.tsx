@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Eye, TrendingDown, ShoppingCart, HardHat, Shield, Wallet, Cog, Fuel, Car,
+  Eye, TrendingDown, ShoppingCart, HardHat, Shield, Wallet, Cog, Fuel, Car, Printer,
 } from 'lucide-react';
-import { api, formatMad, type PaginatedResponse } from '../lib/api';
+import { api, formatDate, formatMad, type PaginatedResponse } from '../lib/api';
+import { fetchAllRows, printRows, type PrintColumn } from '../lib/listPrint';
 import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacDateInput, MacSearch,
   PageHeader, Pagination, StatusPill, TableWrap, Tabs, Td, Th,
 } from '../components/ui';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection, type RowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 
@@ -112,6 +115,85 @@ function entityLink(item: Decaissement) {
   return null;
 }
 
+function sumOf(rows: Decaissement[], pick: (d: Decaissement) => number | undefined) {
+  return formatMad(rows.reduce((s, d) => s + Number(pick(d) || 0), 0));
+}
+
+function moneyColumn(label: string, pick: (d: Decaissement) => number | undefined): PrintColumn<Decaissement> {
+  return { label, value: (d) => formatMad(pick(d) || 0), align: 'right', total: (rows) => sumOf(rows, pick) };
+}
+
+function printColumns(category: DecaissementCategory, t: TranslateFn): PrintColumn<Decaissement>[] {
+  const date: PrintColumn<Decaissement> = { label: t('columns.date'), value: (d) => new Date(d.date).toLocaleDateString('fr-MA') };
+  const status: PrintColumn<Decaissement> = { label: t('columns.status'), value: (d) => (d.status ?? '').replace(/_/g, ' ') };
+  const amount = (d: Decaissement) => d.amount;
+  switch (category) {
+    case 'all':
+      return [
+        date,
+        { label: t('columns.type'), value: (d) => categoryLabel(d.category, t) },
+        { label: t('columns.label'), value: (d) => d.label },
+        { label: t('columns.ref'), value: (d) => d.reference },
+        moneyColumn(t('columns.amount'), amount),
+        { label: t('columns.mode'), value: (d) => d.mode },
+        status,
+      ];
+    case 'main_oeuvre':
+    case 'chauffeurs':
+      return [
+        { label: category === 'chauffeurs' ? t('columns.chauffeur') : t('columns.worker'), value: (d) => d.label },
+        { label: t('columns.period'), value: (d) => d.period },
+        moneyColumn(t('columns.brut'), (d) => d.brut),
+        moneyColumn(t('columns.bonuses'), (d) => d.bonuses),
+        moneyColumn(t('columns.advances'), (d) => d.advances),
+        moneyColumn(t('columns.netDue'), (d) => d.netDue),
+        moneyColumn(t('columns.paid'), (d) => d.amountPaid),
+        {
+          label: t('columns.remaining'),
+          value: (d) => ((d.remaining || 0) > 0 ? formatMad(d.remaining!) : ''),
+          align: 'right',
+          total: (rows) => sumOf(rows, (d) => d.remaining),
+        },
+        status,
+      ];
+    case 'equipe_interne':
+      return [
+        { label: t('columns.collaborator'), value: (d) => d.label },
+        { label: t('columns.period'), value: (d) => d.period },
+        moneyColumn(t('columns.base'), (d) => d.baseSalary),
+        moneyColumn(t('columns.bonuses'), (d) => d.bonuses),
+        moneyColumn(t('columns.advances'), (d) => d.advance),
+        moneyColumn(t('columns.net'), (d) => d.netSalary),
+        moneyColumn(t('columns.paid'), amount),
+        status,
+      ];
+    case 'achat':
+      return [
+        date,
+        { label: t('columns.ref'), value: (d) => d.reference },
+        { label: t('columns.designation'), value: (d) => d.label },
+        { label: t('columns.supplier'), value: (d) => d.supplier },
+        { label: t('columns.mode'), value: (d) => d.mode },
+        moneyColumn(t('columns.amount'), amount),
+        status,
+      ];
+    case 'maintenance':
+      return [
+        date,
+        { label: t('columns.engin'), value: (d) => d.engin },
+        { label: t('columns.intervention'), value: (d) => d.label },
+        moneyColumn(t('columns.budget'), amount),
+      ];
+    default:
+      return [
+        date,
+        { label: t('columns.engin'), value: (d) => d.engin },
+        { label: t('columns.detail'), value: (d) => d.label },
+        moneyColumn(t('columns.cost'), amount),
+      ];
+  }
+}
+
 function CategoryKpis({ category, stats }: { category: DecaissementCategory; stats: Stats }) {
   const { t } = useI18n();
   switch (category) {
@@ -179,10 +261,12 @@ function DecaissementTable({
   category,
   items,
   navigate,
+  selection,
 }: {
   category: DecaissementCategory;
   items: Decaissement[];
   navigate: (path: string) => void;
+  selection: RowSelection<Decaissement>;
 }) {
   const { t } = useI18n();
   if (category === 'all') {
@@ -190,6 +274,7 @@ function DecaissementTable({
       <TableWrap mac>
         <thead>
           <tr>
+            <SelectAllTh selection={selection} rows={items} />
             <Th mac>{t('columns.date')}</Th>
             <Th mac>{t('columns.type')}</Th>
             <Th mac>{t('columns.label')}</Th>
@@ -205,6 +290,7 @@ function DecaissementTable({
             const link = entityLink(d);
             return (
               <tr key={d.id} className={link ? 'cursor-pointer' : undefined} onClick={() => link && navigate(link)}>
+                <SelectTd selection={selection} row={d} />
                 <Td mac className="mac-table-muted">{new Date(d.date).toLocaleDateString('fr-MA')}</Td>
                 <Td mac>
                   <span className="mac-chip mac-chip-gray">{categoryLabel(d.category, t)}</span>
@@ -231,6 +317,7 @@ function DecaissementTable({
       <TableWrap mac>
         <thead>
           <tr>
+            <SelectAllTh selection={selection} rows={items} />
             <Th mac>{personLabel}</Th>
             <Th mac>{t('columns.period')}</Th>
             <Th mac>{t('columns.brut')}</Th>
@@ -248,6 +335,7 @@ function DecaissementTable({
             const link = entityLink(d);
             return (
               <tr key={d.id} className={link ? 'cursor-pointer' : undefined} onClick={() => link && navigate(link)}>
+                <SelectTd selection={selection} row={d} />
                 <Td mac className="font-medium">{d.label}</Td>
                 <Td mac className="mac-table-muted">{d.period || '—'}</Td>
                 <Td mac>{formatMad(d.brut || 0)}</Td>
@@ -273,6 +361,7 @@ function DecaissementTable({
       <TableWrap mac>
         <thead>
           <tr>
+            <SelectAllTh selection={selection} rows={items} />
             <Th mac>{t('columns.collaborator')}</Th>
             <Th mac>{t('columns.period')}</Th>
             <Th mac>{t('columns.base')}</Th>
@@ -289,6 +378,7 @@ function DecaissementTable({
             const link = entityLink(d);
             return (
               <tr key={d.id} className={link ? 'cursor-pointer' : undefined} onClick={() => link && navigate(link)}>
+                <SelectTd selection={selection} row={d} />
                 <Td mac className="font-medium">{d.label}</Td>
                 <Td mac className="mac-table-muted">{d.period || '—'}</Td>
                 <Td mac>{formatMad(d.baseSalary || 0)}</Td>
@@ -313,6 +403,7 @@ function DecaissementTable({
       <TableWrap mac>
         <thead>
           <tr>
+            <SelectAllTh selection={selection} rows={items} />
             <Th mac>{t('columns.date')}</Th>
             <Th mac>{t('columns.ref')}</Th>
             <Th mac>{t('columns.designation')}</Th>
@@ -328,6 +419,7 @@ function DecaissementTable({
             const link = entityLink(d);
             return (
               <tr key={d.id} className={link ? 'cursor-pointer' : undefined} onClick={() => link && navigate(link)}>
+                <SelectTd selection={selection} row={d} />
                 <Td mac className="mac-table-muted">{new Date(d.date).toLocaleDateString('fr-MA')}</Td>
                 <Td mac className="mac-table-muted">{d.reference}</Td>
                 <Td mac>{d.label}</Td>
@@ -351,6 +443,7 @@ function DecaissementTable({
       <TableWrap mac>
         <thead>
           <tr>
+            <SelectAllTh selection={selection} rows={items} />
             <Th mac>{t('columns.date')}</Th>
             <Th mac>{t('columns.engin')}</Th>
             <Th mac>{t('columns.intervention')}</Th>
@@ -363,6 +456,7 @@ function DecaissementTable({
             const link = entityLink(d);
             return (
               <tr key={d.id} className={link ? 'cursor-pointer' : undefined} onClick={() => link && navigate(link)}>
+                <SelectTd selection={selection} row={d} />
                 <Td mac className="mac-table-muted">{new Date(d.date).toLocaleDateString('fr-MA')}</Td>
                 <Td mac>{d.engin || '—'}</Td>
                 <Td mac>{d.label}</Td>
@@ -382,6 +476,7 @@ function DecaissementTable({
     <TableWrap mac>
       <thead>
         <tr>
+          <SelectAllTh selection={selection} rows={items} />
           <Th mac>{t('columns.date')}</Th>
           <Th mac>{t('columns.engin')}</Th>
           <Th mac>{t('columns.detail')}</Th>
@@ -394,6 +489,7 @@ function DecaissementTable({
           const link = entityLink(d);
           return (
             <tr key={d.id} className={link ? 'cursor-pointer' : undefined} onClick={() => link && navigate(link)}>
+              <SelectTd selection={selection} row={d} />
               <Td mac className="mac-table-muted">{new Date(d.date).toLocaleDateString('fr-MA')}</Td>
               <Td mac>{d.engin || '—'}</Td>
               <Td mac>{d.label}</Td>
@@ -433,6 +529,7 @@ export default function DecaissementsPage() {
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Decaissement>();
 
   const tabs = useMemo(
     () => TAB_IDS.map((id) => ({ id, label: tabLabel(id, t) })),
@@ -483,6 +580,7 @@ export default function DecaissementsPage() {
   }, [page, category, q, dateFrom, dateTo]);
 
   function switchCategory(cat: DecaissementCategory) {
+    selection.clear();
     setCategory(cat);
     setPage(1);
     const qs = new URLSearchParams(searchParams);
@@ -500,6 +598,20 @@ export default function DecaissementsPage() {
     carburant: t('msg.emptyDisbursementsFuel'),
   };
 
+  function printList() {
+    printRows<Decaissement>({
+      title: t('pages.disbursements'),
+      filters: [
+        [t('listPrint.type'), category !== 'all' && tabLabel(category, t)],
+        [t('listPrint.search'), q],
+        [t('listPrint.period'), (dateFrom || dateTo) && `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}`],
+      ],
+      columns: printColumns(category, t),
+      rows: selection.count ? selection.rows : () => fetchAllRows<Decaissement>('/finance/decaissements', buildQuery(1)),
+      selectedCount: selection.count,
+    });
+  }
+
   return (
     <div className="space-y-0">
       <PageHeader
@@ -507,7 +619,10 @@ export default function DecaissementsPage() {
         title={t('pages.disbursements')}
         subtitle={t('pages.disbursementsSubtitle')}
         actions={
-          <Btn variant="secondary" icon={Wallet} onClick={() => navigate('/balance')}>{t('actions.viewBalance')}</Btn>
+          <>
+            <Btn variant="secondary" icon={Printer} onClick={printList}>{t('common.print')}</Btn>
+            <Btn variant="secondary" icon={Wallet} onClick={() => navigate('/balance')}>{t('actions.viewBalance')}</Btn>
+          </>
         }
       />
 
@@ -561,13 +676,15 @@ export default function DecaissementsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
         ) : items.length === 0 ? (
           <EmptyState title={emptyMessages[category] || t('msg.emptyDisbursements')} />
         ) : (
-          <DecaissementTable category={category} items={items} navigate={navigate} />
+          <DecaissementTable category={category} items={items} navigate={navigate} selection={selection} />
         )}
         <Pagination page={page} pages={pages} total={total} limit={PAGE_SIZE} onPage={(p) => load(p)} mac />
       </Card>

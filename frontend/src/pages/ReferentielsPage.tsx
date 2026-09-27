@@ -1,4 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { escHtml } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -11,7 +12,9 @@ import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 
@@ -103,6 +106,7 @@ export default function ReferentielsPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<DropdownItem>();
 
   function buildStatsQuery(overrides?: { category?: string; active?: string; q?: string }) {
     const qs = new URLSearchParams();
@@ -281,23 +285,38 @@ export default function ReferentielsPage() {
     downloadExcel(`/dropdowns/export/xlsx?${buildStatsQuery()}`, 'referentiels-gic.xlsx');
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.references'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
-      <h1>${t('pages.referentials')} — GIC</h1>
-      <p>${t('msg.referentialsPrintSummary', { categories: stats.categoriesCount, active: stats.actifs, total: stats.total })}</p>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
-        <tr><th>${t('columns.category')}</th><th>${t('columns.displayLabel')}</th><th>${t('columns.technicalValue')}</th><th>${t('columns.sortOrder')}</th><th>${t('fields.active')}</th></tr>
-        ${items.map((i) => `<tr>
-          <td>${categoryLabel(i.category, predefined, stats.categories)}</td>
-          <td>${i.label}</td>
-          <td>${i.value}</td>
-          <td>${i.sortOrder}</td>
-          <td>${i.isActive ? t('fields.yes') : t('fields.no')}</td>
-        </tr>`).join('')}
-      </table>
-    </body></html>`, { grid: false }) });
+  function printList() {
+    const sortLabel = sortOptions.find((o) => o.value === sort)?.label || sort;
+    printRows<DropdownItem>({
+      title: t('pages.referentials'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('columns.category'), categoryFilter && categoryLabel(categoryFilter, predefined, stats.categories)],
+        [t('listPrint.status'), activeFilters.find((f) => f.id === activeFilter)?.label],
+        [t('listPrint.sort'), `${sortLabel} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.category'), value: (i) => categoryLabel(i.category, predefined, stats.categories) },
+        { label: t('columns.displayLabel'), value: (i) => i.label },
+        { label: t('columns.technicalValue'), value: (i) => i.value },
+        { label: t('columns.sortOrder'), value: (i) => i.sortOrder, align: 'right' },
+        { label: t('columns.status'), value: (i) => (i.isActive ? t('status.activeFeminine') : t('status.inactiveFeminine')) },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<DropdownItem>('/dropdowns', buildQuery(1)),
+      selectedCount: selection.count,
+      extraHtml: selection.count
+        ? undefined
+        : () => `<p>${escHtml(t('msg.referentialsPrintSummary', { categories: stats.categoriesCount, active: stats.actifs, total: stats.total }))}</p>`,
+    });
   }
+
+  const sortOptions = [
+    { value: 'category', label: t('columns.category') },
+    { value: 'label', label: t('columns.displayLabel') },
+    { value: 'value', label: t('columns.technicalValue') },
+    { value: 'sortOrder', label: t('columns.sortOrder') },
+    { value: 'createdAt', label: t('columns.createdAtSort') },
+  ];
 
   const allCategories = [
     ...predefined,
@@ -355,13 +374,7 @@ export default function ReferentielsPage() {
                 setPage(1);
                 load(1, { sort: v });
               }}
-              options={[
-                { value: 'category', label: t('columns.category') },
-                { value: 'label', label: t('columns.displayLabel') },
-                { value: 'value', label: t('columns.technicalValue') },
-                { value: 'sortOrder', label: t('columns.sortOrder') },
-                { value: 'createdAt', label: t('columns.createdAtSort') },
-              ]}
+              options={sortOptions}
               className="w-36 shrink-0"
             />
             <Btn
@@ -470,6 +483,8 @@ export default function ReferentielsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -479,6 +494,7 @@ export default function ReferentielsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.category')}</Th>
                 <Th mac>{t('columns.displayLabel')}</Th>
                 <Th mac>{t('columns.technicalValue')}</Th>
@@ -494,6 +510,7 @@ export default function ReferentielsPage() {
                   className="cursor-pointer"
                   onClick={() => openEdit(i)}
                 >
+                  <SelectTd selection={selection} row={i} />
                   <Td mac>
                     <span className="font-medium">{categoryLabel(i.category, predefined, stats.categories)}</span>
                     <span className="block text-[10px] text-gic-muted font-mono">{i.category}</span>

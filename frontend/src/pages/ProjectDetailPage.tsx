@@ -1579,7 +1579,12 @@ export default function ProjectDetailPage() {
         }
       >
         <form id="edit-proj-form" onSubmit={saveProject}>
-          <ProjectFormFields form={form} setForm={setForm} locations={locations} />
+          <ProjectFormFields
+            form={form}
+            setForm={setForm}
+            locations={locations}
+            onLocationCreated={(loc) => setLocations((prev) => [...prev, loc])}
+          />
         </form>
       </Modal>
 

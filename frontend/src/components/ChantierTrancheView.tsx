@@ -2,19 +2,21 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Plus, Users, Truck, HardHat, UserMinus, Layers, ShoppingCart, Pencil, Trash2, Clock, ChevronRight, Package,
+  Plus, Users, Truck, HardHat, Layers, ShoppingCart, Pencil, Trash2, Clock, ChevronRight,
 } from 'lucide-react';
-import { api, fetchWorkforceList, fetchSupplierList, formatDate, formatMad } from '../lib/api';
+import { api, fetchSupplierList, formatDate, formatMad } from '../lib/api';
+import { chantierDateError } from './ChantierFormFields';
 import {
-  Btn, Input, MacActionBtn, Modal, PageBackLink, StatusPill, TableWrap, Td, Th,
+  Btn, Input, MacActionBtn, Modal, PageBackLink, TableWrap, Td, Th,
 } from './ui';
 import ProgressSteps from './ProgressSteps';
 import { TaskPhaseFields } from './TaskPhaseFields';
 import { emptyPhaseForm, ensureAnchoredPhases, validatePhaseForm, type TaskPhaseInput } from '../lib/progressPhases';
 import { workforceDetailPathForCategory } from '../lib/workforceScope';
-import { PurchaseFormFields, emptyPurchaseForm, type PurchaseFormData } from './PurchaseFormFields';
-import { EntityPickerPanel, enginToPickerItem, workforceToPickerItem } from './EntityPickerPanel';
-import { ChantierStockPanel } from './ChantierExtraPanels';
+import { PurchaseFormFields, emptyPurchaseForm, purchaseFormToBody, validatePurchaseForm, type PurchaseFormData } from './PurchaseFormFields';
+import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from './PurchaseBadges';
+import { EntityPickerPanel, enginToPickerItem } from './EntityPickerPanel';
+import { SiteEnginsPanel, type SiteEnginCosts } from './engins/SiteEngins';
 import { useI18n } from '../i18n/I18nContext';
 
 export type TrancheListItem = {
@@ -29,11 +31,12 @@ export type TrancheListItem = {
   tasksCount: number;
   purchasesCount: number;
   purchasesTotal: number;
-  stockCount?: number;
+  enginsCost?: number;
   groupes: { name: string; percent: number; etages: string[] }[];
 };
 
 export type TrancheDetail = TrancheListItem & {
+  enginCosts?: SiteEnginCosts;
   progress: Array<{
     id: string;
     taskName: string;
@@ -71,12 +74,14 @@ export type TrancheDetail = TrancheListItem & {
     designation: string;
     totalPrice: number;
     status: string;
+    paymentStatus?: string;
+    deliveryStatus?: string;
     date: string;
     supplier?: { companyName?: string } | null;
   }>;
 };
 
-type TrancheTab = 'avancement' | 'personnel' | 'engins' | 'achats' | 'stock' | 'pointage';
+type TrancheTab = 'avancement' | 'engins' | 'achats' | 'pointage';
 
 export function ChantierTranchesList({
   chantierId,
@@ -131,6 +136,7 @@ export function ChantierTranchesList({
             const meta = [
               tr.workersCount > 0 ? t('msg.workersCount', { count: tr.workersCount }) : null,
               tr.missionsCount > 0 ? t('msg.equipmentCount', { count: tr.missionsCount }) : null,
+              tr.enginsCost ? t('fleet.hints.trancheEnginCost', { amount: formatMad(tr.enginsCost) }) : null,
               tr.tasksCount > 0 ? t('msg.tasksCount', { count: tr.tasksCount }) : null,
               tr.purchasesCount > 0 ? t('msg.purchasesCount', { count: tr.purchasesCount }) : null,
             ].filter(Boolean).join(' · ');
@@ -179,13 +185,25 @@ export function ChantierTrancheView({
   trancheId,
   chantierName,
   engins,
+  tranches = [],
+  onSelectTranche,
   onBack,
   onRefresh,
 }: {
   chantierId: string;
   trancheId: string;
   chantierName: string;
-  engins: Array<{ id: string; brand?: string; matricule?: string; genre?: string; status?: string; photo?: string | null }>;
+  engins: Array<{
+    id: string;
+    brand?: string;
+    matricule?: string;
+    genre?: string;
+    status?: string;
+    photo?: string | null;
+    driverAssignments?: Array<{ workforce?: { firstName: string; lastName: string } | null }>;
+  }>;
+  tranches?: TrancheListItem[];
+  onSelectTranche?: (trancheId: string) => void;
   onBack: () => void;
   onRefresh: () => void;
 }) {
@@ -194,13 +212,7 @@ export function ChantierTrancheView({
   const [tab, setTab] = useState<TrancheTab>('avancement');
   const [error, setError] = useState('');
   const [savingProgress, setSavingProgress] = useState<string | null>(null);
-  const [assignOpen, setAssignOpen] = useState(false);
   const [missionOpen, setMissionOpen] = useState(false);
-  const [workforce, setWorkforce] = useState<any[]>([]);
-  const [assignForm, setAssignForm] = useState({ workforceId: '', functionRole: '' });
-  const [assignSelectedIds, setAssignSelectedIds] = useState<string[]>([]);
-  const [assignMissionFilter, setAssignMissionFilter] = useState<'all' | 'mission' | 'free'>('all');
-  const [assignPickerQuery, setAssignPickerQuery] = useState('');
   const [missionPickerQuery, setMissionPickerQuery] = useState('');
   const [missionForm, setMissionForm] = useState({ enginId: '', mission: '', driverName: '', usage: '' });
   const [addTaskForm, setAddTaskForm] = useState({
@@ -239,7 +251,6 @@ export function ChantierTrancheView({
   useEffect(() => {
     setAutoSeedDone(false);
     load();
-    fetchWorkforceList().then(setWorkforce).catch(() => {});
     fetchSupplierList().then(setSuppliers).catch(() => {});
     api('/achats/families').then(setFamilies).catch(() => {});
     api<string[]>('/chantiers/tasks/reference').then(setTaskRef).catch(() => {});
@@ -270,13 +281,6 @@ export function ChantierTrancheView({
 
   function loadTranchePointages() {
     if (!detail) return;
-    const workerIds = new Set(
-      detail.assignments.map((a) => a.workforce.id).filter(Boolean) as string[],
-    );
-    if (workerIds.size === 0) {
-      setPointages([]);
-      return;
-    }
     setPointageLoading(true);
     const qs = new URLSearchParams({
       chantierId,
@@ -341,6 +345,10 @@ export function ChantierTrancheView({
 
   async function saveTrancheEdit(e: React.FormEvent) {
     e.preventDefault();
+    if (chantierDateError(editForm.estimatedStartDate, editForm.estimatedEndDate)) {
+      await appAlert(t('inline.dateOrderError'));
+      return;
+    }
     try {
       await api(`/chantiers/${chantierId}/tranches/${trancheId}`, {
         method: 'PUT',
@@ -492,69 +500,10 @@ export function ChantierTrancheView({
     }
   }
 
-  function openAssign() {
-    setAssignForm({ workforceId: '', functionRole: '' });
-    setAssignSelectedIds([]);
-    setAssignMissionFilter('all');
-    setAssignPickerQuery('');
-    setAssignOpen(true);
-  }
-
-  function toggleAssignSelect(workforceId: string) {
-    setAssignSelectedIds((prev) => (
-      prev.includes(workforceId) ? prev.filter((id) => id !== workforceId) : [...prev, workforceId]
-    ));
-  }
-
   function openMission() {
     setMissionForm({ enginId: '', mission: '', driverName: '', usage: '' });
     setMissionPickerQuery('');
     setMissionOpen(true);
-  }
-
-  async function assignWorker(e: React.FormEvent) {
-    e.preventDefault();
-    if (!detail || assignSelectedIds.length === 0) return;
-    const failures: string[] = [];
-    for (const workforceId of assignSelectedIds) {
-      const worker = workforce.find((w) => w.id === workforceId);
-      try {
-        await api(`/chantiers/${chantierId}/assign`, {
-          method: 'POST',
-          body: JSON.stringify({
-            workforceId,
-            functionRole: assignForm.functionRole || worker?.category || null,
-            tranche: detail.name,
-          }),
-        });
-      } catch (err) {
-        const name = worker ? `${worker.firstName} ${worker.lastName}` : workforceId;
-        failures.push(`${name}: ${err instanceof Error ? err.message : t('common.error')}`);
-      }
-    }
-    if (failures.length === assignSelectedIds.length) {
-      await appAlert(failures.join('\n'));
-      return;
-    }
-    if (failures.length > 0) {
-      await appAlert(t('msg.someAssignmentsFailed', { failures: failures.join('\n') }));
-    }
-    setAssignOpen(false);
-    setAssignForm({ workforceId: '', functionRole: '' });
-    setAssignSelectedIds([]);
-    load();
-    onRefresh();
-  }
-
-  async function unassignWorker(assignmentId: string) {
-    if (!await appConfirm(t('msg.confirmUnassignWorker'))) return;
-    try {
-      await api(`/chantiers/${chantierId}/assign/${assignmentId}`, { method: 'DELETE' });
-      load();
-      onRefresh();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
   }
 
   async function createMission(e: React.FormEvent) {
@@ -590,25 +539,15 @@ export function ChantierTrancheView({
   async function savePurchase(e: React.FormEvent) {
     e.preventDefault();
     if (!detail) return;
+    const invalid = validatePurchaseForm(purchaseForm, t);
+    if (invalid) {
+      await appAlert(invalid);
+      return;
+    }
     try {
       await api('/achats/purchases', {
         method: 'POST',
-        body: JSON.stringify({
-          designation: purchaseForm.designation,
-          family: purchaseForm.family || null,
-          unit: purchaseForm.unit || null,
-          quantity: purchaseForm.quantity,
-          unitPrice: purchaseForm.unitPrice,
-          tvaRate: purchaseForm.tvaRate || '20',
-          supplierId: purchaseForm.supplierId || null,
-          chantierId,
-          tranche: detail.name,
-          paymentMode: purchaseForm.paymentMode,
-          author: purchaseForm.author || null,
-          remark: purchaseForm.remark || null,
-          date: purchaseForm.date,
-          invoiced: purchaseForm.invoiced === 'true',
-        }),
+        body: JSON.stringify({ ...purchaseFormToBody(purchaseForm), chantierId, tranche: detail.name }),
       });
       setPurchaseOpen(false);
       setPurchaseForm(emptyPurchaseForm());
@@ -634,22 +573,40 @@ export function ChantierTrancheView({
 
   const tabs: { id: TrancheTab; label: string; icon: typeof HardHat; badge?: number }[] = [
     { id: 'avancement', label: t('tabs.progress'), icon: HardHat, badge: detail.tasksCount },
-    { id: 'personnel', label: t('tabs.workers'), icon: Users, badge: detail.workersCount },
-    { id: 'pointage', label: t('tabs.attendance'), icon: Clock },
-    { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: detail.missionsCount },
+    { id: 'pointage', label: t('tabs.attendance'), icon: Clock, badge: detail.workersCount },
+    { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: detail.enginCosts?.byEngin?.length || detail.missionsCount },
     { id: 'achats', label: t('tabs.purchases'), icon: ShoppingCart, badge: detail.purchasesCount },
-    { id: 'stock', label: t('tabs.stock'), icon: Package, badge: detail.stockCount || undefined },
   ];
 
   return (
     <div className="tranche-detail">
       <div className="tranche-detail-toolbar">
-        <PageBackLink
-          onClick={onBack}
-          label={t('detail.backToTranches')}
-          iconOnly={false}
-          className="mac-page-back-labeled"
-        />
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <PageBackLink
+            onClick={onBack}
+            label={t('detail.backToTranches')}
+            iconOnly={false}
+            className="mac-page-back-labeled"
+          />
+          {tranches.length > 1 && onSelectTranche && (
+            <label className="tranche-switcher" title={t('trancheNav.switchTranche')}>
+              <Layers size={13} aria-hidden />
+              <select
+                value={trancheId}
+                onChange={(e) => {
+                  if (e.target.value && e.target.value !== trancheId) onSelectTranche(e.target.value);
+                }}
+                aria-label={t('trancheNav.switchTranche')}
+              >
+                {tranches.map((tr) => (
+                  <option key={tr.id} value={tr.id}>
+                    {tr.name} · {tr.percent}%
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
         <div className="tranche-detail-toolbar-actions">
           <MacActionBtn icon={Pencil} tone="orange" title={t('actions.editTranche')} onClick={openEditTranche} />
           <MacActionBtn icon={Trash2} tone="red" title={t('actions.deleteTranche')} onClick={deleteTranche} />
@@ -688,7 +645,11 @@ export function ChantierTrancheView({
           </div>
           <div className="tranche-detail-metric">
             <Truck size={14} aria-hidden />
-            <span>{t('msg.equipmentCount', { count: detail.missionsCount })}</span>
+            <span>
+              {detail.enginsCost
+                ? t('fleet.hints.trancheEnginCost', { amount: formatMad(detail.enginsCost) })
+                : t('msg.equipmentCount', { count: detail.missionsCount })}
+            </span>
           </div>
           <div className="tranche-detail-metric">
             <ShoppingCart size={14} aria-hidden />
@@ -797,56 +758,15 @@ export function ChantierTrancheView({
         </div>
       )}
 
-      {tab === 'personnel' && (
-        <div>
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <p className="text-[13px] font-medium text-gic-ink">{t('detail.workersOnTranche')}</p>
-            <div className="flex items-center gap-2">
-              <Link to={`/pointage?chantierId=${chantierId}&tranche=${encodeURIComponent(detail.name)}`} className="mac-chip mac-chip-blue !gap-1">
-                <Clock size={11} /> {t('tabs.attendance')}
-              </Link>
-              <Btn icon={Plus} onClick={openAssign}>{t('common.assign')}</Btn>
-            </div>
-          </div>
-          {detail.assignments.length === 0 ? (
-            <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptyWorkersOnTranche')}</p>
-          ) : (
-            <TableWrap mac>
-              <thead>
-                <tr>
-                  <Th mac>{t('columns.name')}</Th>
-                  <Th mac>{t('columns.category')}</Th>
-                  <Th mac>{t('columns.function')}</Th>
-                  <Th mac>{t('columns.group')}</Th>
-                  <Th mac>{t('columns.phoneFull')}</Th>
-                  <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
-                </tr>
-              </thead>
-              <tbody>
-                {detail.assignments.map((a) => (
-                  <tr key={a.id}>
-                    <Td mac>
-                      <Link to={workforceDetailPathForCategory(a.workforce.category, a.workforce.id)} className="mac-table-ref font-medium">
-                        {a.workforce.firstName} {a.workforce.lastName}
-                      </Link>
-                    </Td>
-                    <Td mac className="mac-table-muted capitalize">{a.workforce.category || '—'}</Td>
-                    <Td mac>{a.functionRole || '—'}</Td>
-                    <Td mac className="mac-table-muted">{a.workforce.groupe || '—'}</Td>
-                    <Td mac className="mac-table-muted">{a.workforce.phone1 || '—'}</Td>
-                    <Td mac className="mac-td-actions">
-                      <MacActionBtn icon={UserMinus} tone="red" title={t('common.remove')} onClick={() => unassignWorker(a.id)} />
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </TableWrap>
-          )}
-        </div>
-      )}
-
       {tab === 'engins' && (
-        <div>
+        <SiteEnginsPanel
+          chantierId={chantierId}
+          tranche={detail.name}
+          costs={detail.enginCosts}
+          onChanged={() => { load(); onRefresh(); }}
+          missionsCount={detail.missions.length}
+          missions={
+        <div className="p-3">
           <div className="flex items-center justify-between gap-2 mb-3">
             <p className="text-[13px] font-medium text-gic-ink inline-flex items-center gap-1.5">
               <Truck size={15} className="text-[#007aff]" /> {t('detail.equipmentMissionsOnTranche')}
@@ -878,6 +798,8 @@ export function ChantierTrancheView({
             </TableWrap>
           )}
         </div>
+          }
+        />
       )}
 
       {tab === 'achats' && (
@@ -899,6 +821,8 @@ export function ChantierTrancheView({
                   <Th mac>{t('columns.designation')}</Th>
                   <Th mac>{t('columns.supplier')}</Th>
                   <Th mac>{t('columns.amount')}</Th>
+                  <Th mac>{t('purchase.list.payment')}</Th>
+                  <Th mac>{t('purchase.list.delivery')}</Th>
                   <Th mac>{t('columns.status')}</Th>
                 </tr>
               </thead>
@@ -912,7 +836,9 @@ export function ChantierTrancheView({
                     <Td mac>{p.designation}</Td>
                     <Td mac className="mac-table-muted">{p.supplier?.companyName || '—'}</Td>
                     <Td mac>{formatMad(p.totalPrice)}</Td>
-                    <Td mac><StatusPill status={p.status} quiet /></Td>
+                    <Td mac>{p.paymentStatus ? <PurchasePaymentPill status={p.paymentStatus} /> : '—'}</Td>
+                    <Td mac>{p.deliveryStatus ? <PurchaseDeliveryPill status={p.deliveryStatus} /> : '—'}</Td>
+                    <Td mac><PurchaseStatusPill status={p.status} /></Td>
                   </tr>
                 ))}
               </tbody>
@@ -921,26 +847,20 @@ export function ChantierTrancheView({
         </div>
       )}
 
-      {tab === 'stock' && (
-        <ChantierStockPanel
-          chantierId={chantierId}
-          tranches={[detail.name]}
-          filterTranche={detail.name}
-          lockTranche
-        />
-      )}
-
       {tab === 'pointage' && (
         <div>
           <div className="flex items-center justify-between gap-2 mb-3">
             <p className="text-[13px] font-medium text-gic-ink">{t('detail.attendanceOnTranche')}</p>
-            <Link to={`/pointage?chantierId=${chantierId}&tranche=${encodeURIComponent(detail.name)}`}>
-              <Btn variant="secondary" icon={Clock}>{t('actions.enterAttendance')}</Btn>
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link to={`/pointage?chantierId=${chantierId}&tranche=${encodeURIComponent(detail.name)}&tab=synthese`}>
+                <Btn variant="secondary" icon={Users}>{t('pointageMgmt.byWorkerTab')}</Btn>
+              </Link>
+              <Link to={`/pointage?chantierId=${chantierId}&tranche=${encodeURIComponent(detail.name)}&tab=gestion`}>
+                <Btn icon={Clock}>{t('actions.enterAttendance')}</Btn>
+              </Link>
+            </div>
           </div>
-          {detail.workersCount === 0 ? (
-            <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.assignWorkersForAttendance')}</p>
-          ) : pointageLoading ? (
+          {pointageLoading ? (
             <p className="py-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
           ) : pointages.length === 0 ? (
             <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptyAttendanceOnTranche')}</p>
@@ -977,41 +897,6 @@ export function ChantierTrancheView({
         </div>
       </div>
 
-      <Modal open={assignOpen} title={t('detail.assignFor', { name: detail.name })} onClose={() => setAssignOpen(false)} size="lg"
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setAssignOpen(false)}>{t('common.cancel')}</Btn>
-            <Btn form="tranche-assign-form" type="submit" disabled={assignSelectedIds.length === 0}>
-              {assignSelectedIds.length > 0 ? t('actions.assignWithCount', { count: assignSelectedIds.length }) : t('common.assign')}
-            </Btn>
-          </>
-        }
-      >
-        <form id="tranche-assign-form" onSubmit={assignWorker} className="grid gap-3">
-          <p className="text-[11px] text-gic-muted">{t('detail.trancheLabel')} <strong>{detail.name}</strong></p>
-          <EntityPickerPanel
-            items={workforce.filter((w) => w.isActive !== false).map(workforceToPickerItem)}
-            excludeIds={workforce
-              .filter((w) => (w.assignments as any[])?.some((a) => a.chantierId === chantierId || a.chantier?.id === chantierId))
-              .map((w) => w.id)}
-            multiple
-            selectedIds={assignSelectedIds}
-            onToggleSelect={toggleAssignSelect}
-            query={assignPickerQuery}
-            onQueryChange={setAssignPickerQuery}
-            open={assignOpen}
-            showMissionFilter
-            missionFilter={assignMissionFilter}
-            onMissionFilterChange={setAssignMissionFilter}
-            searchPlaceholder={t('fields.filterNameRefCinCat')}
-            emptyMessage={t('msg.emptyWorkersAvailable')}
-            countLabel={(n) => t('msg.workersAvailableCount', { count: n })}
-            ariaLabel={t('tabs.workers')}
-          />
-          <Input label={t('fields.functionOnTranche')} value={assignForm.functionRole} onChange={(e) => setAssignForm({ ...assignForm, functionRole: e.target.value })} placeholder={t('fields.functionOnTranchePlaceholder')} />
-        </form>
-      </Modal>
-
       <Modal open={missionOpen} title={t('detail.missionEquipmentFor', { name: detail.name })} onClose={() => setMissionOpen(false)}
         footer={<><Btn variant="secondary" onClick={() => setMissionOpen(false)}>{t('common.cancel')}</Btn><Btn form="tranche-mission-form" type="submit">{t('actions.create')}</Btn></>}
       >
@@ -1020,7 +905,14 @@ export function ChantierTrancheView({
           <EntityPickerPanel
             items={engins.map(enginToPickerItem)}
             selectedId={missionForm.enginId || null}
-            onSelect={(enginId) => setMissionForm({ ...missionForm, enginId })}
+            onSelect={(enginId) => {
+              const driver = engins.find((e) => e.id === enginId)?.driverAssignments?.[0]?.workforce;
+              setMissionForm({
+                ...missionForm,
+                enginId,
+                driverName: missionForm.driverName || (driver ? `${driver.firstName} ${driver.lastName}` : ''),
+              });
+            }}
             query={missionPickerQuery}
             onQueryChange={setMissionPickerQuery}
             open={missionOpen}
@@ -1035,8 +927,8 @@ export function ChantierTrancheView({
         </form>
       </Modal>
 
-      <Modal open={purchaseOpen} title={t('detail.newPurchaseFor', { name: detail.name })} onClose={() => setPurchaseOpen(false)} size="lg"
-        footer={<><Btn variant="secondary" onClick={() => setPurchaseOpen(false)}>{t('common.cancel')}</Btn><Btn form="tranche-purchase-form" type="submit">{t('actions.create')}</Btn></>}
+      <Modal open={purchaseOpen} title={t('detail.newPurchaseFor', { name: detail.name })} onClose={() => setPurchaseOpen(false)} size="xl"
+        footer={<><Btn variant="secondary" onClick={() => setPurchaseOpen(false)}>{t('common.cancel')}</Btn><Btn form="tranche-purchase-form" type="submit">{t('msg.createPurchase')}</Btn></>}
       >
         <form id="tranche-purchase-form" onSubmit={savePurchase}>
           <PurchaseFormFields
@@ -1045,6 +937,8 @@ export function ChantierTrancheView({
             suppliers={suppliers}
             chantiers={[{ id: chantierId, name: chantierName }]}
             families={families}
+            lockChantier={chantierId}
+            lockedChantierName={chantierName}
             lockTranche={detail.name}
             lockedTrancheName={detail.name}
           />
@@ -1092,7 +986,7 @@ export function ChantierTrancheView({
       </Modal>
 
       <Modal open={editOpen} title={t('detail.trancheInfoTitle')} onClose={() => setEditOpen(false)}
-        footer={<><Btn variant="secondary" onClick={() => setEditOpen(false)}>{t('common.cancel')}</Btn><Btn form="edit-tranche-form" type="submit">{t('common.save')}</Btn></>}
+        footer={<><Btn variant="secondary" onClick={() => setEditOpen(false)}>{t('common.cancel')}</Btn><Btn form="edit-tranche-form" type="submit" disabled={chantierDateError(editForm.estimatedStartDate, editForm.estimatedEndDate)}>{t('common.save')}</Btn></>}
       >
         <form id="edit-tranche-form" onSubmit={saveTrancheEdit} className="grid gap-3 sm:grid-cols-2">
           <Input className="sm:col-span-2" label={t('fields.nameRequired')} required value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
@@ -1112,9 +1006,13 @@ export function ChantierTrancheView({
           <Input
             label={t('fields.estimatedEndDate')}
             type="date"
+            min={editForm.estimatedStartDate || undefined}
             value={editForm.estimatedEndDate}
             onChange={(e) => setEditForm({ ...editForm, estimatedEndDate: e.target.value })}
           />
+          {chantierDateError(editForm.estimatedStartDate, editForm.estimatedEndDate) && (
+            <p className="sm:col-span-2 text-[11px] text-gic-coral">{t('inline.dateOrderError')}</p>
+          )}
           <p className="sm:col-span-2 text-[10px] text-gic-muted">{t('msg.trancheRenameHint')}</p>
         </form>
       </Modal>

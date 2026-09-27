@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -13,7 +13,9 @@ import {
 } from '../components/ui';
 import { AgentFormFields, emptyAgentForm, agentToForm, type AgentFormData } from '../components/AgentFormFields';
 import MacAvatar from '../components/MacAvatar';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Agent = {
@@ -58,6 +60,7 @@ export default function AgentsPage() {
   const [form, setForm] = useState<AgentFormData>(emptyAgentForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Agent>();
 
   function buildQuery(pageNum = page) {
     const qs = new URLSearchParams();
@@ -195,22 +198,34 @@ export default function AgentsPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.agents'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.agents')} — GIC</title></head><body>
-      <h1>${t('pages.agents')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.ref')}</th><th>${t('columns.name')}</th><th>${t('columns.email')}</th><th>${t('columns.phoneFull')}</th><th>${t('columns.clients')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((a) => `<tr>
-          <td>${a.reference || '—'}</td>
-          <td>${a.firstName} ${a.lastName}</td>
-          <td>${a.email || '—'}</td>
-          <td>${a.phone1 || '—'}</td>
-          <td>${a._count?.clients ?? 0}</td>
-          <td>${a.isActive === false ? 'Inactif' : 'Actif'}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    printRows<Agent>({
+      title: t('pages.agents'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('columns.clients'), linkedFilter && linkedFilters.find((f) => f.id === linkedFilter)?.label],
+        [t('listPrint.status'), activeFilter && activeFilters.find((f) => f.id === activeFilter)?.label],
+        [t('listPrint.sort'), sortOptions.find((o) => o.value === sort)?.label],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (a) => a.reference },
+        { label: t('columns.agent'), value: (a) => `${a.firstName} ${a.lastName}` },
+        { label: t('columns.email'), value: (a) => a.email },
+        { label: t('columns.phoneFull'), value: (a) => a.phone1 },
+        { label: t('columns.clients'), value: (a) => a._count?.clients ?? 0, align: 'right' },
+        { label: t('columns.status'), value: (a) => (a.isActive === false ? t('status.inactive') : t('status.active')) },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Agent>('/agents', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
+
+  const sortOptions = [
+    { value: 'lastName', label: t('msg.nameAZ') },
+    { value: 'reference', label: t('fields.reference') },
+    { value: 'clients', label: t('msg.moreClients') },
+    { value: 'createdAt', label: t('msg.newestFirst') },
+  ];
 
   const linkedFilters = [
     { id: '', label: t('common.all') },
@@ -263,12 +278,7 @@ export default function AgentsPage() {
             <MacSelect
               value={sort}
               onChange={setSort}
-              options={[
-                { value: 'lastName', label: t('msg.nameAZ') },
-                { value: 'reference', label: t('fields.reference') },
-                { value: 'clients', label: t('msg.moreClients') },
-                { value: 'createdAt', label: t('msg.newestFirst') },
-              ]}
+              options={sortOptions}
               className="w-44 shrink-0"
             />
             <div ref={filtersRef} className="relative shrink-0 z-50">
@@ -352,6 +362,8 @@ export default function AgentsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -361,6 +373,7 @@ export default function AgentsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.photo')}</Th>
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.agent')}</Th>
@@ -374,6 +387,7 @@ export default function AgentsPage() {
             <tbody>
               {items.map((a) => (
                 <tr key={a.id} className="cursor-pointer" onClick={() => navigate(`/agents/${a.id}`)}>
+                  <SelectTd selection={selection} row={a} />
                   <Td mac>
                     <MacAvatar photo={a.photo} firstName={a.firstName} lastName={a.lastName} />
                   </Td>

@@ -2,8 +2,9 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, Users, UserCircle, Building2, MapPin, Handshake, Home,
   Wallet, CreditCard, Calculator, Truck, ShoppingCart, HardHat, Cog,
-  ClipboardList, Clock, Banknote, TrendingUp, TrendingDown, FolderOpen, Settings, Shield,
+  Clock, Banknote, TrendingUp, TrendingDown, FolderOpen, Settings, Shield,
   BookOpen, UserCog, FileSearch, Bell, Car, Coins, Contact,
+  Package, CalendarRange, PieChart,
 } from 'lucide-react';
 import { isNavPathVisible } from './featureFlags';
 
@@ -40,7 +41,6 @@ export const navbarGroups: NavGroup[] = [
       { to: '/equipe-interne', label: 'nav.internalTeam', icon: Shield },
       { to: '/main-oeuvre', label: 'nav.workforce', icon: HardHat },
       { to: '/chauffeurs', label: 'nav.drivers', icon: Car },
-      { to: '/pointage', label: 'nav.attendance', icon: Clock },
     ],
   },
   {
@@ -49,8 +49,8 @@ export const navbarGroups: NavGroup[] = [
     description: 'nav.group.realEstateDesc',
     icon: Building2,
     items: [
-      { to: '/biens', label: 'nav.properties', icon: Building2 },
       { to: '/projets', label: 'nav.projects', icon: MapPin },
+      { to: '/biens', label: 'nav.properties', icon: Building2 },
       { to: '/ventes', label: 'nav.sales', icon: Handshake },
       { to: '/locations', label: 'nav.rentals', icon: Home },
     ],
@@ -82,13 +82,16 @@ export const navbarGroups: NavGroup[] = [
   },
   {
     id: 'log',
-    label: 'nav.group.logistics',
-    description: 'nav.group.logisticsDesc',
+    label: 'fleet.nav.group',
+    description: 'fleet.nav.groupDesc',
     icon: Truck,
     items: [
-      { to: '/engins', label: 'nav.equipment', icon: Truck },
-      { to: '/maintenance', label: 'nav.maintenance', icon: Cog },
-      { to: '/missions', label: 'nav.missions', icon: ClipboardList },
+      { to: '/engins/tableau-de-bord', label: 'fleet.nav.dashboard', icon: PieChart },
+      { to: '/engins?kind=engin', label: 'fleet.nav.referentielEngins', icon: Truck },
+      { to: '/engins?kind=materiel', label: 'fleet.nav.referentielMateriels', icon: Package },
+      { to: '/engins/affectations', label: 'fleet.nav.affectations', icon: CalendarRange },
+      { to: '/engins/entretien', label: 'fleet.nav.entretien', icon: Cog },
+      { to: '/engins/couts', label: 'fleet.nav.couts', icon: Calculator },
     ],
   },
   {
@@ -142,4 +145,5 @@ export function splitNavbarGroups(groups: NavGroup[]) {
 /** Liens directs navbar — hors menus déroulants (à côté d'Accueil) */
 export const navbarDirectLinks: NavItem[] = [
   { to: '/chantiers', label: 'nav.sites', icon: HardHat },
+  { to: '/pointage', label: 'nav.attendance', icon: Clock },
 ];

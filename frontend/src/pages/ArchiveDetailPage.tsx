@@ -1,9 +1,10 @@
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, Trash2, Send, Inbox, Info as InfoIcon, History
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Pencil, Trash2, Send, Inbox, Info as InfoIcon, History, Printer
 } from 'lucide-react';
 import { api, formatDate, uploadForm } from '../lib/api';
+import { escHtml, printWithCompany } from '../lib/companyPrint';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
@@ -140,6 +141,36 @@ export default function ArchiveDetailPage() {
     }
   }
 
+  function printFiche() {
+    if (!entry || !id) return;
+    const directionText = entry.direction === 'sortant'
+      ? t('fields.outgoing')
+      : entry.direction === 'entrant' ? t('fields.incoming') : entry.direction || '—';
+    const row = (label: string, value: unknown) => `<p><span class="k">${escHtml(label)} :</span> ${escHtml(value || '—')}</p>`;
+    void printWithCompany({
+      title: `${t('kpi.bureauOrdre')} — ${entry.registerNo ? `N° ${entry.registerNo}` : entry.subject}`,
+      subtitle: entry.subject,
+      bodyHtml: async () => {
+        const rows = history.length ? history : await api<any[]>(`/documents/archives/${id}/history`).catch(() => []);
+        return `<div class="grid">
+          ${row(t('fields.registerNo'), entry.registerNo)}
+          ${row(t('fields.date'), formatDate(entry.date))}
+          ${row(t('fields.subject'), entry.subject)}
+          ${row(t('fields.direction'), directionText)}
+          ${row(t('fields.sender'), entry.sender)}
+          ${row(t('fields.recipient'), entry.recipient)}
+          ${row(t('fields.category'), entry.category)}
+          ${row(t('fields.file'), entry.filePath ? entry.filePath.split(/[\\/]/).pop() : '')}
+        </div>
+        ${entry.remark ? `<h2>${escHtml(t('fields.remark'))}</h2><p class="intro">${escHtml(entry.remark)}</p>` : ''}
+        <h2>${escHtml(t('tabs.history'))}</h2>
+        ${rows.length ? `<table><thead><tr><th>${escHtml(t('columns.date'))}</th><th>${escHtml(t('columns.action'))}</th><th>${escHtml(t('columns.user'))}</th><th>${escHtml(t('columns.details'))}</th></tr></thead><tbody>${rows
+          .map((h) => `<tr><td>${escHtml(formatDate(h.createdAt))}</td><td>${escHtml(h.action || '—')}</td><td>${escHtml(h.user ? `${h.user.firstName} ${h.user.lastName}` : '—')}</td><td>${escHtml(h.details || '—')}</td></tr>`)
+          .join('')}</tbody></table>` : `<p class="muted">${escHtml(t('msg.emptyHistory'))}</p>`}`;
+      },
+    });
+  }
+
   if (!entry && !error) {
     return <p className="text-[12px] text-gic-muted p-6 text-center">{t('msg.loadingBureau')}</p>;
   }
@@ -182,6 +213,7 @@ export default function ArchiveDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
+          <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
           <Btn icon={Send} onClick={() => { setEmailOpen(true); setEmailTo(entry!.recipient || ''); setEmailBody(''); }}>{t('fields.email')}</Btn>
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />

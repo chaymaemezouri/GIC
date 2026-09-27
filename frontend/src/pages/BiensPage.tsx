@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -16,6 +16,8 @@ import {
   type BienFormData, type FloorOption,
 } from '../components/BienFormFields';
 import MacAvatar from '../components/MacAvatar';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Property = {
@@ -91,6 +93,7 @@ export default function BiensPage() {
   const [form, setForm] = useState<BienFormData>(emptyBienForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Property>();
 
   function buildStatsQuery(overrides?: { q?: string; status?: string; projectId?: string }) {
     const qs = new URLSearchParams();
@@ -248,21 +251,40 @@ export default function BiensPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.properties'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.properties')} — GIC</title></head><body>
-      <h1>${t('pages.properties')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.ref')}</th><th>${t('columns.property')}</th><th>${t('columns.project')}</th><th>${t('columns.surface')}</th><th>${t('columns.price')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((p) => `<tr>
-          <td>${p.reference}</td>
-          <td>${p.name}</td>
-          <td>${p.project?.name || '—'}</td>
-          <td>${p.surface ? p.surface + ' m²' : '—'}</td>
-          <td>${p.price ? p.price + ' MAD' : '—'}</td>
-          <td>${p.status}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    printRows<Property>({
+      title: t('pages.properties'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('columns.project'), projectFilter && projects.find((p) => p.id === projectFilter)?.name],
+        [t('listPrint.status'), statusFilter && statusFilters.find((f) => f.id === statusFilter)?.label],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (p) => p.reference },
+        { label: t('columns.property'), value: (p) => p.name },
+        { label: t('columns.project'), value: (p) => p.project?.name },
+        { label: t('columns.surface'), value: (p) => (p.surface ? `${p.surface} m²` : ''), align: 'right' },
+        {
+          label: t('columns.price'),
+          value: (p) => (p.price ? formatMad(p.price) : ''),
+          align: 'right',
+          total: (rows) => formatMad(rows.reduce((s, p) => s + Number(p.price || 0), 0)),
+        },
+        { label: t('columns.status'), value: (p) => (p.status ?? '').replace(/_/g, ' ') },
+        {
+          label: t('columns.client'),
+          value: (p) => {
+            const buyer = p.sales?.[0]?.client;
+            const tenant = p.rentals?.[0]?.client;
+            const client = buyer || tenant;
+            if (!client) return '';
+            return `${client.firstName} ${client.lastName} (${buyer ? t('fields.buyer') : t('fields.tenant')})`;
+          },
+        },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Property>('/immobilier/properties', buildListQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const statusFilters = [
@@ -428,6 +450,8 @@ export default function BiensPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -437,6 +461,7 @@ export default function BiensPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.photo')}</Th>
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.property')}</Th>
@@ -460,6 +485,7 @@ export default function BiensPage() {
                   className="cursor-pointer"
                   onClick={() => navigate(`/biens/${p.id}`)}
                 >
+                  <SelectTd selection={selection} row={p} />
                   <Td mac>
                     <MacAvatar photo={p.photo} name={p.name} fallback={p.reference.slice(-2)} />
                   </Td>

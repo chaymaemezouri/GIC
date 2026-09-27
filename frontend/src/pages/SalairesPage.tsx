@@ -1,15 +1,18 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { escHtml } from '../lib/companyPrint';
+import { fetchAllRows, printRows, type PrintColumn } from '../lib/listPrint';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Download, Printer, Eye, Wallet, Users, TrendingUp, Clock, Banknote,
   SlidersHorizontal, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
-import { api, downloadCsv, fetchChantierList, formatMad, type PaginatedResponse } from '../lib/api';
+import { api, downloadCsv, fetchChantierList, formatDate, formatMad, type PaginatedResponse } from '../lib/api';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Tabs, Td, Th,
 } from '../components/ui';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import {
   scopeQueryParams,
@@ -120,6 +123,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
   const [payAmount, setPayAmount] = useState('');
   const [payMode, setPayMode] = useState('especes');
   const [payLoading, setPayLoading] = useState(false);
+  const selection = useRowSelection<SalaryRow>();
 
   function buildQuery(pageNum = page, overrides?: {
     q?: string; category?: string; active?: string; sort?: string; order?: SortOrder;
@@ -201,6 +205,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
       .then((s) => setCategories(s.categories || []))
       .catch(() => {});
     fetchChantierList<{ id: string; name: string }>().then(setChantiers).catch(() => {});
+    selection.clear();
   }, [mode]);
 
   useEffect(() => {
@@ -272,27 +277,69 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
     downloadCsv(`/chantiers/salaries/export/csv?${buildStatsQuery()}`, exportName);
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.salaries'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.salaries')} GIC</title></head><body>
-      <h1>${t('pages.salaries')} — GIC</h1>
-      <p>${t('fields.period')} : ${dateFrom} → ${dateTo}</p>
-      <p>${t('columns.net')} : ${formatMad(stats.totalNet)} · ${t('columns.brut')} : ${formatMad(stats.totalBrut)}</p>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.worker')}</th><th>${t('columns.category')}</th><th>${t('fields.daysCount')}</th><th>${t('columns.brut')}</th><th>${t('columns.bonuses')}</th><th>${t('columns.advances')}</th><th>${t('columns.net')}</th></tr>
-        ${items.map((r) => `<tr>
-          <td>${r.firstName} ${r.lastName}</td>
-          <td>${r.category || '—'}</td>
-          <td>${r.salary.totalDays.toFixed(2)}</td>
-          <td>${r.salary.brut}</td>
-          <td>${r.salary.bonuses}</td>
-          <td>${r.salary.advances}</td>
-          <td>${r.salary.net}</td>
-        </tr>`).join('')}
-      </table>
-      <p style="margin-top:16px;font-size:11px">${t('msg.salaryFormulaHint')}</p>
-    </body></html>`, { grid: false }) });
+  function isMonthly(r: SalaryRow) {
+    return r.salaryPeriod === 'mois' || r.salary?.salaryPeriod === 'mois';
   }
+
+  function printList() {
+    const chantier = chantiers.find((c) => c.id === chantierFilter);
+    const money = (label: string, pick: (r: SalaryRow) => number): PrintColumn<SalaryRow> => ({
+      label,
+      value: (r) => formatMad(pick(r)),
+      align: 'right',
+      total: (rows) => formatMad(rows.reduce((s, r) => s + Number(pick(r) || 0), 0)),
+    });
+    printRows<SalaryRow>({
+      title: pageTitle,
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.period'), (dateFrom || dateTo) && `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}`],
+        [t('actions.payment'), payFilter && PAY_TABS.find((p) => p.id === payFilter)?.label],
+        [t('listPrint.status'), activeFilters.find((f) => f.id === activeFilter)?.label],
+        [t('fields.category'), showCategory && categoryFilter],
+        [t('fields.chantier'), chantierFilter && (chantier?.name ?? chantierFilter)],
+        [t('listPrint.sort'), `${sortOptions.find((o) => o.value === sort)?.label ?? sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        {
+          label: personLabel,
+          value: (r) => [
+            `${r.firstName} ${r.lastName}`,
+            r.chantier?.name,
+            isMonthly(r) && r.bankName ? `${r.bankName}${r.rib ? ` · ${r.rib}` : ''}` : '',
+          ].filter(Boolean).join(' — '),
+        },
+        ...(showCategory ? [{ label: t('columns.category'), value: (r: SalaryRow) => r.category }] : []),
+        { label: t('columns.mode'), value: (r) => (isMonthly(r) ? t('columns.month') : t('msg.periodDay')) },
+        { label: t('columns.salary'), value: (r) => formatMad(isMonthly(r) ? (r.monthlySalary || r.salary.brut) : r.dailySalary), align: 'right' },
+        { label: t('columns.workDays'), value: (r) => (isMonthly(r) ? '' : r.salary.totalDays.toFixed(2)), align: 'right' },
+        money(t('columns.brut'), (r) => r.salary.brut),
+        money(t('columns.bonuses'), (r) => r.salary.bonuses),
+        money(t('columns.advances'), (r) => r.salary.advances),
+        money(t('columns.netDue'), (r) => r.salary.netDue),
+        money(t('columns.paid'), (r) => r.salary.amountPaid),
+        {
+          label: t('columns.remaining'),
+          value: (r) => (r.salary.remaining > 0 ? formatMad(r.salary.remaining) : ''),
+          align: 'right',
+          total: (rows) => formatMad(rows.reduce((s, r) => s + Math.max(0, Number(r.salary.remaining || 0)), 0)),
+        },
+        { label: t('columns.status'), value: (r) => (r.salary.status ?? '').replace(/_/g, ' ') },
+        { label: t('columns.pointageShort'), value: (r) => (isMonthly(r) ? '' : r.salary.pointageCount), align: 'center' },
+      ],
+      extraHtml: () => `<p class="muted">${escHtml(t('msg.salaryFormulaHint'))}</p>`,
+      rows: selection.count ? selection.rows : () => fetchAllRows<SalaryRow>('/chantiers/salaries', buildQuery(1)),
+      selectedCount: selection.count,
+    });
+  }
+
+  const sortOptions = [
+    { value: 'lastName', label: t('columns.name') },
+    { value: 'net', label: t('columns.net') },
+    { value: 'brut', label: t('columns.brut') },
+    { value: 'totalDays', label: t('fields.daysCount') },
+    { value: 'dailySalary', label: t('fields.dailySalaryShort') },
+  ];
 
   const activeFilters = [
     { id: 'true', label: t('kpi.active') },
@@ -394,13 +441,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
               <MacSelect
                 value={sort}
                 onChange={setSort}
-                options={[
-                  { value: 'lastName', label: t('columns.name') },
-                  { value: 'net', label: t('columns.net') },
-                  { value: 'brut', label: t('columns.brut') },
-                  { value: 'totalDays', label: t('fields.daysCount') },
-                  { value: 'dailySalary', label: t('fields.dailySalaryShort') },
-                ]}
+                options={sortOptions}
                 className="w-40"
               />
               <MacActionBtn
@@ -544,6 +585,8 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -553,6 +596,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{personLabel}</Th>
                 {showCategory && <Th mac>{t('columns.category')}</Th>}
                 <Th mac>{t('columns.mode')}</Th>
@@ -574,6 +618,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
                 const isMois = r.salaryPeriod === 'mois' || r.salary?.salaryPeriod === 'mois';
                 return (
                 <tr key={r.id} className="cursor-pointer" onClick={() => openDetail(r)}>
+                  <SelectTd selection={selection} row={r} />
                   <Td mac>
                     <Link to={workforceDetailPathForCategory(r.category, r.id)} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>
                       {r.firstName} {r.lastName}

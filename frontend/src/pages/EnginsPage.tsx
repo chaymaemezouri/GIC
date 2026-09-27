@@ -1,40 +1,61 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows, type PrintColumn } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Plus, Pencil, Eye, Download, Printer, Trash2, Truck, Wrench, MapPin, AlertTriangle, ClipboardList,
-  SlidersHorizontal, Check, ArrowUp, ArrowDown,
+  Plus, Pencil, Eye, Download, Printer, Trash2, Truck, Wrench, Activity, AlertTriangle, ClipboardList,
+  SlidersHorizontal, Check, ArrowUp, ArrowDown, CheckCircle2,
 } from 'lucide-react';
 import {
-  api, downloadCsv, downloadExcel, fetchChantierList, fetchEnginList, formatDate, type PaginatedResponse,
+  api, downloadCsv, downloadExcel, fetchChantierList, formatDate, formatMad, type PaginatedResponse,
 } from '../lib/api';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
-  Modal, PageHeader, Pagination, Select, StatusPill, Tabs, TableWrap, Td, Th,
+  Modal, PageHeader, Pagination, Select, Tabs, TableWrap, Td, Th,
 } from '../components/ui';
-import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, enginOwnershipLabel, type EnginFormData } from '../components/EnginFormFields';
+import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, type EnginFormData } from '../components/EnginFormFields';
+import { DeleteMotifModal, FleetStatusPill, invalidateFleetRefs, useFleetRefs } from '../components/engins/FleetCommon';
+import { MaintenanceModal } from '../components/engins/MaintenanceModal';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import {
+  ENGIN_STATUSES, chantierTrancheLabel, enginLabel, errorMessage, fleetStatusLabel, formatMad2, kindLabel, ownershipLabel,
+} from '../lib/engins';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Engin = {
   id: string;
+  code?: string | null;
+  designation?: string | null;
+  kind?: string | null;
+  label?: string;
   ownershipType?: string;
-  rentalSupplier?: string;
-  rentalMonthly?: number;
-  brand?: string;
-  genre?: string;
-  matricule?: string;
-  gpsNumber?: string;
-  fuelLevel?: number;
+  rentalSupplier?: string | null;
+  rentalSupplierRef?: { id: string; companyName: string } | null;
+  rentalContractRef?: string | null;
+  rentalPrice?: number | null;
+  rentalUnit?: string | null;
+  rentalStart?: string | null;
+  rentalEnd?: string | null;
+  purchasePrice?: number | null;
+  acquisitionDate?: string | null;
+  depreciationYears?: number | null;
+  brand?: string | null;
+  genre?: string | null;
+  model?: string | null;
+  matricule?: string | null;
+  location?: string | null;
   status: string;
-  counterValue?: number;
-  counterUnit?: string;
-  insuranceExpiry?: string;
-  vignetteExpiry?: string;
-  visitExpiry?: string;
-  authExpiry?: string;
-  _count?: { missions: number; maintenances: number };
+  counterValue?: number | null;
+  counterUnit?: string | null;
+  insuranceExpiry?: string | null;
+  vignetteExpiry?: string | null;
+  visitExpiry?: string | null;
+  authExpiry?: string | null;
+  currentAssignment?: { id: string; chantierId: string | null; chantierName: string | null; tranche: string | null; startDate: string; endDate: string | null } | null;
+  costInfo?: { dailyRate?: number | null; annualDepreciation?: number; dailyDepreciation?: number; netBookValue?: number | null };
+  _count?: { missions: number; maintenances: number; assignments: number };
 };
 
 type Mission = {
@@ -43,23 +64,28 @@ type Mission = {
   mission: string;
   driverName?: string;
   usage?: string;
-  engin?: { id: string; brand?: string; matricule?: string; status?: string };
+  engin?: { id: string; code?: string | null; designation?: string | null; brand?: string; matricule?: string; status?: string };
   chantier?: { id: string; name: string } | null;
 };
 
 type Stats = {
   total: number;
   disponibles: number;
-  enMission: number;
+  affectes: number;
   enMaintenance: number;
+  horsService: number;
+  materiels: number;
+  enginsCount: number;
   personnel: number;
   loue: number;
   missionsTotal: number;
-  maintenanceBudget: number;
   paperExpiring: number;
   paperExpired: number;
   genres: string[];
 };
+
+type View = '' | 'acquisitions' | 'locations';
+type KindParam = '' | 'engin' | 'materiel';
 
 const PAGE_SIZE = 20;
 type SortOrder = 'asc' | 'desc';
@@ -81,10 +107,20 @@ function paperAlertClass(date?: string | null) {
   return 'mac-table-muted';
 }
 
+/** Les entrées de menu (référentiels, acquisitions, locations) partagent cette page : on remonte l’état à chaque changement de vue. */
 export default function EnginsPage() {
+  const [searchParams] = useSearchParams();
+  const kind = (searchParams.get('kind') || '') as KindParam;
+  const view = (searchParams.get('view') || '') as View;
+  return <EnginsView key={`${kind}|${view}`} kind={kind} view={view} />;
+}
+
+function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { engins: enginOptions } = useFleetRefs();
+  const fixedOwnership = view === 'acquisitions' ? 'personnel' : view === 'locations' ? 'loue' : '';
   const [tab, setTab] = useState<TabId>((searchParams.get('tab') as TabId) || 'parc');
   const [items, setItems] = useState<Engin[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -92,18 +128,16 @@ export default function EnginsPage() {
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Stats>({
-    total: 0, disponibles: 0, enMission: 0, enMaintenance: 0, personnel: 0, loue: 0,
-    missionsTotal: 0,
-    maintenanceBudget: 0, paperExpiring: 0, paperExpired: 0, genres: [],
+    total: 0, disponibles: 0, affectes: 0, enMaintenance: 0, horsService: 0, materiels: 0, enginsCount: 0,
+    personnel: 0, loue: 0, missionsTotal: 0, paperExpiring: 0, paperExpired: 0, genres: [],
   });
   const [chantiers, setChantiers] = useState<{ id: string; name: string }[]>([]);
-  const [enginOptions, setEnginOptions] = useState<{ id: string; matricule?: string; brand?: string }[]>([]);
   const [q, setQ] = useState(searchParams.get('q') || '');
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [genreFilter, setGenreFilter] = useState(searchParams.get('genre') || '');
-  const [ownershipFilter, setOwnershipFilter] = useState(searchParams.get('ownershipType') || '');
+  const [ownershipFilter, setOwnershipFilter] = useState(fixedOwnership || searchParams.get('ownershipType') || '');
   const [alertFilter, setAlertFilter] = useState(searchParams.get('alert') || 'expiring');
-  const [sort, setSort] = useState(searchParams.get('sort') || 'matricule');
+  const [sort, setSort] = useState(searchParams.get('sort') || 'code');
   const [order, setOrder] = useState<SortOrder>(searchParams.get('order') === 'desc' ? 'desc' : 'asc');
   const [dateFrom, setDateFrom] = useState(searchParams.get('dateFrom') || monthStartISO());
   const [dateTo, setDateTo] = useState(searchParams.get('dateTo') || new Date().toISOString().slice(0, 10));
@@ -114,29 +148,37 @@ export default function EnginsPage() {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleteMotif, setDeleteMotif] = useState('');
   const [missionOpen, setMissionOpen] = useState(false);
-  const [maintOpen, setMaintOpen] = useState<string | null>(null);
-  const [form, setForm] = useState<EnginFormData>(emptyEnginForm());
+  const [maintEnginId, setMaintEnginId] = useState<string | null>(null);
+  const [form, setForm] = useState<EnginFormData>(emptyEnginForm(kind || 'engin', fixedOwnership === 'loue' ? 'loue' : 'personnel'));
   const [missionForm, setMissionForm] = useState({
     enginId: '', mission: '', driverName: '', chantierId: '', date: new Date().toISOString().slice(0, 10), usage: '', requestedBy: '',
   });
-  const [maintForm, setMaintForm] = useState({ designation: '', budget: '', responsible: '', date: new Date().toISOString().slice(0, 10) });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const parcSelection = useRowSelection<Engin>();
+  const rappelsSelection = useRowSelection<Engin>();
+  const missionSelection = useRowSelection<Mission>();
 
-  function buildParcQuery(pageNum = page, overrides?: { status?: string; genre?: string; alert?: string; ownershipType?: string; q?: string }) {
+  type Overrides = { status?: string; genre?: string; alert?: string; ownershipType?: string; q?: string };
+
+  function baseEnginParams(overrides?: Overrides) {
     const qs = new URLSearchParams();
     const query = overrides?.q !== undefined ? overrides.q : q;
     if (query) qs.set('q', query);
+    if (kind) qs.set('kind', kind);
+    const own = fixedOwnership || (overrides?.ownershipType !== undefined ? overrides.ownershipType : ownershipFilter);
+    if (own) qs.set('ownershipType', own);
+    return qs;
+  }
+
+  function buildParcQuery(pageNum = page, overrides?: Overrides) {
+    const qs = baseEnginParams(overrides);
     const st = overrides?.status !== undefined ? overrides.status : statusFilter;
     const gen = overrides?.genre !== undefined ? overrides.genre : genreFilter;
-    const own = overrides?.ownershipType !== undefined ? overrides.ownershipType : ownershipFilter;
     if (st) qs.set('status', st);
     if (gen) qs.set('genre', gen);
-    // Alert filter applies only on Rappels (passed explicitly) — never on Parc.
     if (overrides?.alert) qs.set('alert', overrides.alert);
-    if (own) qs.set('ownershipType', own);
     if (sort !== 'matricule') qs.set('sort', sort);
     if (order !== 'asc') qs.set('order', order);
     qs.set('page', String(pageNum));
@@ -144,20 +186,16 @@ export default function EnginsPage() {
     return qs;
   }
 
-  function buildStatsQuery(overrides?: { status?: string; genre?: string; alert?: string; ownershipType?: string; q?: string }) {
-    const qs = new URLSearchParams();
-    const query = overrides?.q !== undefined ? overrides.q : q;
-    if (query) qs.set('q', query);
+  function buildStatsQuery(overrides?: Overrides) {
+    const qs = baseEnginParams(overrides);
     if (tab === 'rappels') {
       const al = overrides?.alert !== undefined ? overrides.alert : alertFilter;
       if (al) qs.set('alert', al);
     } else if (tab === 'parc') {
       const st = overrides?.status !== undefined ? overrides.status : statusFilter;
       const gen = overrides?.genre !== undefined ? overrides.genre : genreFilter;
-      const own = overrides?.ownershipType !== undefined ? overrides.ownershipType : ownershipFilter;
       if (st) qs.set('status', st);
       if (gen) qs.set('genre', gen);
-      if (own) qs.set('ownershipType', own);
     }
     return qs.toString();
   }
@@ -176,23 +214,27 @@ export default function EnginsPage() {
     return qs;
   }
 
-  function loadStats(overrides?: { status?: string; genre?: string; alert?: string; ownershipType?: string; q?: string }) {
+  function loadStats(overrides?: Overrides) {
     api<Stats>(`/engins/stats?${buildStatsQuery(overrides)}`).then(setStats).catch(() => {});
   }
 
-  function loadParc(pageNum = page, overrides?: { status?: string; genre?: string; alert?: string; ownershipType?: string; q?: string }) {
+  function loadList(qs: URLSearchParams) {
     setLoading(true);
     setError('');
-    loadStats(overrides);
-    api<PaginatedResponse<Engin>>(`/engins?${buildParcQuery(pageNum, overrides)}`)
+    api<PaginatedResponse<Engin>>(`/engins?${qs}`)
       .then((res) => {
         setItems(res.items);
         setPage(res.page);
         setPages(res.pages);
         setTotal(res.total);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t('msg.serverError')))
+      .catch((err) => setError(errorMessage(err, t('msg.serverError'))))
       .finally(() => setLoading(false));
+  }
+
+  function loadParc(pageNum = page, overrides?: Overrides) {
+    loadStats(overrides);
+    loadList(buildParcQuery(pageNum, overrides));
   }
 
   function loadMissions(pageNum = page) {
@@ -205,47 +247,39 @@ export default function EnginsPage() {
         setPages(res.pages);
         setTotal(res.total);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t('msg.serverError')))
+      .catch((err) => setError(errorMessage(err, t('msg.serverError'))))
       .finally(() => setLoading(false));
   }
 
   function loadRappels(pageNum = page, overrides?: { alert?: string }) {
-    setLoading(true);
-    setError('');
     const al = overrides?.alert !== undefined ? overrides.alert : alertFilter;
     loadStats({ alert: al });
-    api<PaginatedResponse<Engin>>(`/engins?${buildParcQuery(pageNum, { alert: al, status: '', genre: '', ownershipType: '' })}`)
-      .then((res) => {
-        setItems(res.items);
-        setPage(res.page);
-        setPages(res.pages);
-        setTotal(res.total);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : t('msg.serverError')))
-      .finally(() => setLoading(false));
+    loadList(buildParcQuery(pageNum, { alert: al, status: '', genre: '' }));
   }
 
-  function load(pageNum = 1, overrides?: { status?: string; genre?: string; alert?: string }) {
-    loadStats();
+  function load(pageNum = 1, overrides?: Overrides) {
     if (tab === 'parc') loadParc(pageNum, overrides);
-    else if (tab === 'missions') loadMissions(pageNum);
-    else loadRappels(pageNum, overrides);
+    else if (tab === 'missions') {
+      loadStats();
+      loadMissions(pageNum);
+    } else loadRappels(pageNum, overrides);
   }
 
   useEffect(() => {
     fetchChantierList<{ id: string; name: string }>().then(setChantiers);
-    fetchEnginList<{ id: string; matricule?: string; brand?: string }>().then(setEnginOptions);
   }, []);
 
   useEffect(() => {
     const qs = new URLSearchParams();
+    if (kind) qs.set('kind', kind);
+    if (view) qs.set('view', view);
     if (tab !== 'parc') qs.set('tab', tab);
     if (q) qs.set('q', q);
     if (tab === 'parc') {
       if (statusFilter) qs.set('status', statusFilter);
       if (genreFilter) qs.set('genre', genreFilter);
-      if (ownershipFilter) qs.set('ownershipType', ownershipFilter);
-      if (sort !== 'matricule') qs.set('sort', sort);
+      if (ownershipFilter && !fixedOwnership) qs.set('ownershipType', ownershipFilter);
+      if (sort !== 'code') qs.set('sort', sort);
       if (order !== 'asc') qs.set('order', order);
     }
     if (tab === 'rappels' && alertFilter !== 'expiring') qs.set('alert', alertFilter);
@@ -257,11 +291,12 @@ export default function EnginsPage() {
     }
     if (page > 1) qs.set('page', String(page));
     setSearchParams(qs, { replace: true });
-  }, [tab, q, statusFilter, genreFilter, ownershipFilter, alertFilter, sort, order, dateFrom, dateTo, enginFilter, chantierFilter, page, setSearchParams]);
+  }, [kind, view, fixedOwnership, tab, q, statusFilter, genreFilter, ownershipFilter, alertFilter, sort, order, dateFrom, dateTo, enginFilter, chantierFilter, page, setSearchParams]);
 
   useEffect(() => {
     setPage(1);
     load(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, sort, order]);
 
   useEffect(() => {
@@ -282,14 +317,14 @@ export default function EnginsPage() {
 
   function openCreate() {
     setEditId(null);
-    setForm(emptyEnginForm());
+    setForm(emptyEnginForm(kind || 'engin', fixedOwnership === 'loue' ? 'loue' : 'personnel'));
     setOpen(true);
   }
 
   useCreateQuery(openCreate);
 
   function openEdit(e: Engin) {
-    api(`/engins/${e.id}`).then((full) => {
+    api<Record<string, unknown>>(`/engins/${e.id}`).then((full) => {
       setEditId(e.id);
       setForm(enginToForm(full));
       setOpen(true);
@@ -306,23 +341,22 @@ export default function EnginsPage() {
         await api('/engins', { method: 'POST', body: JSON.stringify(body) });
       }
       setOpen(false);
+      invalidateFleetRefs();
       load(page);
-      fetchEnginList<{ id: string; matricule?: string; brand?: string }>().then(setEnginOptions);
     } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
+      await appAlert(errorMessage(err, t('common.error')));
     }
   }
 
-  async function confirmDelete() {
-    if (!deleteId || !deleteMotif.trim()) return;
+  async function confirmDelete(motif: string) {
+    if (!deleteId) return;
     try {
-      await api(`/engins/${deleteId}`, { method: 'DELETE', body: JSON.stringify({ motif: deleteMotif }) });
+      await api(`/engins/${deleteId}`, { method: 'DELETE', body: JSON.stringify({ motif }) });
       setDeleteId(null);
-      setDeleteMotif('');
+      invalidateFleetRefs();
       load(page);
-      fetchEnginList<{ id: string; matricule?: string; brand?: string }>().then(setEnginOptions);
     } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
+      await appAlert(errorMessage(err, t('common.error')));
     }
   }
 
@@ -334,67 +368,203 @@ export default function EnginsPage() {
       setMissionForm({ enginId: '', mission: '', driverName: '', chantierId: '', date: new Date().toISOString().slice(0, 10), usage: '', requestedBy: '' });
       load(page);
     } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
+      await appAlert(errorMessage(err, t('common.error')));
     }
   }
 
-  async function createMaint(e: React.FormEvent) {
-    e.preventDefault();
-    if (!maintOpen) return;
-    try {
-      await api(`/engins/${maintOpen}/maintenances`, { method: 'POST', body: JSON.stringify(maintForm) });
-      setMaintOpen(null);
-      setMaintForm({ designation: '', budget: '', responsible: '', date: new Date().toISOString().slice(0, 10) });
-      load(page);
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
+  const fileBase = view === 'locations' ? 'engins-loues-gic' : view === 'acquisitions' ? 'engins-proprietes-gic' : kind === 'materiel' ? 'materiels-gic' : 'engins-gic';
 
   function exportCsv() {
-    if (tab === 'missions') {
-      downloadCsv(`/engins/missions/export/csv?${buildMissionQuery()}`, 'missions-engins-gic.csv');
-    } else {
-      downloadCsv(`/engins/export/csv?${buildParcQuery()}`, 'engins-gic.csv');
-    }
+    if (tab === 'missions') downloadCsv(`/engins/missions/export/csv?${buildMissionQuery()}`, 'missions-engins-gic.csv');
+    else downloadCsv(`/engins/export/csv?${buildParcQuery()}`, `${fileBase}.csv`);
   }
 
   function exportExcel() {
-    if (tab === 'missions') {
-      downloadExcel(`/engins/missions/export/xlsx?${buildMissionQuery()}`, 'missions-engins-gic.xlsx');
-    } else {
-      downloadExcel(`/engins/export/xlsx?${buildParcQuery()}`, 'engins-gic.xlsx');
-    }
+    if (tab === 'missions') downloadExcel(`/engins/missions/export/xlsx?${buildMissionQuery()}`, 'missions-engins-gic.xlsx');
+    else downloadExcel(`/engins/export/xlsx?${buildParcQuery()}`, `${fileBase}.xlsx`);
   }
 
-  async function printList() {
-
-    if (tab === 'missions') {
-      await printWithCompany({ title: t('nav.missions'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
-        <h1>${t('nav.missions')} — GIC</h1>
-        <p>Période : ${dateFrom} → ${dateTo}</p>
-        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
-          <tr><th>${t('columns.date')}</th><th>${t('columns.engin')}</th><th>${t('columns.mission')}</th><th>${t('columns.chauffeur')}</th><th>${t('columns.chantier')}</th></tr>
-          ${missions.map((m) => `<tr><td>${formatDate(m.date)}</td><td>${m.engin?.matricule || m.engin?.brand || '—'}</td><td>${m.mission}</td><td>${m.driverName || '—'}</td><td>${m.chantier?.name || '—'}</td></tr>`).join('')}
-        </table>
-      </body></html>`, { grid: false }) });
-    } else {
-      await printWithCompany({ title: t('pages.equipment'), bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
-        <h1>${t('pages.equipment')} — GIC</h1>
-        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">
-          <tr><th>${t('columns.matricule')}</th><th>${t('columns.brand')}</th><th>${t('columns.genre')}</th><th>${t('columns.status')}</th><th>${t('columns.gps')}</th><th>${t('columns.fuel')}</th></tr>
-          ${items.map((e) => `<tr><td>${e.matricule || '—'}</td><td>${e.brand || '—'}</td><td>${e.genre || '—'}</td><td>${e.status}</td><td>${e.gpsNumber || '—'}</td><td>${e.fuelLevel != null ? e.fuelLevel + '%' : '—'}</td></tr>`).join('')}
-        </table>
-      </body></html>`, { grid: false }) });
-    }
+  function rentalCost(e: Engin) {
+    if (!e.rentalPrice) return '—';
+    return `${formatMad(e.rentalPrice)} / ${t(`fleet.rentalUnit.${e.rentalUnit || 'mois'}`)}`;
   }
 
-  const statusFilters = [
-    { id: '', label: t('common.all') },
-    { id: 'disponible', label: t('common.availablePlural') },
-    { id: 'en_mission', label: t('fields.onMission') },
-    { id: 'en_maintenance', label: t('nav.maintenance') },
+  function dailyCost(e: Engin) {
+    if (e.ownershipType === 'loue') return e.costInfo?.dailyRate != null ? formatMad2(e.costInfo.dailyRate) : '—';
+    return e.costInfo?.dailyDepreciation ? formatMad2(e.costInfo.dailyDepreciation) : '—';
+  }
+
+  const title =
+    view === 'acquisitions' ? t('fleet.nav.acquisitions')
+      : view === 'locations' ? t('fleet.nav.locations')
+        : kind === 'materiel' ? t('fleet.nav.referentielMateriels')
+          : kind === 'engin' ? t('fleet.nav.referentielEngins')
+            : t('pages.equipment');
+  const subtitle =
+    view === 'acquisitions' ? t('fleet.pages.acquisitionsSubtitle')
+      : view === 'locations' ? t('fleet.pages.locationsSubtitle')
+        : kind === 'materiel' ? t('fleet.pages.materielsSubtitle')
+          : t('pages.equipmentListSubtitle');
+
+  function dailyCostValue(e: Engin) {
+    return (e.ownershipType === 'loue' ? e.costInfo?.dailyRate : e.costInfo?.dailyDepreciation) || 0;
+  }
+
+  function sumMad(rows: Engin[], pick: (e: Engin) => number | null | undefined) {
+    return formatMad(rows.reduce((s, e) => s + (pick(e) || 0), 0));
+  }
+
+  function printList() {
+    const own = fixedOwnership || ownershipFilter;
+    const baseFilters: [string, unknown][] = [
+      [t('listPrint.search'), q],
+      [t('fleet.fields.kind'), kind && kindLabel(kind, t)],
+      [t('fleet.fields.mode'), own && ownershipLabel(own, t)],
+    ];
+    const sortFilter: [string, unknown] = [
+      t('listPrint.sort'),
+      `${sortOptions.find((o) => o.value === sort)?.label || sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`,
+    ];
+
+    if (tab === 'missions') {
+      printRows<Mission>({
+        title: t('nav.missions'),
+        filters: [
+          [t('listPrint.search'), q],
+          [t('listPrint.period'), dateFrom || dateTo ? `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}` : ''],
+          [t('columns.engin'), enginFilter && enginLabel(enginOptions.find((e) => e.id === enginFilter))],
+          [t('columns.chantier'), chantierFilter && chantiers.find((c) => c.id === chantierFilter)?.name],
+        ],
+        columns: [
+          { label: t('columns.date'), value: (m) => formatDate(m.date) },
+          { label: t('columns.engin'), value: (m) => (m.engin ? enginLabel(m.engin) : '') },
+          { label: t('columns.mission'), value: (m) => m.mission },
+          { label: t('columns.chauffeur'), value: (m) => m.driverName },
+          { label: t('columns.chantier'), value: (m) => m.chantier?.name },
+        ],
+        rows: missionSelection.count ? missionSelection.rows : () => fetchAllRows<Mission>('/engins/missions', buildMissionQuery(1)),
+        selectedCount: missionSelection.count,
+      });
+      return;
+    }
+
+    if (tab === 'rappels') {
+      printRows<Engin>({
+        title,
+        subtitle: t('tabs.paperReminders'),
+        filters: [
+          ...baseFilters,
+          [t('common.alerts'), alertFilters.find((f) => f.id === alertFilter)?.label],
+          sortFilter,
+        ],
+        columns: [
+          { label: t('columns.engin'), value: (e) => enginLabel(e) },
+          { label: t('fields.matricule'), value: (e) => e.matricule || e.genre },
+          { label: t('columns.assurance'), value: (e) => formatDate(e.insuranceExpiry) },
+          { label: t('columns.vignette'), value: (e) => formatDate(e.vignetteExpiry) },
+          { label: t('columns.visite'), value: (e) => formatDate(e.visitExpiry) },
+          { label: t('columns.autorisation'), value: (e) => formatDate(e.authExpiry) },
+        ],
+        rows: rappelsSelection.count
+          ? rappelsSelection.rows
+          : () => fetchAllRows<Engin>('/engins', buildParcQuery(1, { alert: alertFilter, status: '', genre: '' })),
+        selectedCount: rappelsSelection.count,
+      });
+      return;
+    }
+
+    const columns: PrintColumn<Engin>[] = [
+      { label: t('fleet.fields.code'), value: (e) => e.code },
+      { label: t('fields.matricule'), value: (e) => e.matricule },
+      { label: t('fleet.fields.designation'), value: (e) => e.designation || [e.genre, e.brand].filter(Boolean).join(' ') },
+      ...(!kind ? [{ label: t('fleet.fields.kind'), value: (e: Engin) => kindLabel(e.kind, t) }] : []),
+      ...(!view
+        ? [{
+          label: t('fleet.fields.mode'),
+          value: (e: Engin) => [
+            ownershipLabel(e.ownershipType, t),
+            e.ownershipType === 'loue' ? e.rentalSupplierRef?.companyName || e.rentalSupplier : '',
+          ].filter(Boolean).join(' — '),
+        }]
+        : []),
+      ...(view === 'acquisitions'
+        ? [
+          {
+            label: t('fleet.fields.purchasePrice'),
+            value: (e: Engin) => (e.purchasePrice != null ? formatMad(e.purchasePrice) : ''),
+            align: 'right' as const,
+            total: (rows: Engin[]) => sumMad(rows, (e) => e.purchasePrice),
+          },
+          {
+            label: t('fleet.fields.acquisitionDate'),
+            value: (e: Engin) => [
+              e.acquisitionDate ? formatDate(e.acquisitionDate) : '',
+              e.depreciationYears ? t('fleet.hints.overYears', { years: e.depreciationYears }) : '',
+            ].filter(Boolean).join(' — '),
+          },
+          {
+            label: t('fleet.fields.annualDepreciation'),
+            value: (e: Engin) => (e.costInfo?.annualDepreciation ? formatMad(e.costInfo.annualDepreciation) : ''),
+            align: 'right' as const,
+            total: (rows: Engin[]) => sumMad(rows, (e) => e.costInfo?.annualDepreciation),
+          },
+          {
+            label: t('fleet.fields.netBookValue'),
+            value: (e: Engin) => (e.costInfo?.netBookValue != null ? formatMad(e.costInfo.netBookValue) : ''),
+            align: 'right' as const,
+            total: (rows: Engin[]) => sumMad(rows, (e) => e.costInfo?.netBookValue),
+          },
+        ]
+        : []),
+      ...(view === 'locations'
+        ? [
+          { label: t('fleet.fields.rentalSupplier'), value: (e: Engin) => e.rentalSupplierRef?.companyName || e.rentalSupplier },
+          { label: t('fleet.fields.rentalContract'), value: (e: Engin) => e.rentalContractRef },
+          { label: t('fleet.fields.rentalPrice'), value: (e: Engin) => rentalCost(e), align: 'right' as const },
+          {
+            label: t('fleet.fields.rentalPeriod'),
+            value: (e: Engin) => `${e.rentalStart ? formatDate(e.rentalStart) : '—'} → ${e.rentalEnd ? formatDate(e.rentalEnd) : '…'}`,
+          },
+        ]
+        : []),
+      { label: t('fleet.fields.status'), value: (e) => fleetStatusLabel(e.status, t) },
+      {
+        label: t('fleet.fields.currentAssignment'),
+        value: (e) => (e.currentAssignment
+          ? `${chantierTrancheLabel(e.currentAssignment.chantierName, e.currentAssignment.tranche)} — ${t('fleet.hints.since', { date: formatDate(e.currentAssignment.startDate) })}`
+          : ''),
+      },
+      {
+        label: t('fleet.fields.dailyCost'),
+        value: (e) => dailyCost(e),
+        align: 'right',
+        total: (rows) => formatMad2(rows.reduce((s, e) => s + dailyCostValue(e), 0)),
+      },
+    ];
+
+    printRows<Engin>({
+      title,
+      filters: [
+        ...baseFilters,
+        [t('listPrint.status'), statusFilter && t(`fleet.status.${statusFilter}`)],
+        [t('fleet.fields.type'), genreFilter],
+        sortFilter,
+      ],
+      columns,
+      rows: parcSelection.count ? parcSelection.rows : () => fetchAllRows<Engin>('/engins', buildParcQuery(1)),
+      selectedCount: parcSelection.count,
+    });
+  }
+
+  const sortOptions = [
+    { value: 'code', label: t('fleet.fields.code') },
+    { value: 'designation', label: t('fleet.fields.designation') },
+    { value: 'matricule', label: t('fields.matricule') },
+    { value: 'status', label: t('common.status') },
+    { value: 'createdAt', label: t('fleet.filters.recent') },
   ];
+
+  const statusFilters = [{ id: '', label: t('common.all') }, ...ENGIN_STATUSES.map((s) => ({ id: s, label: t(`fleet.status.${s}`) }))];
 
   const alertFilters = [
     { id: 'expiring', label: t('common.expire30d') },
@@ -404,57 +574,62 @@ export default function EnginsPage() {
 
   const ownershipFilters = [
     { id: '', label: t('common.all') },
-    { id: 'personnel', label: t('fields.ownershipPersonal') },
-    { id: 'loue', label: t('fields.ownershipRented') },
+    { id: 'personnel', label: t('fleet.ownership.personnel') },
+    { id: 'loue', label: t('fleet.ownership.loue') },
   ];
 
   const hasActiveFilters =
     tab === 'parc'
-      ? !!statusFilter || !!genreFilter || !!ownershipFilter
+      ? !!statusFilter || !!genreFilter || (!fixedOwnership && !!ownershipFilter)
       : tab === 'rappels'
         ? alertFilter !== 'expiring'
         : !!enginFilter || !!chantierFilter;
+
+  const tabs = [
+    { id: 'parc', label: view === 'locations' ? t('fleet.tabs.contracts') : view === 'acquisitions' ? t('fleet.tabs.assets') : t('common.parc') },
+    ...(kind !== 'materiel' && !view ? [{ id: 'missions', label: t('nav.missions') }] : []),
+    { id: 'rappels', label: t('tabs.paperReminders') },
+  ];
+
+  const addLabel = kind === 'materiel' ? t('fleet.actions.addMateriel') : view === 'locations' ? t('fleet.actions.addRental') : t('actions.addEquipment');
 
   return (
     <div className="space-y-0">
       <PageHeader
         mac
-        title={t('pages.equipment')}
-        subtitle={t('pages.equipmentListSubtitle')}
+        title={title}
+        subtitle={subtitle}
+        backTo={false}
         actions={
           <>
-            <Link to="/missions"><Btn variant="secondary" icon={ClipboardList}>{t('nav.missions')}</Btn></Link>
-            <Link to="/maintenance"><Btn variant="secondary" icon={Wrench}>{t('nav.maintenance')}</Btn></Link>
             <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>
             <Btn variant="secondary" icon={Download} onClick={exportExcel}>{t('common.excel')}</Btn>
             <div className="mac-action-group">
               <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
             </div>
-            {tab === 'parc' && <Btn icon={Plus} onClick={openCreate}>{t('actions.addEquipment')}</Btn>}
+            {tab === 'parc' && <Btn icon={Plus} onClick={openCreate}>{addLabel}</Btn>}
             {tab === 'missions' && <Btn icon={Plus} onClick={() => setMissionOpen(true)}>{t('actions.newMission')}</Btn>}
           </>
         }
       />
 
       <div className="mac-kpi-grid mac-kpi-grid-4">
-        <KpiCard title={t('kpi.fleetTotal')} value={stats.total} icon={Truck} tone="violet" delta={t('msg.persLouesDelta', { pers: stats.personnel, loues: stats.loue })} deltaTone="muted" />
-        <KpiCard title={t('kpi.onMission')} value={stats.enMission} icon={MapPin} tone="amber" delta={t('msg.maintenanceDelta', { count: stats.enMaintenance })} deltaTone="muted" />
-        <KpiCard title={t('columns.missions')} value={stats.missionsTotal} icon={ClipboardList} tone="emerald" />
+        <KpiCard
+          title={kind === 'materiel' ? t('fleet.kpi.materiels') : t('kpi.fleetTotal')}
+          value={stats.total}
+          icon={Truck}
+          tone="violet"
+          delta={view ? undefined : t('fleet.kpi.enginsMaterielsDelta', { engins: stats.enginsCount, materiels: stats.materiels, loues: stats.loue })}
+          deltaTone="muted"
+        />
+        <KpiCard title={t('fleet.kpi.available')} value={stats.disponibles} icon={CheckCircle2} tone="emerald" />
+        <KpiCard title={t('fleet.kpi.assigned')} value={stats.affectes} icon={Activity} tone="amber" delta={t('fleet.kpi.repairShortDelta', { count: stats.enMaintenance })} deltaTone="muted" />
         <KpiCard title={t('kpi.paperAlerts')} value={stats.paperExpiring + stats.paperExpired} icon={AlertTriangle} tone="coral" delta={t('msg.expiredDelta', { count: stats.paperExpired })} deltaTone="muted" />
       </div>
 
       <Card padding={false} className="mb-0 overflow-visible">
         <div className="px-3 pt-3">
-          <Tabs
-            mac
-            active={tab}
-            onChange={(id) => { setTab(id); setShowFilters(false); }}
-            tabs={[
-              { id: 'parc', label: t('common.parc') },
-              { id: 'missions', label: t('nav.missions') },
-              { id: 'rappels', label: t('tabs.paperReminders') },
-            ]}
-          />
+          <Tabs mac active={tab} onChange={(id) => { setTab(id as TabId); setShowFilters(false); }} tabs={tabs} />
         </div>
 
         <div className={`mac-filters-panel${showFilters ? ' mac-filters-panel-open' : ''}`}>
@@ -464,7 +639,7 @@ export default function EnginsPage() {
                 value={q}
                 onChange={setQ}
                 onSubmit={() => { setPage(1); load(1); }}
-                placeholder={tab === 'missions' ? t('msg.searchMission') : t('msg.searchEquipment')}
+                placeholder={tab === 'missions' ? t('msg.searchMission') : t('fleet.filters.searchEngin')}
               />
               {tab === 'missions' && (
                 <>
@@ -473,19 +648,13 @@ export default function EnginsPage() {
                   <MacSelect
                     value={enginFilter}
                     onChange={setEnginFilter}
-                    options={[
-                      { value: '', label: t('common.allEquipment') },
-                      ...enginOptions.map((e) => ({ value: e.id, label: e.matricule || e.brand || e.id })),
-                    ]}
-                    className="w-40 shrink-0"
+                    options={[{ value: '', label: t('common.allEquipment') }, ...enginOptions.map((e) => ({ value: e.id, label: enginLabel(e) }))]}
+                    className="w-48 shrink-0"
                   />
                   <MacSelect
                     value={chantierFilter}
                     onChange={setChantierFilter}
-                    options={[
-                      { value: '', label: t('common.allSites') },
-                      ...chantiers.map((c) => ({ value: c.id, label: c.name })),
-                    ]}
+                    options={[{ value: '', label: t('common.allSites') }, ...chantiers.map((c) => ({ value: c.id, label: c.name }))]}
                     className="w-40 shrink-0"
                   />
                 </>
@@ -493,14 +662,15 @@ export default function EnginsPage() {
               {tab === 'parc' && (
                 <>
                   <MacSelect
+                    value={statusFilter}
+                    onChange={(v) => { setStatusFilter(v); setPage(1); loadParc(1, { status: v }); }}
+                    options={statusFilters.map((f) => ({ value: f.id, label: f.id ? f.label : t('fleet.filters.allStatuses') }))}
+                    className="w-40 shrink-0"
+                  />
+                  <MacSelect
                     value={sort}
                     onChange={setSort}
-                    options={[
-                      { value: 'matricule', label: t('fields.matricule') },
-                      { value: 'brand', label: t('fields.brand') },
-                      { value: 'status', label: t('common.status') },
-                      { value: 'fuelLevel', label: t('tabs.fuel') },
-                    ]}
+                    options={sortOptions}
                     className="w-36 shrink-0"
                   />
                   <Btn
@@ -528,76 +698,41 @@ export default function EnginsPage() {
                     <div className="mac-filter-menu" role="menu">
                       {tab === 'parc' && (
                         <>
-                          <p className="mac-filter-menu-section">{t('common.status')}</p>
-                          {statusFilters.map((f) => (
-                            <button
-                              key={f.id || 'all-status'}
-                              type="button"
-                              role="menuitem"
-                              className={`mac-filter-menu-item${statusFilter === f.id ? ' mac-filter-menu-item-active' : ''}`}
-                              onClick={() => {
-                                setStatusFilter(f.id);
-                                setPage(1);
-                                loadParc(1, { status: f.id });
-                              }}
-                            >
-                              <span>{f.label}</span>
-                              {statusFilter === f.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
-                            </button>
-                          ))}
                           {stats.genres.length > 0 && (
                             <>
-                              <div className="mac-filter-menu-sep" />
-                              <p className="mac-filter-menu-section">{t('fields.genre')}</p>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className={`mac-filter-menu-item${genreFilter === '' ? ' mac-filter-menu-item-active' : ''}`}
-                                onClick={() => {
-                                  setGenreFilter('');
-                                  setPage(1);
-                                  loadParc(1, { genre: '' });
-                                }}
-                              >
-                                <span>Tous</span>
-                                {genreFilter === '' && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
-                              </button>
-                              {stats.genres.map((g) => (
+                              <p className="mac-filter-menu-section">{t('fleet.fields.type')}</p>
+                              {['', ...stats.genres].map((g) => (
                                 <button
-                                  key={g}
+                                  key={g || 'all-genre'}
                                   type="button"
                                   role="menuitem"
                                   className={`mac-filter-menu-item${genreFilter === g ? ' mac-filter-menu-item-active' : ''}`}
-                                  onClick={() => {
-                                    setGenreFilter(g);
-                                    setPage(1);
-                                    loadParc(1, { genre: g });
-                                  }}
+                                  onClick={() => { setGenreFilter(g); setPage(1); loadParc(1, { genre: g }); }}
                                 >
-                                  <span>{g}</span>
+                                  <span>{g || t('common.all')}</span>
                                   {genreFilter === g && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
                                 </button>
                               ))}
                             </>
                           )}
-                          <div className="mac-filter-menu-sep" />
-                          <p className="mac-filter-menu-section">Propriété</p>
-                          {ownershipFilters.map((f) => (
-                            <button
-                              key={f.id || 'all-ownership'}
-                              type="button"
-                              role="menuitem"
-                              className={`mac-filter-menu-item${ownershipFilter === f.id ? ' mac-filter-menu-item-active' : ''}`}
-                              onClick={() => {
-                                setOwnershipFilter(f.id);
-                                setPage(1);
-                                loadParc(1, { ownershipType: f.id });
-                              }}
-                            >
-                              <span>{f.label}</span>
-                              {ownershipFilter === f.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
-                            </button>
-                          ))}
+                          {!fixedOwnership && (
+                            <>
+                              <div className="mac-filter-menu-sep" />
+                              <p className="mac-filter-menu-section">{t('fleet.fields.mode')}</p>
+                              {ownershipFilters.map((f) => (
+                                <button
+                                  key={f.id || 'all-ownership'}
+                                  type="button"
+                                  role="menuitem"
+                                  className={`mac-filter-menu-item${ownershipFilter === f.id ? ' mac-filter-menu-item-active' : ''}`}
+                                  onClick={() => { setOwnershipFilter(f.id); setPage(1); loadParc(1, { ownershipType: f.id }); }}
+                                >
+                                  <span>{f.label}</span>
+                                  {ownershipFilter === f.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
+                                </button>
+                              ))}
+                            </>
+                          )}
                           {hasActiveFilters && (
                             <>
                               <div className="mac-filter-menu-sep" />
@@ -607,13 +742,13 @@ export default function EnginsPage() {
                                 onClick={() => {
                                   setStatusFilter('');
                                   setGenreFilter('');
-                                  setOwnershipFilter('');
+                                  if (!fixedOwnership) setOwnershipFilter('');
                                   setPage(1);
                                   loadParc(1, { status: '', genre: '', ownershipType: '' });
                                   setShowFilters(false);
                                 }}
                               >
-                                Réinitialiser
+                                {t('auth.reset')}
                               </button>
                             </>
                           )}
@@ -628,11 +763,7 @@ export default function EnginsPage() {
                               type="button"
                               role="menuitem"
                               className={`mac-filter-menu-item${alertFilter === f.id ? ' mac-filter-menu-item-active' : ''}`}
-                              onClick={() => {
-                                setAlertFilter(f.id);
-                                setPage(1);
-                                loadRappels(1, { alert: f.id });
-                              }}
+                              onClick={() => { setAlertFilter(f.id); setPage(1); loadRappels(1, { alert: f.id }); }}
                             >
                               <span>{f.label}</span>
                               {alertFilter === f.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
@@ -657,6 +788,10 @@ export default function EnginsPage() {
         </Card>
       )}
 
+      {tab === 'missions' && <SelectionBar selection={missionSelection} onPrint={printList} />}
+      {tab === 'rappels' && <SelectionBar selection={rappelsSelection} onPrint={printList} />}
+      {tab === 'parc' && <SelectionBar selection={parcSelection} onPrint={printList} />}
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -667,6 +802,7 @@ export default function EnginsPage() {
             <TableWrap mac>
               <thead>
                 <tr>
+                  <SelectAllTh selection={missionSelection} rows={missions} />
                   <Th mac>{t('columns.date')}</Th>
                   <Th mac>{t('columns.engin')}</Th>
                   <Th mac>{t('columns.mission')}</Th>
@@ -677,25 +813,16 @@ export default function EnginsPage() {
               </thead>
               <tbody>
                 {missions.map((m) => (
-                  <tr
-                    key={m.id}
-                    className="cursor-pointer"
-                    onClick={() => m.engin?.id && navigate(`/engins/${m.engin.id}`)}
-                  >
+                  <tr key={m.id} className="cursor-pointer" onClick={() => m.engin?.id && navigate(`/engins/${m.engin.id}`)}>
+                    <SelectTd selection={missionSelection} row={m} />
                     <Td mac className="text-[11px]">{formatDate(m.date)}</Td>
                     <Td mac>
-                      {m.engin ? (
-                        <Link to={`/engins/${m.engin.id}`} className="mac-table-ref">
-                          {m.engin.matricule || m.engin.brand}
-                        </Link>
-                      ) : '—'}
+                      {m.engin ? <Link to={`/engins/${m.engin.id}`} className="mac-table-ref">{enginLabel(m.engin)}</Link> : '—'}
                     </Td>
                     <Td mac>{m.mission}</Td>
                     <Td mac>{m.driverName || '—'}</Td>
                     <Td mac>
-                      {m.chantier ? (
-                        <Link to={`/chantiers/${m.chantier.id}`} className="hover:text-[#007aff]">{m.chantier.name}</Link>
-                      ) : '—'}
+                      {m.chantier ? <Link to={`/chantiers/${m.chantier.id}`} className="hover:text-[#007aff]">{m.chantier.name}</Link> : '—'}
                     </Td>
                     <Td mac className="mac-td-actions">
                       {m.engin && (
@@ -718,6 +845,7 @@ export default function EnginsPage() {
             <TableWrap mac>
               <thead>
                 <tr>
+                  <SelectAllTh selection={rappelsSelection} rows={items} />
                   <Th mac>{t('columns.engin')}</Th>
                   <Th mac>{t('columns.assurance')}</Th>
                   <Th mac>{t('columns.vignette')}</Th>
@@ -728,14 +856,11 @@ export default function EnginsPage() {
               </thead>
               <tbody>
                 {items.map((e) => (
-                  <tr
-                    key={e.id}
-                    className="cursor-pointer"
-                    onClick={() => navigate(`/engins/${e.id}`)}
-                  >
+                  <tr key={e.id} className="cursor-pointer" onClick={() => navigate(`/engins/${e.id}`)}>
+                    <SelectTd selection={rappelsSelection} row={e} />
                     <Td mac>
-                      <Link to={`/engins/${e.id}`} className="mac-table-ref">{e.matricule || e.brand}</Link>
-                      <span className="block text-[10px] mac-table-muted">{e.genre || '—'}</span>
+                      <Link to={`/engins/${e.id}`} className="mac-table-ref">{enginLabel(e)}</Link>
+                      <span className="block text-[10px] mac-table-muted">{e.matricule || e.genre || '—'}</span>
                     </Td>
                     <Td mac className={`text-[11px] ${paperAlertClass(e.insuranceExpiry)}`}>{formatDate(e.insuranceExpiry)}</Td>
                     <Td mac className={`text-[11px] ${paperAlertClass(e.vignetteExpiry)}`}>{formatDate(e.vignetteExpiry)}</Td>
@@ -754,61 +879,117 @@ export default function EnginsPage() {
             </TableWrap>
           )
         ) : items.length === 0 ? (
-          <EmptyState title={t('msg.emptyEquipment')} action={<Btn icon={Plus} onClick={openCreate}>{t('actions.addEquipment')}</Btn>} />
+          <EmptyState title={t('msg.emptyEquipment')} action={<Btn icon={Plus} onClick={openCreate}>{addLabel}</Btn>} />
         ) : (
           <TableWrap mac>
             <thead>
               <tr>
-                <Th mac>{t('columns.matricule')}</Th>
-                <Th mac>{t('columns.brandGenre')}</Th>
-                <Th mac>{t('columns.ownership')}</Th>
-                <Th mac>{t('columns.gps')}</Th>
-                <Th mac>{t('columns.counter')}</Th>
-                <Th mac>{t('columns.fuel')}</Th>
-                <Th mac>{t('columns.status')}</Th>
-                <Th mac>{t('columns.missions')}</Th>
+                <SelectAllTh selection={parcSelection} rows={items} />
+                <Th mac>{t('fleet.fields.code')}</Th>
+                <Th mac>{t('fleet.fields.designation')}</Th>
+                {!kind && <Th mac>{t('fleet.fields.kind')}</Th>}
+                {!view && <Th mac>{t('fleet.fields.mode')}</Th>}
+                {view === 'acquisitions' && (
+                  <>
+                    <Th mac className="text-right">{t('fleet.fields.purchasePrice')}</Th>
+                    <Th mac>{t('fleet.fields.acquisitionDate')}</Th>
+                    <Th mac className="text-right">{t('fleet.fields.annualDepreciation')}</Th>
+                    <Th mac className="text-right">{t('fleet.fields.netBookValue')}</Th>
+                  </>
+                )}
+                {view === 'locations' && (
+                  <>
+                    <Th mac>{t('fleet.fields.rentalSupplier')}</Th>
+                    <Th mac>{t('fleet.fields.rentalContract')}</Th>
+                    <Th mac className="text-right">{t('fleet.fields.rentalPrice')}</Th>
+                    <Th mac>{t('fleet.fields.rentalPeriod')}</Th>
+                  </>
+                )}
+                <Th mac>{t('fleet.fields.status')}</Th>
+                <Th mac>{t('fleet.fields.currentAssignment')}</Th>
+                <Th mac className="text-right">{t('fleet.fields.dailyCost')}</Th>
                 <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
               </tr>
             </thead>
             <tbody>
               {items.map((e) => (
-                <tr
-                  key={e.id}
-                  className="cursor-pointer"
-                  onClick={() => navigate(`/engins/${e.id}`)}
-                >
+                <tr key={e.id} className="cursor-pointer" onClick={() => navigate(`/engins/${e.id}`)}>
+                  <SelectTd selection={parcSelection} row={e} />
                   <Td mac>
-                    <Link to={`/engins/${e.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{e.matricule || '—'}</Link>
+                    <Link to={`/engins/${e.id}`} className="mac-table-ref" onClick={(ev) => ev.stopPropagation()}>{e.code || '—'}</Link>
+                    {e.matricule && <span className="block text-[10px] mac-table-muted">{e.matricule}</span>}
                   </Td>
                   <Td mac>
-                    {e.brand || '—'}
-                    {e.genre && <span className="block text-[10px] mac-table-muted">{e.genre}</span>}
+                    {e.designation || [e.genre, e.brand].filter(Boolean).join(' ') || '—'}
+                    <span className="block text-[10px] mac-table-muted">{[e.genre, e.brand, e.model].filter(Boolean).join(' · ') || '—'}</span>
                   </Td>
-                  <Td mac>
-                    <span className={`mac-chip ${e.ownershipType === 'loue' ? 'mac-chip-orange' : 'mac-chip-blue'}`}>
-                      {enginOwnershipLabel(e.ownershipType, t)}
+                  {!kind && (
+                    <Td mac>
+                      <span className={`mac-chip ${e.kind === 'materiel' ? 'mac-chip-gray' : 'mac-chip-blue'}`}>{kindLabel(e.kind, t)}</span>
+                    </Td>
+                  )}
+                  {!view && (
+                    <Td mac>
+                      <span className={`mac-chip ${e.ownershipType === 'loue' ? 'mac-chip-orange' : 'mac-chip-green'}`}>{ownershipLabel(e.ownershipType, t)}</span>
+                      {e.ownershipType === 'loue' && (e.rentalSupplierRef?.companyName || e.rentalSupplier) && (
+                        <span className="block text-[10px] mac-table-muted mt-0.5">{e.rentalSupplierRef?.companyName || e.rentalSupplier}</span>
+                      )}
+                    </Td>
+                  )}
+                  {view === 'acquisitions' && (
+                    <>
+                      <Td mac className="text-right tabular-nums">{e.purchasePrice != null ? formatMad(e.purchasePrice) : '—'}</Td>
+                      <Td mac className="text-[11px]">
+                        {formatDate(e.acquisitionDate)}
+                        {e.depreciationYears ? <span className="block text-[10px] mac-table-muted">{t('fleet.hints.overYears', { years: e.depreciationYears })}</span> : null}
+                      </Td>
+                      <Td mac className="text-right tabular-nums">{e.costInfo?.annualDepreciation ? formatMad(e.costInfo.annualDepreciation) : '—'}</Td>
+                      <Td mac className="text-right tabular-nums">{e.costInfo?.netBookValue != null ? formatMad(e.costInfo.netBookValue) : '—'}</Td>
+                    </>
+                  )}
+                  {view === 'locations' && (
+                    <>
+                      <Td mac>{e.rentalSupplierRef?.companyName || e.rentalSupplier || '—'}</Td>
+                      <Td mac className="mac-table-muted text-[11px]">{e.rentalContractRef || '—'}</Td>
+                      <Td mac className="text-right tabular-nums">{rentalCost(e)}</Td>
+                      <Td mac className="text-[11px]">
+                        {e.rentalStart ? formatDate(e.rentalStart) : '—'} → {e.rentalEnd ? formatDate(e.rentalEnd) : '…'}
+                      </Td>
+                    </>
+                  )}
+                  <Td mac><FleetStatusPill status={e.status} /></Td>
+                  <Td mac className="text-[11px]">
+                    {e.currentAssignment ? (
+                      <>
+                        {e.currentAssignment.chantierId ? (
+                          <Link
+                            to={`/chantiers/${e.currentAssignment.chantierId}?tab=engins`}
+                            className="hover:text-[#007aff]"
+                            onClick={(ev) => ev.stopPropagation()}
+                          >
+                            {chantierTrancheLabel(e.currentAssignment.chantierName, e.currentAssignment.tranche)}
+                          </Link>
+                        ) : chantierTrancheLabel(e.currentAssignment.chantierName, e.currentAssignment.tranche)}
+                        <span className="block text-[10px] mac-table-muted">
+                          {t('fleet.hints.since', { date: formatDate(e.currentAssignment.startDate) })}
+                        </span>
+                      </>
+                    ) : <span className="mac-table-muted">—</span>}
+                  </Td>
+                  <Td mac className="text-right tabular-nums text-[11px]">
+                    {dailyCost(e)}
+                    <span className="block text-[10px] mac-table-muted">
+                      {e.ownershipType === 'loue' ? t('fleet.hints.rentalPerDay') : t('fleet.hints.depreciationPerDay')}
                     </span>
-                    {e.ownershipType === 'loue' && e.rentalSupplier && (
-                      <span className="block text-[10px] mac-table-muted mt-0.5">{e.rentalSupplier}</span>
-                    )}
                   </Td>
-                  <Td mac className="mac-table-muted text-[11px]">{e.gpsNumber || '—'}</Td>
-                  <Td mac className="text-[11px]">{e.counterValue != null ? `${e.counterValue} ${e.counterUnit || ''}` : '—'}</Td>
-                  <Td mac>{e.fuelLevel != null ? `${e.fuelLevel}%` : '—'}</Td>
-                  <Td mac>
-                    <StatusPill status={e.status} quiet />
-                  </Td>
-                  <Td mac>
-                    <span className="mac-chip mac-chip-blue">{e._count?.missions ?? 0}</span>
-                  </Td>
-                  <Td mac className="mac-td-actions" onClick={(e) => e.stopPropagation()}>
+                  <Td mac className="mac-td-actions" onClick={(ev) => ev.stopPropagation()}>
                     <div className="mac-actions">
                       <Link to={`/engins/${e.id}`} className="mac-action-btn mac-action-btn-blue" title={t('common.view')}>
                         <Eye size={14} strokeWidth={2.15} />
                       </Link>
                       <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEdit(e)} />
-                      <MacActionBtn icon={Wrench} tone="teal" title={t('nav.maintenance')} onClick={() => setMaintOpen(e.id)} />
-                      <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { setDeleteId(e.id); setDeleteMotif(''); }} />
+                      <MacActionBtn icon={Wrench} tone="teal" title={t('fleet.actions.newMaintenance')} onClick={() => setMaintEnginId(e.id)} />
+                      <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => setDeleteId(e.id)} />
                     </div>
                   </Td>
                 </tr>
@@ -821,8 +1002,8 @@ export default function EnginsPage() {
 
       <Modal
         open={open}
-        size="lg"
-        title={editId ? t('actions.editEquipment') : t('actions.newEquipment')}
+        size="xl"
+        title={editId ? t('actions.editEquipment') : kind === 'materiel' ? t('fleet.actions.newMateriel') : t('actions.newEquipment')}
         onClose={() => setOpen(false)}
         footer={
           <>
@@ -831,23 +1012,10 @@ export default function EnginsPage() {
           </>
         }
       >
-        <form id="engin-form" onSubmit={saveEngin}><EnginFormFields form={form} setForm={setForm} /></form>
+        <form id="engin-form" onSubmit={saveEngin}><EnginFormFields form={form} setForm={setForm} isEdit={!!editId} /></form>
       </Modal>
 
-      <Modal
-        open={!!deleteId}
-        title={t('actions.deleteEquipment')}
-        onClose={() => setDeleteId(null)}
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setDeleteId(null)}>{t('common.cancel')}</Btn>
-            <Btn variant="danger" onClick={confirmDelete} disabled={!deleteMotif.trim()}>{t('common.confirm')}</Btn>
-          </>
-        }
-      >
-        <p className="text-[12px] text-gic-muted mb-3">Motif obligatoire (RG audit GIC).</p>
-        <Input label={t('msg.motifStar')} value={deleteMotif} onChange={(e) => setDeleteMotif(e.target.value)} />
-      </Modal>
+      <DeleteMotifModal open={!!deleteId} title={t('actions.deleteEquipment')} onClose={() => setDeleteId(null)} onConfirm={confirmDelete} />
 
       <Modal
         open={missionOpen}
@@ -863,7 +1031,7 @@ export default function EnginsPage() {
         <form id="mission-form" onSubmit={createMission} className="grid gap-3">
           <Select label={t('fields.enginRequiredStar')} required value={missionForm.enginId} onChange={(e) => setMissionForm({ ...missionForm, enginId: e.target.value })}>
             <option value="">—</option>
-            {enginOptions.map((e) => <option key={e.id} value={e.id}>{e.matricule} {e.brand}</option>)}
+            {enginOptions.map((e) => <option key={e.id} value={e.id}>{enginLabel(e)}</option>)}
           </Select>
           <Input label={t('common.date')} type="date" value={missionForm.date} onChange={(e) => setMissionForm({ ...missionForm, date: e.target.value })} />
           <Input label={t('fields.missionRequired')} required value={missionForm.mission} onChange={(e) => setMissionForm({ ...missionForm, mission: e.target.value })} />
@@ -877,24 +1045,18 @@ export default function EnginsPage() {
         </form>
       </Modal>
 
-      <Modal
-        open={!!maintOpen}
-        title={t('actions.registerMaintenance')}
-        onClose={() => setMaintOpen(null)}
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setMaintOpen(null)}>{t('common.cancel')}</Btn>
-            <Btn form="maint-form" type="submit">{t('common.save')}</Btn>
-          </>
-        }
-      >
-        <form id="maint-form" onSubmit={createMaint} className="grid gap-3">
-          <Input label={t('common.date')} type="date" value={maintForm.date} onChange={(e) => setMaintForm({ ...maintForm, date: e.target.value })} />
-          <Input label={t('fields.designationRequired')} required value={maintForm.designation} onChange={(e) => setMaintForm({ ...maintForm, designation: e.target.value })} />
-          <Input label={t('fields.budgetMad')} value={maintForm.budget} onChange={(e) => setMaintForm({ ...maintForm, budget: e.target.value })} />
-          <Input label={t('fields.responsible')} value={maintForm.responsible} onChange={(e) => setMaintForm({ ...maintForm, responsible: e.target.value })} />
-        </form>
-      </Modal>
+      <MaintenanceModal
+        open={!!maintEnginId}
+        enginId={maintEnginId || undefined}
+        onClose={() => setMaintEnginId(null)}
+        onSaved={() => { invalidateFleetRefs(); load(page); }}
+      />
+
+      {tab === 'parc' && stats.missionsTotal > 0 && !view && kind !== 'materiel' && (
+        <p className="text-[11px] text-gic-muted mt-2 flex items-center gap-1">
+          <ClipboardList size={12} /> {t('fleet.hints.missionsCount', { count: stats.missionsTotal })}
+        </p>
+      )}
     </div>
   );
 }

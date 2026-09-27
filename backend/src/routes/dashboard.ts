@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { ENGAGED_STATUSES, OPEN_STATUSES } from '../lib/purchaseWorkflow.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -108,7 +109,7 @@ router.get('/', async (req, res) => {
     prisma.engin.count({ where: { status: 'en_maintenance' } }),
     prisma.purchase.aggregate({
       _sum: { totalPrice: true },
-      where: { ...purchaseFilter, ...movementDateFilter },
+      where: { ...purchaseFilter, ...movementDateFilter, status: { in: ENGAGED_STATUSES } },
     }),
   ]);
 
@@ -127,7 +128,7 @@ router.get('/', async (req, res) => {
 
   const purchasesPending = await prisma.purchase.count({
     where: {
-      status: { in: ['brouillon', 'retourné'] },
+      status: { in: OPEN_STATUSES },
       ...purchaseFilter,
     },
   });

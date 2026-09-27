@@ -11,6 +11,7 @@ import {
   buildStandardLotPhases,
 } from '../lib/tasks.js';
 import { buildChantierOverview } from '../lib/chantierOverview.js';
+import { chantierEnginCosts } from '../lib/enginCosts.js';
 import { listChantierTranches, getChantierTrancheDetail } from '../lib/chantierTranches.js';
 import { validateWorkProgressPhases } from '../lib/workProgressPhases.js';
 import { nextReference } from '../lib/references.js';
@@ -24,6 +25,13 @@ import { workforceDocHtml } from '../lib/workforcePrint.js';
 import { getOrCreateCompanySettings } from '../lib/companySettings.js';
 import { syncWorkforcePayrollMovement } from '../lib/cashSync.js';
 import { workforceScopeFilters } from '../lib/workforceScope.js';
+import {
+  findSessionConflict,
+  normalizeTranche,
+  resolveSessionForLine,
+} from '../lib/pointageSessions.js';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 const router = Router();
 const IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -275,7 +283,12 @@ router.get('/workforce', async (req, res) => {
       where,
       include: {
         assignments: { include: { chantier: { select: { id: true, name: true } } }, take: 3 },
-        _count: { select: { pointages: true, assignments: true } },
+        vehicleAssignments: {
+          where: { endDate: null },
+          include: { engin: { select: { id: true, brand: true, genre: true, matricule: true } } },
+          take: 1,
+        },
+        _count: { select: { pointages: true, assignments: true, vehicleAssignments: true } },
       },
       orderBy,
       skip,
@@ -485,6 +498,12 @@ router.get('/workforce/:id', async (req, res) => {
     where: { id: String(req.params.id) },
     include: {
       assignments: { include: { chantier: true }, orderBy: { startDate: 'desc' } },
+      vehicleAssignments: {
+        include: {
+          engin: { select: { id: true, brand: true, genre: true, matricule: true, status: true, photo: true } },
+        },
+        orderBy: { startDate: 'desc' },
+      },
       pointages: {
         orderBy: { date: 'desc' },
         take: 30,
@@ -504,6 +523,7 @@ router.put('/workforce/:id', async (req, res) => {
   delete data.reference;
   delete data._count;
   delete data.assignments;
+  delete data.vehicleAssignments;
   delete data.pointages;
   if (data.birthDate != null) data.birthDate = data.birthDate ? new Date(String(data.birthDate)) : null;
   if (data.hireDate != null) data.hireDate = data.hireDate ? new Date(String(data.hireDate)) : null;
@@ -519,17 +539,17 @@ router.delete('/workforce/:id', async (req, res) => {
   const motif = String(req.body?.motif || '').trim();
   if (!motif) return res.status(400).json({ message: 'Motif de suppression obligatoire' });
 
-  const [pointages, assignments] = await Promise.all([
-    prisma.pointage.count({ where: { workforceId: id } }),
-    prisma.workforceAssignment.count({ where: { workforceId: id } }),
-  ]);
-  if (pointages > 0 || assignments > 0) {
+  const pointages = await prisma.pointage.count({ where: { workforceId: id } });
+  if (pointages > 0) {
     return res.status(400).json({
-      message: `Ouvrier lié à ${pointages} pointage(s) et ${assignments} affectation(s) — suppression impossible`,
+      message: `Ouvrier lié à ${pointages} pointage(s) — suppression impossible (désactivez-le plutôt)`,
     });
   }
 
-  await prisma.workforce.delete({ where: { id } });
+  await prisma.$transaction([
+    prisma.workforceAssignment.deleteMany({ where: { workforceId: id } }),
+    prisma.workforce.delete({ where: { id } }),
+  ]);
   await audit(req, 'suppression', 'Workforce', id, motif);
   res.json({ ok: true });
 });
@@ -575,13 +595,7 @@ function parsePointageDate(dateStr: string) {
 async function pointageTrancheClause(chantierId: string, tranche: string) {
   const name = tranche.trim();
   if (!name || !chantierId) return null;
-  const assignments = await prisma.workforceAssignment.findMany({
-    where: { chantierId, tranche: name },
-    select: { workforceId: true },
-  });
-  const ids = [...new Set(assignments.map((a) => a.workforceId))];
-  if (!ids.length) return { workforceId: { in: ['__none__'] } };
-  return { workforceId: { in: ids } };
+  return { tranche: name };
 }
 
 async function buildPointageWhere(query: {
@@ -1157,6 +1171,351 @@ router.get('/pointage/salary-summary', async (req, res) => {
   });
 });
 
+// --- Gestion du pointage : un pointage = une journée d'un chantier / d'une tranche ---
+const sessionLineInclude = {
+  workforce: true,
+  chantier: { select: { id: true, name: true } },
+} as const;
+
+function summarizeSessionLines(
+  lines: Array<{
+    totalDay: number;
+    advance: number;
+    bonus: number;
+    dayRate: number | null;
+    validated: boolean;
+    workforce?: { dailySalary: number } | null;
+  }>,
+) {
+  return {
+    linesCount: lines.length,
+    validatedCount: lines.filter((l) => l.validated).length,
+    totalDays: lines.reduce((s, l) => s + l.totalDay, 0),
+    brut: lines.reduce((s, l) => s + pointageBrut(l, l.workforce?.dailySalary || 0), 0),
+    advances: lines.reduce((s, l) => s + l.advance, 0),
+    bonuses: lines.reduce((s, l) => s + l.bonus, 0),
+  };
+}
+
+async function sessionScopeList(chantierId: string, tranche: string) {
+  return prisma.pointageSession.findMany({
+    where: { chantierId, ...(tranche ? { tranche } : {}) },
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+    include: { lines: { include: { workforce: { select: { dailySalary: true } } } } },
+  });
+}
+
+async function sessionDetail(id: string) {
+  const session = await prisma.pointageSession.findUnique({
+    where: { id },
+    include: {
+      chantier: { select: { id: true, name: true } },
+      lines: { include: sessionLineInclude, orderBy: { workforce: { lastName: 'asc' } } },
+    },
+  });
+  if (!session) return null;
+  return { ...session, ...summarizeSessionLines(session.lines) };
+}
+
+router.get('/pointage/sessions', async (req, res) => {
+  const chantierId = String(req.query.chantierId || '').trim();
+  if (!chantierId) return res.status(400).json({ message: 'chantierId requis' });
+  const tranche = normalizeTranche(req.query.tranche);
+  const sessions = await sessionScopeList(chantierId, tranche);
+  res.json(
+    sessions.map((s, i) => {
+      const { lines, ...rest } = s;
+      return { ...rest, index: i + 1, ...summarizeSessionLines(lines) };
+    }),
+  );
+});
+
+router.get('/pointage/sessions/:id', async (req, res) => {
+  const detail = await sessionDetail(String(req.params.id));
+  if (!detail) return res.status(404).json({ message: 'Pointage introuvable' });
+  res.json(detail);
+});
+
+router.post('/pointage/sessions', async (req, res) => {
+  const chantierId = String(req.body.chantierId || '').trim();
+  const tranche = normalizeTranche(req.body.tranche);
+  if (!chantierId || !req.body.date) {
+    return res.status(400).json({ message: 'Chantier et date requis' });
+  }
+  const chantier = await prisma.chantier.findUnique({ where: { id: chantierId }, select: { id: true, name: true } });
+  if (!chantier) return res.status(404).json({ message: 'Chantier introuvable' });
+  if (tranche) {
+    const trancheExists = await prisma.chantierTranche.findFirst({ where: { chantierId, name: tranche } });
+    if (!trancheExists) return res.status(404).json({ message: 'Tranche introuvable' });
+  }
+  let date: Date;
+  try {
+    date = parsePointageDate(String(req.body.date));
+  } catch {
+    return res.status(400).json({ message: 'Date invalide' });
+  }
+  const conflict = await findSessionConflict(chantierId, tranche, date);
+  if (conflict) return res.status(409).json(conflict);
+
+  const session = await prisma.pointageSession.create({
+    data: {
+      chantierId,
+      tranche,
+      date,
+      remark: req.body.remark ? String(req.body.remark).trim() : null,
+    },
+  });
+
+  if (req.body.copyPrevious) {
+    const previous = await prisma.pointageSession.findFirst({
+      where: { chantierId, tranche, date: { lt: date } },
+      orderBy: { date: 'desc' },
+      include: { lines: { include: { workforce: true } } },
+    });
+    const alreadyPointed = new Set(
+      (
+        await prisma.pointage.findMany({
+          where: { chantierId, date },
+          select: { workforceId: true },
+        })
+      ).map((p) => p.workforceId),
+    );
+    for (const line of previous?.lines || []) {
+      if (!line.workforce.isActive || isMonthlyWorkforce(line.workforce)) continue;
+      if (alreadyPointed.has(line.workforceId)) continue;
+      await prisma.pointage.create({
+        data: {
+          date,
+          workforceId: line.workforceId,
+          chantierId,
+          sessionId: session.id,
+          tranche: tranche || null,
+          dayValue: 1,
+          hours: 8,
+          totalDay: 1,
+          dayRate: line.dayRate,
+        },
+      });
+    }
+  }
+
+  await audit(
+    req,
+    'création',
+    'PointageSession',
+    session.id,
+    `${chantier.name}${tranche ? ` — ${tranche}` : ''} — ${String(req.body.date).slice(0, 10)}`,
+  );
+  res.status(201).json(await sessionDetail(session.id));
+});
+
+router.put('/pointage/sessions/:id', async (req, res) => {
+  const id = String(req.params.id);
+  const existing = await prisma.pointageSession.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ message: 'Pointage introuvable' });
+  await prisma.pointageSession.update({
+    where: { id },
+    data: { remark: req.body.remark != null ? String(req.body.remark).trim() || null : existing.remark },
+  });
+  res.json(await sessionDetail(id));
+});
+
+/** Enregistrement groupé (par lot) des lignes d'un pointage. */
+router.post('/pointage/sessions/:id/lines', async (req, res) => {
+  const id = String(req.params.id);
+  const session = await prisma.pointageSession.findUnique({ where: { id } });
+  if (!session) return res.status(404).json({ message: 'Pointage introuvable' });
+  const lines = Array.isArray(req.body.lines) ? req.body.lines : [];
+  if (!lines.length) return res.status(400).json({ message: 'Aucune ligne à enregistrer' });
+
+  const errors: string[] = [];
+  let saved = 0;
+  for (const raw of lines) {
+    const workforceId = String(raw?.workforceId || '').trim();
+    if (!workforceId) continue;
+    const worker = await prisma.workforce.findUnique({
+      where: { id: workforceId },
+      select: { id: true, salaryPeriod: true, firstName: true, lastName: true },
+    });
+    if (!worker) {
+      errors.push(`Ouvrier introuvable (${workforceId})`);
+      continue;
+    }
+    const name = `${worker.firstName} ${worker.lastName}`;
+    if (isMonthlyWorkforce(worker)) {
+      errors.push(`${name} est payé au mois — pas de pointage`);
+      continue;
+    }
+    const other = await prisma.pointage.findUnique({
+      where: {
+        date_workforceId_chantierId: { date: session.date, workforceId, chantierId: session.chantierId },
+      },
+    });
+    if (other && other.sessionId && other.sessionId !== id) {
+      errors.push(`${name} est déjà pointé ce jour sur ce chantier${other.tranche ? ` (tranche ${other.tranche})` : ''}`);
+      continue;
+    }
+    const dv = parseDayValue(raw.dayValue ?? 1);
+    const rate =
+      raw.dayRate != null && raw.dayRate !== '' && !Number.isNaN(Number(raw.dayRate)) ? Number(raw.dayRate) : null;
+    const validated = raw.validated != null ? !!raw.validated : other?.validated ?? false;
+    const data = {
+      sessionId: id,
+      tranche: session.tranche || null,
+      dayValue: dv,
+      hours: dv * 8,
+      totalDay: dv,
+      dayRate: rate,
+      advance: Number(raw.advance) || 0,
+      bonus: Number(raw.bonus) || 0,
+      validated,
+      validatedAt: validated ? other?.validatedAt || new Date() : null,
+    };
+    if (other) {
+      await prisma.pointage.update({ where: { id: other.id }, data });
+    } else {
+      await prisma.pointage.create({
+        data: { ...data, date: session.date, workforceId, chantierId: session.chantierId },
+      });
+    }
+    await syncWorkforceDailyRateFromPointage(req, workforceId, rate);
+    saved++;
+  }
+  await prisma.pointageSession.update({ where: { id }, data: { updatedAt: new Date() } });
+  if (saved) {
+    await audit(req, 'pointage', 'PointageSession', id, `${saved} ligne(s) enregistrée(s)`);
+  }
+  res.json({ saved, errors, session: await sessionDetail(id) });
+});
+
+router.put('/pointage/sessions/:id/validate', async (req, res) => {
+  const id = String(req.params.id);
+  const session = await prisma.pointageSession.findUnique({ where: { id } });
+  if (!session) return res.status(404).json({ message: 'Pointage introuvable' });
+  const validated = req.body.validated !== false;
+  await prisma.pointage.updateMany({
+    where: { sessionId: id },
+    data: { validated, validatedAt: validated ? new Date() : null },
+  });
+  await audit(req, validated ? 'validation' : 'dévalidation', 'PointageSession', id, session.date.toISOString().slice(0, 10));
+  res.json(await sessionDetail(id));
+});
+
+router.delete('/pointage/sessions/:id', async (req, res) => {
+  const id = String(req.params.id);
+  const session = await prisma.pointageSession.findUnique({
+    where: { id },
+    include: { chantier: { select: { name: true } }, _count: { select: { lines: true } } },
+  });
+  if (!session) return res.status(404).json({ message: 'Pointage introuvable' });
+  const motif = String(req.body?.motif || '').trim();
+  if (!motif) return res.status(400).json({ message: 'Motif de suppression obligatoire' });
+  await prisma.$transaction([
+    prisma.pointage.deleteMany({ where: { sessionId: id } }),
+    prisma.pointageSession.delete({ where: { id } }),
+  ]);
+  await audit(
+    req,
+    'suppression',
+    'PointageSession',
+    id,
+    `${session.chantier.name}${session.tranche ? ` — ${session.tranche}` : ''} — ${session.date
+      .toISOString()
+      .slice(0, 10)} — ${session._count.lines} ligne(s) — ${motif}`,
+  );
+  res.json({ ok: true, deletedLines: session._count.lines });
+});
+
+/** Synthèse par ouvrier (chantier / tranche / période). */
+router.get('/pointage/by-worker', async (req, res) => {
+  const where = await buildPointageWhere({
+    dateFrom: req.query.dateFrom ? String(req.query.dateFrom) : null,
+    dateTo: req.query.dateTo ? String(req.query.dateTo) : null,
+    chantierId: String(req.query.chantierId || ''),
+    validated: String(req.query.validated || ''),
+    tranche: String(req.query.tranche || ''),
+  });
+  const rows = await prisma.pointage.findMany({
+    where,
+    include: { workforce: true },
+    orderBy: { date: 'asc' },
+  });
+  const map = new Map<
+    string,
+    {
+      workforce: (typeof rows)[number]['workforce'];
+      lines: number;
+      validatedLines: number;
+      totalDays: number;
+      brut: number;
+      bonuses: number;
+      advances: number;
+      firstDate: Date;
+      lastDate: Date;
+    }
+  >();
+  for (const p of rows) {
+    let entry = map.get(p.workforceId);
+    if (!entry) {
+      entry = {
+        workforce: p.workforce,
+        lines: 0,
+        validatedLines: 0,
+        totalDays: 0,
+        brut: 0,
+        bonuses: 0,
+        advances: 0,
+        firstDate: p.date,
+        lastDate: p.date,
+      };
+      map.set(p.workforceId, entry);
+    }
+    entry.lines++;
+    if (p.validated) entry.validatedLines++;
+    entry.totalDays += p.totalDay;
+    entry.brut += pointageBrut(p, p.workforce.dailySalary || 0);
+    entry.bonuses += p.bonus;
+    entry.advances += p.advance;
+    if (p.date < entry.firstDate) entry.firstDate = p.date;
+    if (p.date > entry.lastDate) entry.lastDate = p.date;
+  }
+  const items = [...map.values()]
+    .map((e) => ({
+      workforceId: e.workforce.id,
+      workforce: {
+        id: e.workforce.id,
+        reference: e.workforce.reference,
+        firstName: e.workforce.firstName,
+        lastName: e.workforce.lastName,
+        category: e.workforce.category,
+        photo: e.workforce.photo,
+        dailySalary: e.workforce.dailySalary,
+      },
+      lines: e.lines,
+      validatedLines: e.validatedLines,
+      totalDays: e.totalDays,
+      brut: e.brut,
+      bonuses: e.bonuses,
+      advances: e.advances,
+      remaining: e.brut + e.bonuses - e.advances,
+      firstDate: e.firstDate,
+      lastDate: e.lastDate,
+    }))
+    .sort((a, b) => a.workforce.lastName.localeCompare(b.workforce.lastName, 'fr'));
+  const totals = items.reduce(
+    (s, i) => ({
+      workers: s.workers + 1,
+      totalDays: s.totalDays + i.totalDays,
+      brut: s.brut + i.brut,
+      bonuses: s.bonuses + i.bonuses,
+      advances: s.advances + i.advances,
+      remaining: s.remaining + i.remaining,
+    }),
+    { workers: 0, totalDays: 0, brut: 0, bonuses: 0, advances: 0, remaining: 0 },
+  );
+  res.json({ items, totals });
+});
+
 router.get('/pointage/day', async (req, res) => {
   const date = req.query.date ? String(req.query.date) : new Date().toISOString().slice(0, 10);
   const chantierId = String(req.query.chantierId || '');
@@ -1255,6 +1614,15 @@ router.post('/pointage', async (req, res) => {
   const totalDay = dv;
   const rate =
     dayRate != null && dayRate !== '' && !Number.isNaN(Number(dayRate)) ? Number(dayRate) : null;
+  const existingLine = await prisma.pointage.findUnique({
+    where: {
+      date_workforceId_chantierId: { date: pointageDate, workforceId: String(workforceId), chantierId: cid },
+    },
+    select: { sessionId: true },
+  });
+  const session = existingLine?.sessionId
+    ? null
+    : await resolveSessionForLine(cid, pointageDate, req.body.tranche);
   const pointage = await prisma.pointage.upsert({
     where: {
       date_workforceId_chantierId: {
@@ -1267,6 +1635,8 @@ router.post('/pointage', async (req, res) => {
       date: pointageDate,
       workforceId: String(workforceId),
       chantierId: cid,
+      sessionId: session?.id ?? null,
+      tranche: session?.tranche || null,
       dayValue: dv,
       hours,
       totalDay,
@@ -1277,6 +1647,7 @@ router.post('/pointage', async (req, res) => {
       validatedAt: validated ? new Date() : null,
     },
     update: {
+      ...(session ? { sessionId: session.id, tranche: session.tranche || null } : {}),
       dayValue: dv,
       hours,
       totalDay,
@@ -1322,10 +1693,22 @@ router.put('/pointage/:id', async (req, res) => {
         : null
       : existing.dayRate;
 
+  const nextChantierId =
+    req.body.chantierId !== undefined ? req.body.chantierId || null : existing.chantierId;
+  let sessionPatch: { sessionId: string | null; tranche: string | null } | null = null;
+  if (nextChantierId !== existing.chantierId) {
+    if (nextChantierId) {
+      const s = await resolveSessionForLine(nextChantierId, existing.date);
+      sessionPatch = { sessionId: s.id, tranche: s.tranche || null };
+    } else {
+      sessionPatch = { sessionId: null, tranche: null };
+    }
+  }
   const pointage = await prisma.pointage.update({
     where: { id },
     data: {
-      chantierId: req.body.chantierId !== undefined ? req.body.chantierId || null : existing.chantierId,
+      chantierId: nextChantierId,
+      ...(sessionPatch || {}),
       dayValue,
       hours,
       totalDay,
@@ -1418,6 +1801,22 @@ function buildChantierWhere(q: string, status: string, projectId?: string) {
   };
 }
 
+function toValidDate(v: unknown): Date | null {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(String(v));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Date de début strictement antérieure à la date de fin. */
+function dateOrderError(start: unknown, end: unknown) {
+  const s = toValidDate(start);
+  const e = toValidDate(end);
+  if (s && e && s.getTime() >= e.getTime()) {
+    return 'La date de début doit être strictement antérieure à la date de fin.';
+  }
+  return null;
+}
+
 router.get('/chefs', async (_req, res) => {
   const users = await prisma.user.findMany({
     where: { isActive: true, role: { in: ['CHEF_CHANTIER', 'ADMIN', 'SUPER_ADMIN'] } },
@@ -1425,6 +1824,41 @@ router.get('/chefs', async (_req, res) => {
     orderBy: { firstName: 'asc' },
   });
   res.json(users);
+});
+
+/** Création rapide d'un chef de chantier (compte utilisateur rôle CHEF_CHANTIER). */
+router.post('/chefs', async (req, res) => {
+  if (!['ADMIN', 'SUPER_ADMIN'].includes(String(req.user?.role))) {
+    return res.status(403).json({ message: 'Seul un administrateur peut créer un chef de chantier' });
+  }
+  const firstName = String(req.body.firstName || '').trim();
+  const lastName = String(req.body.lastName || '').trim();
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!firstName || !lastName || !email) {
+    return res.status(400).json({ message: 'Prénom, nom et email requis' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: 'Email invalide' });
+  }
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
+  const provided = String(req.body.password || '');
+  if (provided && provided.length < 6) {
+    return res.status(400).json({ message: 'Mot de passe : 6 caractères minimum' });
+  }
+  const password = provided || crypto.randomBytes(6).toString('base64url');
+  const user = await prisma.user.create({
+    data: {
+      email,
+      firstName,
+      lastName,
+      role: 'CHEF_CHANTIER',
+      passwordHash: await bcrypt.hash(password, 10),
+    },
+    select: { id: true, firstName: true, lastName: true, email: true },
+  });
+  await audit(req, 'création', 'User', user.id, `Chef de chantier ${user.firstName} ${user.lastName}`);
+  res.status(201).json({ ...user, generatedPassword: provided ? null : password });
 });
 
 router.get('/stats', async (req, res) => {
@@ -1528,6 +1962,8 @@ router.post('/', async (req, res) => {
   const data = { ...req.body };
   if (data.startDate) data.startDate = new Date(data.startDate);
   if (data.endDate) data.endDate = data.endDate ? new Date(data.endDate) : null;
+  const dateErr = dateOrderError(data.startDate, data.endDate);
+  if (dateErr) return res.status(400).json({ message: dateErr });
   data.workerCount = Number(data.workerCount || 0);
   data.projectId = normalizeProjectId(data.projectId);
   if (data.managerUserId) data.managerUserId = String(data.managerUserId);
@@ -1715,11 +2151,16 @@ router.post('/:id/tranches', async (req, res) => {
   if (!name) return res.status(400).json({ message: 'Nom de tranche requis' });
   const chantier = await prisma.chantier.findUnique({ where: { id: chantierId }, select: { id: true } });
   if (!chantier) return res.status(404).json({ message: 'Chantier introuvable' });
-  const estimatedStartDate = req.body.estimatedStartDate ? new Date(String(req.body.estimatedStartDate)) : null;
-  const estimatedEndDate = req.body.estimatedEndDate ? new Date(String(req.body.estimatedEndDate)) : null;
+  const estimatedStartDate = toValidDate(req.body.estimatedStartDate);
+  const estimatedEndDate = toValidDate(req.body.estimatedEndDate);
   const existingTranche = await prisma.chantierTranche.findUnique({
     where: { chantierId_name: { chantierId, name } },
   });
+  const dateErr = dateOrderError(
+    req.body.estimatedStartDate !== undefined ? estimatedStartDate : existingTranche?.estimatedStartDate,
+    req.body.estimatedEndDate !== undefined ? estimatedEndDate : existingTranche?.estimatedEndDate,
+  );
+  if (dateErr) return res.status(400).json({ message: dateErr });
   if (existingTranche) {
     const updated = await prisma.chantierTranche.update({
       where: { id: existingTranche.id },
@@ -1770,10 +2211,21 @@ router.put('/:id/tranches/:trancheId', async (req, res) => {
     estimatedEndDate?: Date | null;
   } = { name: newName, remark };
   if (req.body.estimatedStartDate !== undefined) {
-    data.estimatedStartDate = req.body.estimatedStartDate ? new Date(String(req.body.estimatedStartDate)) : null;
+    data.estimatedStartDate = toValidDate(req.body.estimatedStartDate);
   }
   if (req.body.estimatedEndDate !== undefined) {
-    data.estimatedEndDate = req.body.estimatedEndDate ? new Date(String(req.body.estimatedEndDate)) : null;
+    data.estimatedEndDate = toValidDate(req.body.estimatedEndDate);
+  }
+  const dateErr = dateOrderError(
+    data.estimatedStartDate !== undefined ? data.estimatedStartDate : tranche.estimatedStartDate,
+    data.estimatedEndDate !== undefined ? data.estimatedEndDate : tranche.estimatedEndDate,
+  );
+  if (dateErr) return res.status(400).json({ message: dateErr });
+  if (newName !== oldName) {
+    const clash = await prisma.chantierTranche.findUnique({
+      where: { chantierId_name: { chantierId, name: newName } },
+    });
+    if (clash) return res.status(400).json({ message: `Une tranche « ${newName} » existe déjà sur ce chantier` });
   }
   const updated = await prisma.chantierTranche.update({ where: { id: trancheId }, data });
   if (newName !== oldName) {
@@ -1782,6 +2234,8 @@ router.put('/:id/tranches/:trancheId', async (req, res) => {
       prisma.workforceAssignment.updateMany({ where: { chantierId, tranche: oldName }, data: { tranche: newName } }),
       prisma.mission.updateMany({ where: { chantierId, tranche: oldName }, data: { tranche: newName } }),
       prisma.purchase.updateMany({ where: { chantierId, tranche: oldName }, data: { tranche: newName } }),
+      prisma.pointage.updateMany({ where: { chantierId, tranche: oldName }, data: { tranche: newName } }),
+      prisma.pointageSession.updateMany({ where: { chantierId, tranche: oldName }, data: { tranche: newName } }),
     ]);
   }
   await audit(req, 'modification', 'ChantierTranche', trancheId, updated.name);
@@ -1794,19 +2248,30 @@ router.delete('/:id/tranches/:trancheId', async (req, res) => {
   const tranche = await prisma.chantierTranche.findFirst({ where: { id: trancheId, chantierId } });
   if (!tranche) return res.status(404).json({ message: 'Tranche introuvable' });
 
-  const [progress, assignments, missions, purchases] = await Promise.all([
-    prisma.workProgress.count({ where: { chantierId, tranche: tranche.name } }),
-    prisma.workforceAssignment.count({ where: { chantierId, tranche: tranche.name } }),
+  const [progress, pointages, missions, purchases] = await Promise.all([
+    prisma.workProgress.count({
+      where: {
+        chantierId,
+        tranche: tranche.name,
+        OR: [{ percent: { gt: 0 } }, { remark: { not: null } }],
+      },
+    }),
+    prisma.pointage.count({ where: { chantierId, tranche: tranche.name } }),
     prisma.mission.count({ where: { chantierId, tranche: tranche.name } }),
     prisma.purchase.count({ where: { chantierId, tranche: tranche.name } }),
   ]);
-  if (progress + assignments + missions + purchases > 0) {
+  if (progress + pointages + missions + purchases > 0) {
     return res.status(400).json({
-      message: `Tranche liée à ${progress} tâche(s), ${assignments} ouvrier(s), ${missions} mission(s), ${purchases} achat(s) — suppression impossible`,
+      message: `Tranche liée à ${progress} tâche(s) commencée(s), ${pointages} pointage(s), ${missions} mission(s), ${purchases} achat(s) — suppression impossible`,
     });
   }
 
-  await prisma.chantierTranche.delete({ where: { id: trancheId } });
+  await prisma.$transaction([
+    prisma.workProgress.deleteMany({ where: { chantierId, tranche: tranche.name } }),
+    prisma.workforceAssignment.updateMany({ where: { chantierId, tranche: tranche.name }, data: { tranche: null } }),
+    prisma.pointageSession.deleteMany({ where: { chantierId, tranche: tranche.name } }),
+    prisma.chantierTranche.delete({ where: { id: trancheId } }),
+  ]);
   await audit(req, 'suppression', 'ChantierTranche', trancheId, tranche.name);
   res.json({ ok: true });
 });
@@ -1876,10 +2341,14 @@ router.get('/:id', async (req, res) => {
       where: { chantierId: id, validated: true },
       _sum: { totalDay: true },
     }),
-    prisma.workforceAssignment.count({
-      where: { chantierId: id, workforce: { declared: false, isActive: true } },
+    prisma.pointage.findMany({
+      where: { chantierId: id },
+      distinct: ['workforceId'],
+      select: { workforceId: true, workforce: { select: { declared: true, isActive: true } } },
     }),
   ]);
+  const personnelCount = cnssNonDeclare.length;
+  const enginCosts = await chantierEnginCosts(id);
 
   const overview = buildChantierOverview({
     id: chantier.id,
@@ -1894,10 +2363,12 @@ router.get('/:id', async (req, res) => {
     pointageToday,
     pointageValidatedToday,
     costMO: Number(costMOAgg._sum.totalDay || 0),
-    cnssNonDeclare,
+    cnssNonDeclare: cnssNonDeclare.filter((p) => !p.workforce.declared && p.workforce.isActive).length,
+    personnelCount,
+    costEngins: enginCosts.total,
   });
 
-  res.json({ ...chantier, overview });
+  res.json({ ...chantier, overview, enginCosts, pointedWorkersCount: personnelCount });
 });
 
 router.put('/:id', async (req, res) => {
@@ -1913,8 +2384,18 @@ router.put('/:id', async (req, res) => {
   delete data.cameras;
   delete data.overview;
   delete data.project;
+  delete data.pointedWorkersCount;
   if (data.startDate != null) data.startDate = data.startDate ? new Date(data.startDate) : null;
   if (data.endDate != null) data.endDate = data.endDate ? new Date(data.endDate) : null;
+  if (data.startDate !== undefined || data.endDate !== undefined) {
+    const current = await prisma.chantier.findUnique({ where: { id }, select: { startDate: true, endDate: true } });
+    if (!current) return res.status(404).json({ message: 'Chantier introuvable' });
+    const err = dateOrderError(
+      data.startDate !== undefined ? data.startDate : current.startDate,
+      data.endDate !== undefined ? data.endDate : current.endDate,
+    );
+    if (err) return res.status(400).json({ message: err });
+  }
   if (data.workerCount != null) data.workerCount = Number(data.workerCount);
   if (data.progressPct != null) data.progressPct = Number(data.progressPct);
   if (data.budgetAchats != null) data.budgetAchats = data.budgetAchats ? Number(data.budgetAchats) : null;
@@ -1931,21 +2412,23 @@ router.delete('/:id', async (req, res) => {
   const motif = String(req.body?.motif || '').trim();
   if (!motif) return res.status(400).json({ message: 'Motif de suppression obligatoire' });
 
-  const [purchases, assignments, missions, pointages, progress] = await Promise.all([
+  const [purchases, missions, pointages, progress] = await Promise.all([
     prisma.purchase.count({ where: { chantierId: id } }),
-    prisma.workforceAssignment.count({ where: { chantierId: id } }),
     prisma.mission.count({ where: { chantierId: id } }),
     prisma.pointage.count({ where: { chantierId: id } }),
     prisma.workProgress.count({ where: { chantierId: id } }),
   ]);
-  const linked = purchases + assignments + missions + pointages + progress;
+  const linked = purchases + missions + pointages + progress;
   if (linked > 0) {
     return res.status(400).json({
-      message: `Chantier lié à des données (${purchases} achats, ${assignments} affectations, ${missions} missions) — suppression impossible`,
+      message: `Chantier lié à des données (${purchases} achats, ${pointages} pointages, ${missions} missions, ${progress} tâches) — suppression impossible`,
     });
   }
 
-  await prisma.chantier.delete({ where: { id } });
+  await prisma.$transaction([
+    prisma.workforceAssignment.deleteMany({ where: { chantierId: id } }),
+    prisma.chantier.delete({ where: { id } }),
+  ]);
   await audit(req, 'suppression', 'Chantier', id, motif);
   res.json({ ok: true });
 });
@@ -2180,55 +2663,6 @@ router.delete('/:id/photo', async (req, res) => {
   });
   await audit(req, 'photo', 'Chantier', chantier.id, 'suppression couverture');
   res.json(chantier);
-});
-
-router.get('/:id/stock', async (req, res) => {
-  const items = await prisma.chantierStockItem.findMany({
-    where: { chantierId: String(req.params.id) },
-    orderBy: { name: 'asc' },
-  });
-  res.json(items);
-});
-
-router.post('/:id/stock', async (req, res) => {
-  const item = await prisma.chantierStockItem.create({
-    data: {
-      chantierId: String(req.params.id),
-      name: String(req.body.name || '').trim(),
-      quantity: Number(req.body.quantity || 0),
-      unit: req.body.unit ? String(req.body.unit).trim() : null,
-      tranche: req.body.tranche ? String(req.body.tranche).trim() : null,
-      remark: req.body.remark ? String(req.body.remark).trim() : null,
-    },
-  });
-  res.status(201).json(item);
-});
-
-router.put('/:id/stock/:itemId', async (req, res) => {
-  const item = await prisma.chantierStockItem.findFirst({
-    where: { id: String(req.params.itemId), chantierId: String(req.params.id) },
-  });
-  if (!item) return res.status(404).json({ message: 'Article introuvable' });
-  const updated = await prisma.chantierStockItem.update({
-    where: { id: item.id },
-    data: {
-      name: req.body.name != null ? String(req.body.name).trim() : undefined,
-      quantity: req.body.quantity != null ? Number(req.body.quantity) : undefined,
-      unit: req.body.unit !== undefined ? (req.body.unit ? String(req.body.unit).trim() : null) : undefined,
-      tranche: req.body.tranche !== undefined ? (req.body.tranche ? String(req.body.tranche).trim() : null) : undefined,
-      remark: req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark).trim() : null) : undefined,
-    },
-  });
-  res.json(updated);
-});
-
-router.delete('/:id/stock/:itemId', async (req, res) => {
-  const item = await prisma.chantierStockItem.findFirst({
-    where: { id: String(req.params.itemId), chantierId: String(req.params.id) },
-  });
-  if (!item) return res.status(404).json({ message: 'Article introuvable' });
-  await prisma.chantierStockItem.delete({ where: { id: item.id } });
-  res.json({ ok: true });
 });
 
 router.get('/:id/subcontractors', async (req, res) => {

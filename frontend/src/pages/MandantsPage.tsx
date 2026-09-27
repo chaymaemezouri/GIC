@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -13,7 +13,9 @@ import {
 } from '../components/ui';
 import { MandantFormFields, emptyMandantForm, mandantToForm, type MandantFormData } from '../components/MandantFormFields';
 import MacAvatar from '../components/MacAvatar';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Mandant = {
@@ -60,6 +62,7 @@ export default function MandantsPage() {
   const [form, setForm] = useState<MandantFormData>(emptyMandantForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Mandant>();
 
   function buildQuery(pageNum = page) {
     const qs = new URLSearchParams();
@@ -194,22 +197,33 @@ export default function MandantsPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.mandants'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.mandants')} — GIC</title></head><body>
-      <h1>${t('pages.mandants')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.ref')}</th><th>${t('columns.name')}</th><th>${t('columns.identity')}</th><th>${t('columns.email')}</th><th>${t('columns.phoneFull')}</th><th>${t('columns.linkedClients')}</th></tr>
-        ${items.map((m) => `<tr>
-          <td>${m.reference || '—'}</td>
-          <td>${m.firstName} ${m.lastName}</td>
-          <td>${m.identityType || ''} ${m.identityNumber || '—'}</td>
-          <td>${m.email || '—'}</td>
-          <td>${m.phone1 || '—'}</td>
-          <td>${m._count?.clients ?? 0}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    printRows<Mandant>({
+      title: t('pages.mandants'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('fields.identityType'), typeFilter],
+        [t('common.clientLink'), linkedFilter && linkedFilters.find((f) => f.id === linkedFilter)?.label],
+        [t('listPrint.sort'), sortOptions.find((o) => o.value === sort)?.label],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (m) => m.reference },
+        { label: t('columns.fullName'), value: (m) => `${m.firstName} ${m.lastName}` },
+        { label: t('columns.identity'), value: (m) => [m.identityType, m.identityNumber].filter(Boolean).join(' ') },
+        { label: t('columns.email'), value: (m) => m.email },
+        { label: t('columns.phoneFull'), value: (m) => m.phone1 },
+        { label: t('columns.linkedClients'), value: (m) => m._count?.clients ?? 0, align: 'right' },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Mandant>('/mandants', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
+
+  const sortOptions = [
+    { value: 'lastName', label: t('msg.nameAZ') },
+    { value: 'reference', label: t('fields.reference') },
+    { value: 'createdAt', label: t('msg.newestFirst') },
+  ];
 
   const typeFilters = [
     { id: '', label: t('common.allTypes') },
@@ -261,11 +275,7 @@ export default function MandantsPage() {
             <MacSelect
               value={sort}
               onChange={setSort}
-              options={[
-                { value: 'lastName', label: t('msg.nameAZ') },
-                { value: 'reference', label: t('fields.reference') },
-                { value: 'createdAt', label: t('msg.newestFirst') },
-              ]}
+              options={sortOptions}
               className="w-40 shrink-0"
             />
             <div ref={filtersRef} className="relative shrink-0 z-50">
@@ -349,6 +359,8 @@ export default function MandantsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -358,6 +370,7 @@ export default function MandantsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.photo')}</Th>
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.fullName')}</Th>
@@ -371,6 +384,7 @@ export default function MandantsPage() {
             <tbody>
               {items.map((m) => (
                 <tr key={m.id} className="cursor-pointer" onClick={() => navigate(`/mandants/${m.id}`)}>
+                  <SelectTd selection={selection} row={m} />
                   <Td mac>
                     <MacAvatar photo={m.photo} firstName={m.firstName} lastName={m.lastName} />
                   </Td>

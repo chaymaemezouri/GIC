@@ -9,7 +9,7 @@ import { api, downloadCsv, downloadExcel, uploadForm, type PaginatedResponse } f
 import { useAuth } from '../context/AuthContext';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import { roleLabel, canAccessRoute } from '../lib/permissions';
-import { ActionBadge, AUDIT_ACTION_FILTERS, AUDIT_ENTITY_FILTERS, auditEntityLabel, auditEntityLink, formatAuditDateTime } from '../lib/auditDisplay';
+import { ActionBadge, AUDIT_ACTION_FILTERS, AUDIT_ENTITY_FILTERS, auditActionLabel, auditEntityLabel, auditEntityLink, formatAuditDateTime } from '../lib/auditDisplay';
 import { DEFAULT_RAIL_PATHS, buildNavCatalog, settingsAdminItems } from '../lib/navConfig';
 import {
   getCatalogForRole,
@@ -23,7 +23,10 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import EccBrandFooter from '../components/EccBrandFooter';
 import { fileUrl } from '../lib/documentDisplay';
 import { printBankTransferList } from '../lib/printBankTransferList';
-import { invalidateCompanySettings, printSimpleTable, printWithCompany, escHtml } from '../lib/companyPrint';
+import { invalidateCompanySettings, printWithCompany, escHtml } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import type { Lang } from '../i18n/types';
 
@@ -156,6 +159,7 @@ export default function ParametresPage() {
   const [showFilters, setShowFilters] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
   const [actLoading, setActLoading] = useState(false);
+  const activitySelection = useRowSelection<ActivityLog>();
   const [railPaths, setRailPaths] = useState<string[]>(DEFAULT_RAIL_PATHS);
   const [sidebarSaving, setSidebarSaving] = useState(false);
 
@@ -573,16 +577,26 @@ export default function ParametresPage() {
   }
 
   function printActivity() {
-    void printSimpleTable({
+    const sortLabel = sort === 'action' ? t('columns.action') : sort === 'entity' ? t('columns.entity') : t('columns.date');
+    printRows<ActivityLog>({
       title: t('settings.activity'),
       subtitle: `${user?.firstName || ''} ${user?.lastName || ''} · ${user?.email || ''}`,
-      columns: [t('fields.date'), t('msg.action'), t('msg.entity'), t('msg.details')],
-      rows: activity.map((l) => [
-        formatAuditDateTime(l.createdAt),
-        l.action,
-        auditEntityLabel(l.entity),
-        l.details || '—',
-      ]),
+      filters: [
+        [t('listPrint.search'), actQ],
+        [t('listPrint.period'), dateFrom || dateTo ? `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}` : ''],
+        [t('settings.activityActionType'), actAction && AUDIT_ACTION_FILTERS.find((f) => f.id === actAction)?.label],
+        [t('msg.entity'), actEntity && AUDIT_ENTITY_FILTERS.find((f) => f.id === actEntity)?.label],
+        [t('listPrint.sort'), `${sortLabel} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (l) => formatAuditDateTime(l.createdAt) },
+        { label: t('columns.action'), value: (l) => auditActionLabel(l.action) },
+        { label: t('columns.entity'), value: (l) => `${auditEntityLabel(l.entity)}${l.entityId ? ` #${l.entityId.slice(0, 6)}` : ''}` },
+        { label: t('columns.details'), value: (l) => l.details },
+        { label: t('columns.ip'), value: (l) => l.ipAddress },
+      ],
+      rows: activitySelection.count ? activitySelection.rows : () => fetchAllRows<ActivityLog>('/auth/me/activity', buildActivityQuery(1)),
+      selectedCount: activitySelection.count,
     });
   }
 
@@ -1311,6 +1325,8 @@ export default function ParametresPage() {
             </div>
           </div>
 
+          <SelectionBar selection={activitySelection} onPrint={printActivity} />
+
           <Card padding={false}>
             {actLoading ? (
               <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -1320,6 +1336,7 @@ export default function ParametresPage() {
               <TableWrap mac>
                 <thead>
                   <tr>
+                    <SelectAllTh selection={activitySelection} rows={activity} />
                     <Th mac>{t('columns.date')}</Th>
                     <Th mac>{t('columns.action')}</Th>
                     <Th mac>{t('columns.entity')}</Th>
@@ -1337,6 +1354,7 @@ export default function ParametresPage() {
                         className="cursor-pointer"
                         onClick={() => navigate(`/audit/${l.id}`)}
                       >
+                        <SelectTd selection={activitySelection} row={l} />
                         <Td mac className="mac-table-muted whitespace-nowrap">{formatAuditDateTime(l.createdAt)}</Td>
                         <Td mac><ActionBadge action={l.action} /></Td>
                         <Td mac>

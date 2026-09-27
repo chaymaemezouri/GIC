@@ -13,9 +13,13 @@ import {
   OfficeCashFormFields, emptyOfficeCashForm, officeCashToForm,
   officePurposeLabel, type OfficeCashFormData,
 } from '../components/OfficeCashFormFields';
-import { printOfficeCashList, printOfficeCashReceipt } from '../lib/printOfficeCash';
+import { printOfficeCashReceipt } from '../lib/printOfficeCash';
+import { escHtml } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert } from '../lib/dialog';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Movement = {
@@ -96,6 +100,7 @@ export default function CaisseBureauPage() {
   const [formError, setFormError] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteMotif, setDeleteMotif] = useState('');
+  const selection = useRowSelection<Movement>();
 
   function buildFilterQs(overrides?: FilterOverrides) {
     const qs = new URLSearchParams();
@@ -252,6 +257,72 @@ export default function CaisseBureauPage() {
     }
   }
 
+  const directionOptions = [
+    { id: '', label: t('common.allFeminine') },
+    { id: 'sortie', label: t('common.exitsDebit') },
+    { id: 'entree', label: t('common.entriesCredit') },
+  ];
+
+  const purposeOptions = [
+    { id: '', label: t('common.allMotifs') },
+    { id: 'chantier', label: t('fields.purposeChantier') },
+    { id: 'travail', label: t('fields.purposeTravail') },
+    { id: 'aleatoire', label: t('fields.purposeAleatoire') },
+    { id: 'alimentation', label: t('fields.purposeAlimentation') },
+  ];
+
+  function reconnuLabel(m: Movement) {
+    return m.reconnu ? `${m.reconnu.firstName} ${m.reconnu.lastName}` : m.reconnuName || '';
+  }
+
+  function sumDirection(rows: Movement[], direction: string) {
+    return rows.filter((m) => m.direction === direction).reduce((s, m) => s + Number(m.amount || 0), 0);
+  }
+
+  function printList() {
+    const reconnu = reconnus.find((r) => r.id === reconnuFilter);
+    const creator = users.find((u) => u.email === createdByFilter);
+    printRows<Movement>({
+      title: t('pages.cash'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('fields.recognized'), reconnuFilter && (reconnu ? `${reconnu.firstName} ${reconnu.lastName}` : reconnuFilter)],
+        [t('fields.createdBy'), createdByFilter && (creator ? `${creator.firstName} ${creator.lastName}` : createdByFilter)],
+        [t('listPrint.period'), (dateFrom || dateTo) && `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}`],
+        [t('fields.direction'), directionFilter && directionOptions.find((f) => f.id === directionFilter)?.label],
+        [t('fields.motif'), purposeFilter && purposeOptions.find((f) => f.id === purposeFilter)?.label],
+        [t('fields.remark'), remarkFilter],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (m) => formatDate(m.date) },
+        { label: t('columns.designation'), value: (m) => [m.designation, m.workLabel, m.chantier?.name].filter(Boolean).join(' — ') },
+        { label: t('columns.piece'), value: (m) => !!m.proofFile, align: 'center' },
+        { label: t('columns.recognized'), value: reconnuLabel },
+        { label: t('columns.motif'), value: (m) => officePurposeLabel(m.purpose, t) },
+        {
+          label: t('columns.debit'),
+          value: (m) => (m.direction === 'sortie' ? formatMad(m.amount) : ''),
+          align: 'right',
+          total: (rows) => formatMad(sumDirection(rows, 'sortie')),
+        },
+        {
+          label: t('columns.credit'),
+          value: (m) => (m.direction === 'entree' ? formatMad(m.amount) : ''),
+          align: 'right',
+          total: (rows) => formatMad(sumDirection(rows, 'entree')),
+        },
+        { label: t('columns.remark'), value: (m) => m.remark },
+      ],
+      extraHtml: (rows) => {
+        const sorties = sumDirection(rows, 'sortie');
+        const entrees = sumDirection(rows, 'entree');
+        return `<p><span class="k">${escHtml(t('columns.debit'))} :</span> ${escHtml(formatMad(sorties))} · <span class="k">${escHtml(t('columns.credit'))} :</span> ${escHtml(formatMad(entrees))} · <span class="k">${escHtml(t('kpi.cashRemaining'))} :</span> ${escHtml(formatMad(entrees - sorties))}</p>`;
+      },
+      rows: selection.count ? selection.rows : () => fetchAllRows<Movement>('/caisse-bureau', buildListQuery(1)),
+      selectedCount: selection.count,
+    });
+  }
+
   return (
     <div className="space-y-0">
       <PageHeader
@@ -266,7 +337,7 @@ export default function CaisseBureauPage() {
                 icon={Printer}
                 tone="gray"
                 title={t('common.print')}
-                onClick={() => printOfficeCashList(items, totals)}
+                onClick={printList}
               />
             </div>
           </>
@@ -374,11 +445,7 @@ export default function CaisseBureauPage() {
               {showFilters && (
                 <div className="mac-filter-menu" role="menu">
                   <p className="mac-filter-menu-section">{t('common.direction')}</p>
-                  {[
-                    { id: '', label: t('common.allFeminine') },
-                    { id: 'sortie', label: t('common.exitsDebit') },
-                    { id: 'entree', label: t('common.entriesCredit') },
-                  ].map((f) => (
+                  {directionOptions.map((f) => (
                     <button
                       key={f.id || 'all-dir'}
                       type="button"
@@ -396,13 +463,7 @@ export default function CaisseBureauPage() {
                   ))}
                   <div className="mac-filter-menu-sep" />
                   <p className="mac-filter-menu-section">{t('fields.purpose')}</p>
-                  {[
-                    { id: '', label: t('common.allMotifs') },
-                    { id: 'chantier', label: t('fields.purposeChantier') },
-                    { id: 'travail', label: t('fields.purposeTravail') },
-                    { id: 'aleatoire', label: t('fields.purposeAleatoire') },
-                    { id: 'alimentation', label: t('fields.purposeAlimentation') },
-                  ].map((f) => (
+                  {purposeOptions.map((f) => (
                     <button
                       key={f.id || 'all-purpose'}
                       type="button"
@@ -480,6 +541,8 @@ export default function CaisseBureauPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -492,6 +555,7 @@ export default function CaisseBureauPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.date')}</Th>
                 <Th mac>{t('columns.designation')}</Th>
                 <Th mac>{t('columns.piece')}</Th>
@@ -506,6 +570,7 @@ export default function CaisseBureauPage() {
             <tbody>
               {items.map((m) => (
                 <tr key={m.id} className="cursor-pointer" onClick={() => openView(m)}>
+                  <SelectTd selection={selection} row={m} />
                   <Td mac className="mac-table-muted">{formatDate(m.date)}</Td>
                   <Td mac>
                     <span className="mac-table-ref">{m.designation}</span>

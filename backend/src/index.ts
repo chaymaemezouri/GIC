@@ -22,6 +22,9 @@ import equipeInterneRoutes from './routes/equipeInterne.js';
 import reconnusRoutes from './routes/reconnus.js';
 import officeCashRoutes from './routes/officeCash.js';
 import { uploadDir } from './lib/uploadPaths.js';
+import { backfillPointageSessions } from './lib/pointageSessions.js';
+import { migrateLegacyPurchases } from './lib/purchaseWorkflow.js';
+import { migrateEnginFleet } from './lib/enginCosts.js';
 
 const app = express();
 app.use(
@@ -80,4 +83,19 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {
   console.log(`GIC API prête sur http://localhost:${port}`);
+  backfillPointageSessions()
+    .then((n) => {
+      if (n) console.log(`Pointage : ${n} ligne(s) historiques rattachées à un pointage journalier`);
+    })
+    .catch((err) => console.error('Backfill pointage sessions', err));
+  migrateLegacyPurchases()
+    .then((n) => {
+      if (n) console.log(`Achats : ${n} achat(s) repris dans le nouveau cycle (lignes, statuts, paiements)`);
+    })
+    .catch((err) => console.error('Migration achats', err));
+  migrateEnginFleet()
+    .then((n) => {
+      if (n) console.log(`Engins & Matériels : ${n} fiche(s) normalisée(s)`);
+    })
+    .catch((err) => console.error('Migration engins', err));
 });

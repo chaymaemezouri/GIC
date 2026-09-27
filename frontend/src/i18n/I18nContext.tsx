@@ -10,9 +10,14 @@ import {
 import type { Dict, I18nContextValue, Lang, TranslateFn } from './types';
 import fr from './fr';
 import ar from './ar';
+import fleetFr from './fleetFr';
+import fleetAr from './fleetAr';
 
 const STORAGE_KEY = 'gic_lang';
-const dictionaries: Record<Lang, Dict> = { fr, ar };
+const dictionaries: Record<Lang, Dict> = {
+  fr: { ...fr, fleet: fleetFr },
+  ar: { ...ar, fleet: fleetAr },
+};
 
 function readStoredLang(): Lang {
   try {

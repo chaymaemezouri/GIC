@@ -1,4 +1,4 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -14,6 +14,8 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import ProgressSteps from '../components/ProgressSteps';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import type { TaskPhaseInput } from '../lib/progressPhases';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -81,6 +83,7 @@ export default function AvancementPage() {
   const [editRemark, setEditRemark] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteMotif, setDeleteMotif] = useState('');
+  const selection = useRowSelection<ProgressItem>();
 
   function buildQuery(pageNum = page, overrides?: { chantierId?: string; q?: string; status?: string }) {
     const qs = new URLSearchParams();
@@ -223,22 +226,33 @@ export default function AvancementPage() {
     downloadExcel(`/chantiers/avancement/export/xlsx?${buildStatsQuery()}`, 'avancement-gic.xlsx');
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.progress'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.progress')} GIC</title></head><body>
-      <h1>${t('pages.progress')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.chantier')}</th><th>${t('columns.task')}</th><th>${t('columns.tranche')}</th><th>${t('columns.taskProgress')}</th><th>${t('columns.globalProgress')}</th><th>${t('columns.status')}</th><th>${t('columns.updated')}</th></tr>
-        ${items.map((p) => `<tr>
-          <td>${p.chantier.name}</td>
-          <td>${p.taskName}</td>
-          <td>${[p.tranche, p.groupe, p.etage].filter(Boolean).join(' · ') || '—'}</td>
-          <td>${Math.round(p.percent)}%</td>
-          <td>${Math.round(p.chantier.progressPct)}%</td>
-          <td>${taskStatus(p.percent).replace('_', ' ')}</td>
-          <td>${p.updatedAt ? formatDate(p.updatedAt) : '—'}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    const sortOptions: Record<string, string> = {
+      taskName: t('columns.task'),
+      percent: t('columns.progressPct'),
+      updatedAt: t('columns.lastUpdatedShort'),
+      chantier: t('columns.chantier'),
+    };
+    printRows<ProgressItem>({
+      title: t('pages.progress'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('columns.chantier'), chantierFilter && chantiers.find((c) => c.id === chantierFilter)?.name],
+        [t('pages.taskStatus'), statusFilter && statusFilters.find((f) => f.id === statusFilter)?.label],
+        [t('listPrint.sort'), (sort !== 'taskName' || order !== 'asc') && `${sortOptions[sort] || sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.chantier'), value: (p) => [p.chantier.name, p.chantier.managerName].filter(Boolean).join(' · ') },
+        { label: t('columns.task'), value: (p) => p.taskName },
+        { label: t('columns.trancheGroup'), value: (p) => [p.tranche, p.groupe, p.etage].filter(Boolean).join(' · ') },
+        { label: t('columns.status'), value: (p) => taskStatus(p.percent).replace(/_/g, ' ') },
+        { label: t('columns.taskProgress'), value: (p) => `${Math.round(p.percent)}%`, align: 'right' },
+        { label: t('columns.globalProgress'), value: (p) => `${Math.round(p.chantier.progressPct)}%`, align: 'right' },
+        { label: t('columns.updated'), value: (p) => (p.updatedAt ? formatDate(p.updatedAt) : '') },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<ProgressItem>('/chantiers/avancement', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const statusFilters = [
@@ -420,6 +434,8 @@ export default function AvancementPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -429,6 +445,7 @@ export default function AvancementPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.chantier')}</Th>
                 <Th mac>{t('columns.task')}</Th>
                 <Th mac>{t('columns.trancheGroup')}</Th>
@@ -446,6 +463,7 @@ export default function AvancementPage() {
                   className={`cursor-pointer${Math.round(p.percent) >= 100 ? ' bg-gic-emerald-soft/10' : ''}`}
                   onClick={() => navigate(`/chantiers/${p.chantier.id}`)}
                 >
+                  <SelectTd selection={selection} row={p} />
                   <Td mac>
                     <Link
                       to={`/chantiers/${p.chantier.id}`}

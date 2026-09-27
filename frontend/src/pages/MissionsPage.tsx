@@ -1,4 +1,4 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -13,7 +13,9 @@ import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Mission = {
@@ -68,6 +70,7 @@ export default function MissionsPage() {
     enginId: '', mission: '', driverName: '', chantierId: '', date: new Date().toISOString().slice(0, 10),
     usage: '', requestedBy: '', tranche: '', remark: '',
   });
+  const selection = useRowSelection<Mission>();
 
   function buildStatsQuery(overrides?: {
     q?: string;
@@ -235,22 +238,35 @@ export default function MissionsPage() {
     downloadExcel(`/engins/missions/export/xlsx?${buildStatsQuery()}`, 'missions-gic.xlsx');
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.missions'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.missions')} GIC</title></head><body>
-      <h1>${t('pages.missionsPrintTitle')}</h1>
-      <p>${t('fields.period')} : ${dateFrom} → ${dateTo} · ${t('msg.missionsCount', { count: stats.total })}</p>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.date')}</th><th>${t('columns.engin')}</th><th>${t('columns.mission')}</th><th>${t('columns.chauffeur')}</th><th>${t('columns.chantier')}</th><th>${t('columns.requestedBy')}</th></tr>
-        ${items.map((m) => `<tr>
-          <td>${formatDate(m.date)}</td>
-          <td>${m.engin?.matricule || ''} ${m.engin?.brand || ''}</td>
-          <td>${m.mission}</td>
-          <td>${m.driverName || '—'}</td>
-          <td>${m.chantier?.name || '—'}</td>
-          <td>${m.requestedBy || '—'}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    const engin = engins.find((e) => e.id === enginFilter);
+    const sortOptions: Record<string, string> = {
+      date: t('columns.date'),
+      mission: t('columns.mission'),
+      driverName: t('columns.chauffeur'),
+    };
+    printRows<Mission>({
+      title: t('pages.missions'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.period'), (dateFrom || dateTo) && `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}`],
+        [t('columns.engin'), engin && `${engin.matricule || ''} — ${engin.brand || ''}`],
+        [t('columns.chantier'), chantierFilter && chantiers.find((c) => c.id === chantierFilter)?.name],
+        [t('pages.linkedSite'), linkFilter === 'with' ? t('kpi.withSite') : linkFilter === 'without' ? t('kpi.withoutSite') : ''],
+        [t('listPrint.sort'), (sort !== 'date' || order !== 'desc') && `${sortOptions[sort] || sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (m) => formatDate(m.date) },
+        { label: t('columns.engin'), value: (m) => (m.engin ? [m.engin.matricule, m.engin.brand].filter(Boolean).join(' ') : '') },
+        { label: t('columns.mission'), value: (m) => m.mission },
+        { label: t('columns.chauffeur'), value: (m) => m.driverName },
+        { label: t('columns.chantier'), value: (m) => m.chantier?.name },
+        { label: t('columns.requestedBy'), value: (m) => m.requestedBy },
+        { label: t('columns.enginStatus'), value: (m) => (m.engin?.status ? m.engin.status.replace(/_/g, ' ') : '') },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Mission>('/engins/missions', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const hasActiveFilters = !!enginFilter || !!chantierFilter || !!linkFilter;
@@ -430,6 +446,8 @@ export default function MissionsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -439,6 +457,7 @@ export default function MissionsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.date')}</Th>
                 <Th mac>{t('columns.engin')}</Th>
                 <Th mac>{t('columns.mission')}</Th>
@@ -456,6 +475,7 @@ export default function MissionsPage() {
                   className="cursor-pointer"
                   onClick={() => navigate(`/missions/${m.id}`)}
                 >
+                  <SelectTd selection={selection} row={m} />
                   <Td mac className="text-[11px]">{formatDate(m.date)}</Td>
                   <Td mac>
                     {m.engin ? (

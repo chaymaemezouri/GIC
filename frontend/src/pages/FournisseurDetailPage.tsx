@@ -4,13 +4,14 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Pencil, Trash2, History, Key, Printer, ShoppingCart, Truck, Plus, Mail, Phone, Upload, FileText, Hash, Calendar, MapPin, Building2, CreditCard, Info as InfoIcon, MessageCircle } from 'lucide-react';
 import { api, fetchChantierList, formatDate, formatMad, openPrintUrl, uploadDocument } from '../lib/api';
-import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th, PageBackLink } from '../components/ui';
+import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 
 
 import { SupplierFormFields, supplierToForm, type SupplierFormData } from '../components/SupplierFormFields';
-import { PurchaseFormFields, emptyPurchaseForm, type PurchaseFormData } from '../components/PurchaseFormFields';
+import { PurchaseFormFields, emptyPurchaseForm, purchaseFormToBody, validatePurchaseForm, type PurchaseFormData } from '../components/PurchaseFormFields';
+import { PurchasePaymentPill, PurchaseStatusPill } from '../components/PurchaseBadges';
 import ConversationsPanel from '../components/ConversationsPanel';
 
 type Tab = 'achats' | 'infos' | 'documents' | 'echanges' | 'historique';
@@ -53,7 +54,7 @@ export default function FournisseurDetailPage() {
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState<PurchaseFormData>(emptyPurchaseForm());
   const [purchaseError, setPurchaseError] = useState('');
-  const [chantiers, setChantiers] = useState<{ id: string; name: string }[]>([]);
+  const [chantiers, setChantiers] = useState<{ id: string; name: string; project?: { id: string; name: string } | null }[]>([]);
   const [families, setFamilies] = useState<any[]>([]);
   const [chantierTranches, setChantierTranches] = useState<{ id: string; name: string }[]>([]);
   const [form, setForm] = useState<SupplierFormData>({
@@ -190,33 +191,19 @@ export default function FournisseurDetailPage() {
     setPurchaseOpen(true);
   }
 
-  function purchaseToBody(f: PurchaseFormData) {
-    return {
-      designation: f.designation,
-      family: f.family || null,
-      unit: f.unit || null,
-      quantity: f.quantity,
-      unitPrice: f.unitPrice,
-      tvaRate: f.tvaRate || '20',
-      supplierId: f.supplierId || null,
-      chantierId: f.chantierId || null,
-      tranche: f.tranche || null,
-      paymentMode: f.paymentMode,
-      author: f.author || null,
-      remark: f.remark || null,
-      date: f.date,
-      invoiced: f.invoiced === 'true',
-    };
-  }
-
   async function savePurchase(e: React.FormEvent) {
     e.preventDefault();
     if (!supplier) return;
     setPurchaseError('');
+    const invalid = validatePurchaseForm(purchaseForm, t);
+    if (invalid) {
+      setPurchaseError(invalid);
+      return;
+    }
     try {
       const created = await api<{ id: string }>('/achats/purchases', {
         method: 'POST',
-        body: JSON.stringify(purchaseToBody({ ...purchaseForm, supplierId: supplier.id })),
+        body: JSON.stringify({ ...purchaseFormToBody(purchaseForm), supplierId: supplier.id }),
       });
       setPurchaseOpen(false);
       load();
@@ -386,6 +373,7 @@ export default function FournisseurDetailPage() {
                     <Th mac>{t('columns.designation')}</Th>
                     <Th mac>{t('columns.chantier')}</Th>
                     <Th mac>{t('columns.amount')}</Th>
+                    <Th mac>{t('purchase.list.payment')}</Th>
                     <Th mac>{t('columns.status')}</Th>
                   </tr>
                 </thead>
@@ -403,7 +391,8 @@ export default function FournisseurDetailPage() {
                         ) : '—'}
                       </Td>
                       <Td mac>{formatMad(p.totalPrice)}</Td>
-                      <Td mac><StatusPill status={p.status} quiet /></Td>
+                      <Td mac>{p.paymentStatus ? <PurchasePaymentPill status={p.paymentStatus} /> : '—'}</Td>
+                      <Td mac><PurchaseStatusPill status={p.status} /></Td>
                     </tr>
                   ))}
                 </tbody>
@@ -533,7 +522,7 @@ export default function FournisseurDetailPage() {
 
       <Modal
         open={purchaseOpen}
-        size="lg"
+        size="xl"
         title={t('detail.newPurchaseFor', { name: supplier.companyName })}
         onClose={() => setPurchaseOpen(false)}
         footer={

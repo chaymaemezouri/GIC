@@ -1,4 +1,4 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -15,8 +15,10 @@ import {
   PaymentFormFields, emptyPaymentForm, paymentToForm, paymentFormToCreateBody, paymentFormToUpdateBody,
   paymentFormToFormData, type PaymentFormData,
 } from '../components/PaymentFormFields';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { printPaymentReceipt } from '../lib/printPayment';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Payment = {
@@ -82,6 +84,7 @@ export default function PaiementsPage() {
   const [formError, setFormError] = useState('');
   const [sales, setSales] = useState<{ id: string; reference: string; remaining: number; client?: { firstName: string; lastName: string } }[]>([]);
   const [rentals, setRentals] = useState<{ id: string; reference: string; remaining: number; client?: { firstName: string; lastName: string } }[]>([]);
+  const selection = useRowSelection<Payment>();
 
   function buildQuery(pageNum = page, overrides?: { type?: string; mode?: string }) {
     const qs = new URLSearchParams();
@@ -232,16 +235,36 @@ export default function PaiementsPage() {
     setOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: 'Paiements', bodyHtml: extractLegacyPrintBody(`<html><head><title>Paiements GIC</title><style>body{font-family:sans-serif;padding:24px;font-size:12px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px}</style></head><body>
-      <h1>Paiements GIC</h1><table><tr><th>Date</th><th>Reçu</th><th>Type</th><th>Client</th><th>Montant</th><th>Mode</th></tr>
-      ${items.map((p) => {
-        const isSale = !!p.sale;
-        const client = isSale ? p.sale?.client : p.rental?.client;
-        return `<tr><td>${formatDate(p.date)}</td><td>${p.receiptNo}</td><td>${isSale ? 'Vente' : 'Location'}</td><td>${client ? `${client.firstName} ${client.lastName}` : ''}</td><td>${p.amount}</td><td>${p.operationType || ''}</td></tr>`;
-      }).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    printRows<Payment>({
+      title: t('pages.receipts'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.period'), dateFrom || dateTo ? `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}` : ''],
+        [t('listPrint.type'), typeFilter && typeFilters.find((f) => f.id === typeFilter)?.label],
+        [t('fields.mode'), modeFilter && modeFilters.find((f) => f.id === modeFilter)?.label],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (p) => formatDate(p.date) },
+        { label: t('columns.receipt'), value: (p) => p.receiptNo },
+        { label: t('columns.type'), value: (p) => (p.sale ? t('fields.sale') : t('fields.rental')) },
+        { label: t('columns.transactionRef'), value: (p) => (p.sale ? p.sale.reference : p.rental?.reference) },
+        {
+          label: t('columns.client'),
+          value: (p) => {
+            const client = p.sale ? p.sale.client : p.rental?.client;
+            return client ? `${client.firstName} ${client.lastName}` : '';
+          },
+        },
+        { label: t('columns.amount'), value: (p) => formatMad(p.amount), align: 'right', total: (rows) => formatMad(rows.reduce((s, p) => s + Number(p.amount || 0), 0)) },
+        { label: t('columns.mode'), value: (p) => modeFilters.find((f) => f.id && f.id === p.operationType)?.label ?? p.operationType },
+        { label: t('fields.payer'), value: (p) => p.payerName },
+        { label: t('columns.nature'), value: (p) => p.nature },
+        { label: t('columns.piece'), value: (p) => !!p.proofFile, align: 'center' },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Payment>('/transactions/payments', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const typeFilters = [
@@ -396,6 +419,8 @@ export default function PaiementsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -405,6 +430,7 @@ export default function PaiementsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.date')}</Th>
                 <Th mac>{t('columns.receipt')}</Th>
                 <Th mac>{t('columns.type')}</Th>
@@ -426,6 +452,7 @@ export default function PaiementsPage() {
                 const txLink = isSale ? `/ventes/${p.sale?.id}` : `/locations/${p.rental?.id}`;
                 return (
                   <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/encaissements/${p.id}`)}>
+                    <SelectTd selection={selection} row={p} />
                     <Td mac>{formatDate(p.date)}</Td>
                     <Td mac className="font-medium text-gic-violet">{p.receiptNo}</Td>
                     <Td mac>

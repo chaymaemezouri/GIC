@@ -4,12 +4,16 @@ import {
   Download, Eye, Printer, Paperclip, Plus, Pencil, Trash2,
   Wallet, TrendingDown, TrendingUp, FileCheck, SlidersHorizontal, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
-import { api, downloadCsv, downloadExcel, formatMad, uploadForm, type PaginatedResponse } from '../lib/api';
+import { api, downloadCsv, downloadExcel, formatDate, formatMad, uploadForm, type PaginatedResponse } from '../lib/api';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, TableWrap, Td, Th,
 } from '../components/ui';
-import { printMovementList, printMovementReceipt } from '../lib/printMovement';
+import { printMovementReceipt } from '../lib/printMovement';
+import { escHtml } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import {
   CashMovementFormFields, emptyCashMovementForm, movementToForm, accountLabel,
   type CashMovementFormData, type CashAccountOption,
@@ -126,6 +130,7 @@ export default function FinancePage() {
   const [accountEditId, setAccountEditId] = useState<string | null>(null);
   const [accountForm, setAccountForm] = useState<AccountForm>(emptyAccountForm());
   const [accountError, setAccountError] = useState('');
+  const selection = useRowSelection<Movement>();
 
   function buildStatsQuery(overrides?: FilterOverrides) {
     const qs = new URLSearchParams();
@@ -252,6 +257,21 @@ export default function FinancePage() {
     { id: 'credit', label: t('common.credits') },
   ];
 
+  const modeFilters = [
+    { id: '', label: t('common.allModes') },
+    { id: 'especes', label: t('fields.modeCash') },
+    { id: 'virement', label: t('fields.modeTransfer') },
+    { id: 'cheque', label: t('fields.modeCheck') },
+    { id: 'carte', label: t('common.cardShort') },
+  ];
+
+  const sortOptions = [
+    { value: 'date', label: t('common.date') },
+    { value: 'designation', label: t('fields.designation') },
+    { value: 'debit', label: t('fields.debit') },
+    { value: 'credit', label: t('fields.credit') },
+  ];
+
   const hasActiveFilters = !!typeFilter || !!modeFilter || !!accountFilter || !!holderFilter || !!dateFrom || !!dateTo || !!q;
 
   function openCreate() {
@@ -364,13 +384,74 @@ export default function FinancePage() {
     }
   }
 
-  function piecesCell(m: Movement) {
-    const pieces = [
+  function movementPieces(m: Movement) {
+    return [
       { path: m.invoiceFile, label: t('common.facture') },
       { path: m.deliveryNoteFile, label: t('common.bl') },
       { path: m.receptionPvFile, label: t('common.pv') },
       { path: m.proofFile, label: t('common.pieceShort') },
     ].filter((p) => p.path);
+  }
+
+  function sourceLabel(m: Movement) {
+    if (!m.sourceType) return '';
+    return SOURCE_LABEL_KEYS[m.sourceType] ? t(SOURCE_LABEL_KEYS[m.sourceType]) : m.sourceType;
+  }
+
+  function printList() {
+    const account = accounts.find((a) => a.id === accountFilter);
+    const holder = users.find((u) => u.id === holderFilter);
+    const sumOf = (rows: Movement[], key: 'debit' | 'credit') => rows.reduce((s, m) => s + Number(m[key] || 0), 0);
+    printRows<Movement>({
+      title: t('pages.balance'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('fields.account'), accountFilter && (account ? accountLabel(account) : accountFilter)],
+        [t('fields.accountHolder'), holderFilter && (holder ? `${holder.firstName} ${holder.lastName}` : holderFilter)],
+        [t('listPrint.period'), (dateFrom || dateTo) && `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}`],
+        [t('listPrint.type'), typeFilter && typeFilters.find((f) => f.id === typeFilter)?.label],
+        [t('fields.mode'), modeFilter && modeFilters.find((f) => f.id === modeFilter)?.label],
+        [t('listPrint.sort'), `${sortOptions.find((o) => o.value === sort)?.label ?? sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (m) => new Date(m.date).toLocaleDateString('fr-MA') },
+        { label: t('columns.source'), value: sourceLabel },
+        { label: t('columns.designation'), value: (m) => m.designation },
+        {
+          label: t('columns.account'),
+          value: (m) => [
+            m.account?.name,
+            m.account?.holderUser && `${m.account.holderUser.firstName} ${m.account.holderUser.lastName}`,
+            m.account?.holderUser && m.account.rib,
+          ].filter(Boolean).join(' · '),
+        },
+        { label: t('columns.mode'), value: (m) => m.mode },
+        {
+          label: t('columns.debit'),
+          value: (m) => (Number(m.debit) ? formatMad(Number(m.debit)) : ''),
+          align: 'right',
+          total: (rows) => formatMad(sumOf(rows, 'debit')),
+        },
+        {
+          label: t('columns.credit'),
+          value: (m) => (Number(m.credit) ? formatMad(Number(m.credit)) : ''),
+          align: 'right',
+          total: (rows) => formatMad(sumOf(rows, 'credit')),
+        },
+        { label: t('columns.pieces'), value: (m) => movementPieces(m).map((p) => p.label).join(', ') },
+      ],
+      extraHtml: (rows) => {
+        const debit = sumOf(rows, 'debit');
+        const credit = sumOf(rows, 'credit');
+        return `<p><span class="k">${escHtml(t('columns.debit'))} :</span> ${escHtml(formatMad(debit))} · <span class="k">${escHtml(t('columns.credit'))} :</span> ${escHtml(formatMad(credit))} · <span class="k">${escHtml(t('kpi.solde'))} :</span> ${escHtml(formatMad(credit - debit))}</p>`;
+      },
+      rows: selection.count ? selection.rows : () => fetchAllRows<Movement>('/finance/movements', buildListQuery(1)),
+      selectedCount: selection.count,
+    });
+  }
+
+  function piecesCell(m: Movement) {
+    const pieces = movementPieces(m);
     if (pieces.length === 0) return <span className="mac-table-muted">—</span>;
     return (
       <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
@@ -394,7 +475,7 @@ export default function FinancePage() {
             <Btn variant="secondary" icon={Download} onClick={() => downloadCsv(`/finance/movements/export/csv?${buildStatsQuery()}`, 'balance-gic.csv')}>{t('common.csv')}</Btn>
             <Btn variant="secondary" icon={Download} onClick={() => downloadExcel(`/finance/movements/export/xlsx?${buildStatsQuery()}`, 'balance-gic.xlsx')}>{t('common.excel')}</Btn>
             <div className="mac-action-group">
-              <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={() => printMovementList(items, totals)} />
+              <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
             </div>
           </>
         }
@@ -504,12 +585,7 @@ export default function FinancePage() {
                 setPage(1);
                 load(1, { sort: v, order: nextOrder });
               }}
-              options={[
-                { value: 'date', label: t('common.date') },
-                { value: 'designation', label: t('fields.designation') },
-                { value: 'debit', label: t('fields.debit') },
-                { value: 'credit', label: t('fields.credit') },
-              ]}
+              options={sortOptions}
               className="w-36 shrink-0"
             />
             <Btn
@@ -558,13 +634,7 @@ export default function FinancePage() {
                   ))}
                   <div className="mac-filter-menu-sep" />
                   <p className="mac-filter-menu-section">{t('fields.mode')}</p>
-                  {[
-                    { id: '', label: t('common.allModes') },
-                    { id: 'especes', label: t('fields.modeCash') },
-                    { id: 'virement', label: t('fields.modeTransfer') },
-                    { id: 'cheque', label: t('fields.modeCheck') },
-                    { id: 'carte', label: t('common.cardShort') },
-                  ].map((f) => (
+                  {modeFilters.map((f) => (
                     <button
                       key={f.id || 'all-mode'}
                       type="button"
@@ -618,15 +688,18 @@ export default function FinancePage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
         ) : items.length === 0 ? (
-          <EmptyState title={t('msg.emptyFinance')} subtitle={t('pages.financeEmptyHint')} />
+          <EmptyState title={t('msg.emptyFinance')} />
         ) : (
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.date')}</Th>
                 <Th mac>{t('columns.source')}</Th>
                 <Th mac>{t('columns.designation')}</Th>
@@ -645,6 +718,7 @@ export default function FinancePage() {
                   className="cursor-pointer"
                   onClick={() => navigate(`/balance/${m.id}`)}
                 >
+                  <SelectTd selection={selection} row={m} />
                   <Td mac className="mac-table-muted">
                     {new Date(m.date).toLocaleDateString('fr-MA')}
                   </Td>

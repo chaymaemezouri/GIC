@@ -1,4 +1,4 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows, type PrintColumn } from '../lib/listPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -11,7 +11,9 @@ import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Tabs, Td, Th,
 } from '../components/ui';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { computeStaffNet } from '../lib/staffSalaryPeriod';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type SortOrder = 'asc' | 'desc';
@@ -151,6 +153,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
   const [payOpen, setPayOpen] = useState<StaffSalaryRow | null>(null);
   const [payMode, setPayMode] = useState('virement');
   const [payLoading, setPayLoading] = useState(false);
+  const selection = useRowSelection<StaffSalaryRow>();
 
   function buildQuery(pageNum = page, overrides?: {
     q?: string; status?: string; active?: string; department?: string;
@@ -375,26 +378,65 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
     downloadCsv(`/equipe-interne/salaires/export/csv?${buildStatsQuery()}`, 'salaires-equipe-interne-gic.csv');
   }
 
-  async function printList() {
+  function printList() {
+    const money = (label: string, pick: (r: StaffSalaryRow) => number): PrintColumn<StaffSalaryRow> => ({
+      label,
+      value: (r) => formatMad(pick(r)),
+      align: 'right',
+      total: (list) => formatMad(list.reduce((s, r) => s + Number(pick(r) || 0), 0)),
+    });
+    const draftValue = (r: StaffSalaryRow, key: keyof RowDraft) => Number(getRow(r.id, r)[key]) || 0;
+    const statusColumn: PrintColumn<StaffSalaryRow> = {
+      label: t('columns.status'),
+      value: (r) => mapStatus(r.salary.status).replace(/_/g, ' '),
+    };
+    const weekLabel = weekOptions.find((w) => w.value === periodWeek)?.label;
+    const columns: PrintColumn<StaffSalaryRow>[] = pageTab === 'saisie'
+      ? [
+        { label: t('columns.collaborator'), value: (r) => `${r.firstName} ${r.lastName} — ${r.jobTitle || '—'} · ${r.salaryPeriodLabel}` },
+        { label: t('columns.service'), value: (r) => r.department },
+        money(t('columns.base'), (r) => draftValue(r, 'baseSalary')),
+        money(t('columns.bonuses'), (r) => draftValue(r, 'bonus')),
+        money(t('columns.deductions'), (r) => draftValue(r, 'deduction')),
+        money(t('columns.advances'), (r) => draftValue(r, 'advance')),
+        money(t('columns.netAuto'), (r) => rowNet(getRow(r.id, r))),
+        statusColumn,
+      ]
+      : [
+        { label: t('columns.collaborator'), value: (r) => `${r.firstName} ${r.lastName}${r.jobTitle ? ` — ${r.jobTitle}` : ''}` },
+        { label: t('columns.service'), value: (r) => r.department },
+        { label: t('columns.period'), value: (r) => r.salary.periodLabel },
+        money(t('columns.base'), (r) => r.salary.baseSalary),
+        money(t('columns.bonuses'), (r) => r.salary.bonus),
+        money(t('columns.deductions'), (r) => r.salary.deduction),
+        money(t('columns.advances'), (r) => r.salary.advance),
+        money(t('columns.netDue'), (r) => r.salary.netDue),
+        money(t('columns.paid'), (r) => r.salary.amountPaid),
+        statusColumn,
+      ];
+    printRows<StaffSalaryRow>({
+      title: t('pages.salariesInternal'),
+      subtitle: pageTab === 'saisie' ? t('tabs.monthEntry') : t('tabs.validatePay'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.period'), periodWeek !== '0' ? `${periodLabel} — ${weekLabel}` : periodLabel],
+        [t('actions.payment'), payViewFilter && PAY_VIEW_TABS.find((p) => p.id === payViewFilter)?.label],
+        [t('columns.service'), departmentFilter],
+        [t('listPrint.sort'), `${sortOptions.find((o) => o.value === sort)?.label ?? sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns,
+      rows: selection.count
+        ? selection.rows
+        : pageTab === 'saisie'
+          ? items
+          : () => fetchAllRows<StaffSalaryRow>('/equipe-interne/salaires', buildQuery(1)),
+      selectedCount: selection.count,
+    });
+  }
 
-    await printWithCompany({ title: t('pages.salariesInternal'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.salariesInternal')} — GIC</title></head><body>
-      <h1>${t('pages.salariesInternal')} — GIC</h1>
-      <p>${t('fields.period')} : ${periodLabel}</p>
-      <p>${t('columns.net')} : ${formatMad(stats.totalNet)} · ${t('columns.paid')} : ${formatMad(stats.totalPaid)} · ${t('columns.remaining')} : ${formatMad(stats.totalRemaining)}</p>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.collaborator')}</th><th>${t('columns.service')}</th><th>${t('columns.base')}</th><th>${t('columns.bonuses')}</th><th>${t('columns.advances')}</th><th>${t('columns.netDue')}</th><th>${t('columns.paid')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((r) => `<tr>
-          <td>${r.firstName} ${r.lastName}</td>
-          <td>${r.department || '—'}</td>
-          <td>${r.salary.baseSalary}</td>
-          <td>${r.salary.bonus}</td>
-          <td>${r.salary.advance}</td>
-          <td>${r.salary.netDue}</td>
-          <td>${r.salary.amountPaid}</td>
-          <td>${r.salary.status}</td>
-        </tr>`).join('')}
-      </table>
-    </body></html>`, { grid: false }) });
+  function switchPageTab(next: PageTab) {
+    selection.clear();
+    setPageTab(next);
   }
 
   function switchPayView(next: PayViewFilter) {
@@ -408,6 +450,20 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
   const editableItems = items.filter((r) => !isLockedStatus(r.salary.status));
   const validatedItems = items.filter((r) => r.salary.status === 'validé');
   const displayItems = items;
+
+  const weekOptions = [
+    { value: '0', label: t('msg.wholeMonth') },
+    { value: '1', label: t('msg.weekQ1') },
+    { value: '2', label: t('msg.weekQ2') },
+    { value: '3', label: t('msg.week3') },
+    { value: '4', label: t('msg.week4') },
+  ];
+
+  const sortOptions = [
+    { value: 'lastName', label: t('columns.name') },
+    { value: 'department', label: t('columns.service') },
+    { value: 'monthlySalary', label: t('fields.refSalary') },
+  ];
 
   const periodToolbar = (
     <>
@@ -429,13 +485,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
       <MacSelect
         value={periodWeek}
         onChange={setPeriodWeek}
-        options={[
-          { value: '0', label: t('msg.wholeMonth') },
-          { value: '1', label: t('msg.weekQ1') },
-          { value: '2', label: t('msg.weekQ2') },
-          { value: '3', label: t('msg.week3') },
-          { value: '4', label: t('msg.week4') },
-        ]}
+        options={weekOptions}
         className="w-28 shrink-0"
       />
       <Btn variant="secondary" onClick={() => { setPage(1); load(1); }}>{t('actions.applyPeriod')}</Btn>
@@ -484,7 +534,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
         <Tabs
           mac
           active={pageTab}
-          onChange={(id) => setPageTab(id as PageTab)}
+          onChange={(id) => switchPageTab(id as PageTab)}
           tabs={[
             { id: 'saisie', label: t('tabs.monthEntry') },
             { id: 'paiements', label: t('tabs.validatePay') },
@@ -518,6 +568,8 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
             </div>
           </div>
 
+          <SelectionBar selection={selection} onPrint={printList} />
+
           <Card padding={false}>
             {loading ? (
               <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -527,6 +579,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
               <TableWrap mac>
                 <thead>
                   <tr>
+                    <SelectAllTh selection={selection} rows={items} />
                     <Th mac>{t('columns.collaborator')}</Th>
                     <Th mac>{t('columns.service')}</Th>
                     <Th mac>{t('columns.base')}</Th>
@@ -545,6 +598,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
                     const net = rowNet(draft);
                     return (
                       <tr key={r.id} className={r.salary.status === 'validé' ? 'bg-gic-emerald-soft/15' : r.salary.status === 'payé' ? 'bg-gray-50/80' : ''}>
+                        <SelectTd selection={selection} row={r} />
                         <Td mac>
                           <Link to={`/equipe-interne/${r.id}`} className="mac-table-ref">{r.firstName} {r.lastName}</Link>
                           <span className="block text-[10px] text-gic-muted">{r.jobTitle || '—'} · {r.salaryPeriodLabel}</span>
@@ -607,11 +661,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
                 <MacSearch value={q} onChange={setQ} onSubmit={() => { setPage(1); load(1); }} placeholder={t('msg.searchCollaborator')} />
                 {periodToolbar}
                 <div className="flex items-center gap-1 shrink-0">
-                  <MacSelect value={sort} onChange={setSort} options={[
-                    { value: 'lastName', label: t('columns.name') },
-                    { value: 'department', label: t('columns.service') },
-                    { value: 'monthlySalary', label: t('fields.refSalary') },
-                  ]} className="w-40" />
+                  <MacSelect value={sort} onChange={setSort} options={sortOptions} className="w-40" />
                   <MacActionBtn icon={order === 'asc' ? ArrowUp : ArrowDown} tone="gray" title={order === 'asc' ? t('msg.ascending') : t('msg.descending')} onClick={toggleOrder} />
                 </div>
                 <div ref={filtersRef} className="relative shrink-0 z-50">
@@ -650,6 +700,8 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
             </Card>
           )}
 
+          <SelectionBar selection={selection} onPrint={printList} />
+
           <Card padding={false}>
             {loading ? (
               <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -659,6 +711,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
               <TableWrap mac>
                 <thead>
                   <tr>
+                    <SelectAllTh selection={selection} rows={displayItems} />
                     <Th mac>{t('columns.collaborator')}</Th>
                     <Th mac>{t('columns.service')}</Th>
                     <Th mac>{t('columns.period')}</Th>
@@ -675,6 +728,7 @@ export default function SalairesEquipeInternePage({ embedded = false }: { embedd
                 <tbody>
                   {displayItems.map((r) => (
                     <tr key={r.id} className="cursor-pointer" onClick={() => openDetail(r)}>
+                      <SelectTd selection={selection} row={r} />
                       <Td mac>
                         <Link to={`/equipe-interne/${r.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{r.firstName} {r.lastName}</Link>
                         <span className="block text-[10px] text-gic-muted">{r.jobTitle || '—'}</span>

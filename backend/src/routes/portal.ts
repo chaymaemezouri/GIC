@@ -105,9 +105,9 @@ router.get('/purchases', async (req, res) => {
 
   const purchases = await prisma.purchase.findMany({
 
-    where: { supplierId: req.supplier!.id },
+    where: { supplierId: req.supplier!.id, status: { not: 'elabore' } },
 
-    include: { chantier: true },
+    include: { chantier: true, lines: { orderBy: { sortOrder: 'asc' } } },
 
     orderBy: { date: 'desc' },
 
@@ -179,13 +179,20 @@ router.post('/purchases/:id/documents', upload.single('file'), async (req, res) 
 
 
 
+  const storedCategory =
+    ({ devis: 'devis_fournisseur', facture: 'facture_fournisseur' } as Record<string, string>)[category] || category;
+
   const doc = await prisma.document.create({
 
     data: {
 
       name: req.body.name || req.file.originalname,
 
-      category,
+      category: storedCategory,
+
+      docNumber: req.body.docNumber ? String(req.body.docNumber) : null,
+
+      uploadedByName: purchase.supplier?.companyName || 'Portail fournisseur',
 
       mimeType: req.file.mimetype,
 
@@ -205,6 +212,10 @@ router.post('/purchases/:id/documents', upload.single('file'), async (req, res) 
 
 
 
+  if (storedCategory === 'facture_fournisseur' && !purchase.invoiced) {
+    await prisma.purchase.update({ where: { id: purchase.id }, data: { invoiced: true } });
+  }
+
   const label = { devis: 'Devis', facture: 'Facture', bon_livraison: 'Bon de livraison' }[category] || category;
 
   await notifyAllAdmins(
@@ -213,7 +224,7 @@ router.post('/purchases/:id/documents', upload.single('file'), async (req, res) 
 
     `${purchase.supplier?.companyName || 'Fournisseur'} a déposé un ${label.toLowerCase()} pour l'achat ${purchase.reference}`,
 
-    { link: '/achats', type: 'info' }
+    { link: `/achats/${purchase.id}`, type: 'info' }
 
   );
 

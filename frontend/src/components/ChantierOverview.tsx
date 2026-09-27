@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ChevronRight, HardHat, Layers, ShoppingCart, Users,
+  AlertTriangle, ChevronRight, HardHat, Layers, ShoppingCart, Truck, Users,
 } from 'lucide-react';
 import { formatMad } from '../lib/api';
-import { Btn, StatusPill } from './ui';
+import { Btn } from './ui';
+import { PurchaseStatusPill } from './PurchaseBadges';
 import ProgressSteps from './ProgressSteps';
 import { useI18n } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
@@ -17,6 +18,7 @@ export type ChantierOverview = {
     achatsOuverts: number;
     alertes: number;
     costMO?: number;
+    depenseEngins?: number;
     cnssNonDeclare?: number;
     budgetTotal?: number;
   };
@@ -175,6 +177,9 @@ export default function ChantierOverviewPanel({
         )}
         <MetricChip icon={Users} label={t('tabs.personnel')} value={synthèse.personnel} />
         <MetricChip icon={ShoppingCart} label={t('fields.budgetRemaining')} value={budgetLabel} tone="accent" />
+        {(synthèse.depenseEngins ?? 0) > 0 && (
+          <MetricChip icon={Truck} label={t('fleet.hints.overviewEnginCost')} value={formatMad(synthèse.depenseEngins!)} />
+        )}
         {(synthèse.cnssNonDeclare ?? 0) > 0 && (
           <MetricChip
             icon={Users}
@@ -226,7 +231,7 @@ export default function ChantierOverviewPanel({
                       </div>
                       <div className="overview-purchase-end">
                         <span className="overview-purchase-amount">{formatMad(p.totalPrice)}</span>
-                        <StatusPill status={p.status} quiet />
+                        <PurchaseStatusPill status={p.status} />
                       </div>
                     </Link>
                   </li>

@@ -1,4 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { escHtml } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -10,6 +11,8 @@ import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
   PageHeader, Pagination, TableWrap, Td, Th,
 } from '../components/ui';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type JournalEntry = {
@@ -100,6 +103,7 @@ export default function ComptabilitePage() {
   const filtersRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<JournalEntry>();
 
   function typeLabel(type: string) {
     const map: Record<string, string> = {
@@ -181,23 +185,57 @@ export default function ComptabilitePage() {
     setOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
   }
 
-  async function printJournal() {
-
-    await printWithCompany({ title: t('accounting.journalPrintTitle'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('accounting.journalPrintTitle')}</title><style>body{font-family:sans-serif;padding:24px;font-size:12px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px}</style></head><body>
-      <h1>${t('accounting.journalTitle')} — GIC</h1>
-      <p>${t('fields.period')} : ${dateFrom} → ${dateTo}</p>
-      <p>${t('columns.debit')} ${totals.debit} · ${t('columns.credit')} ${totals.credit}</p>
-      <table><tr><th>${t('columns.date')}</th><th>${t('columns.type')}</th><th>${t('columns.ref')}</th><th>${t('columns.label')}</th><th>${t('columns.debit')}</th><th>${t('columns.credit')}</th></tr>
-      ${items.map((e) => `<tr><td>${formatDate(e.date)}</td><td>${typeLabel(e.type)}</td><td>${e.reference}</td><td>${e.label}</td><td>${e.debit || ''}</td><td>${e.credit || ''}</td></tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
-  }
-
   const typeFilters = [
     { id: '', label: t('common.all') },
     { id: 'encaissement', label: t('pages.receipts') },
     { id: 'caisse', label: t('pages.balance') },
     { id: 'achat', label: t('pages.purchases') },
   ];
+
+  const sortOptions = [
+    { value: 'date', label: t('columns.date') },
+    { value: 'credit', label: t('columns.credit') },
+    { value: 'debit', label: t('columns.debit') },
+  ];
+
+  function printJournal() {
+    const sumOf = (rows: JournalEntry[], key: 'debit' | 'credit') => rows.reduce((s, e) => s + Number(e[key] || 0), 0);
+    printRows<JournalEntry>({
+      title: t('accounting.journalPrintTitle'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.period'), (dateFrom || dateTo) && `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}`],
+        [t('listPrint.type'), typeFilter && typeFilters.find((f) => f.id === typeFilter)?.label],
+        [t('listPrint.sort'), `${sortOptions.find((o) => o.value === sort)?.label ?? sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (e) => formatDate(e.date) },
+        { label: t('columns.type'), value: (e) => typeLabel(e.type) },
+        { label: t('columns.reference'), value: (e) => e.reference },
+        { label: t('columns.label'), value: (e) => e.label },
+        { label: t('columns.mode'), value: (e) => e.mode },
+        {
+          label: t('columns.debit'),
+          value: (e) => (e.debit > 0 ? formatMad(e.debit) : ''),
+          align: 'right',
+          total: (rows) => formatMad(sumOf(rows, 'debit')),
+        },
+        {
+          label: t('columns.credit'),
+          value: (e) => (e.credit > 0 ? formatMad(e.credit) : ''),
+          align: 'right',
+          total: (rows) => formatMad(sumOf(rows, 'credit')),
+        },
+      ],
+      extraHtml: (rows) => {
+        const debit = sumOf(rows, 'debit');
+        const credit = sumOf(rows, 'credit');
+        return `<p>${escHtml(t('accounting.debitCreditSolde', { debit: formatMad(debit), credit: formatMad(credit), solde: formatMad(credit - debit) }))}</p>`;
+      },
+      rows: selection.count ? selection.rows : () => fetchAllRows<JournalEntry>('/finance/comptabilite/journal', buildQuery(1)),
+      selectedCount: selection.count,
+    });
+  }
 
   const hasActiveFilters = !!typeFilter;
   const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : t('fields.period');
@@ -273,11 +311,7 @@ export default function ComptabilitePage() {
               <MacSelect
                 value={sort}
                 onChange={onSortChange}
-                options={[
-                  { value: 'date', label: t('columns.date') },
-                  { value: 'credit', label: t('columns.credit') },
-                  { value: 'debit', label: t('columns.debit') },
-                ]}
+                options={sortOptions}
                 className="w-28"
               />
               <MacActionBtn
@@ -349,6 +383,8 @@ export default function ComptabilitePage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printJournal} />
+
       <Card padding={false}>
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gic-border text-[12px]">
           <BookOpen size={15} className="text-[#007aff]" />
@@ -369,6 +405,7 @@ export default function ComptabilitePage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.date')}</Th>
                 <Th mac>{t('columns.type')}</Th>
                 <Th mac>{t('columns.reference')}</Th>
@@ -388,6 +425,7 @@ export default function ComptabilitePage() {
                     className={path ? 'cursor-pointer' : undefined}
                     onClick={() => path && navigate(path)}
                   >
+                    <SelectTd selection={selection} row={e} />
                     <Td mac>{formatDate(e.date)}</Td>
                     <Td mac>
                       <span className={`mac-chip ${TYPE_CHIP[e.type] || 'mac-chip-gray'}`}>

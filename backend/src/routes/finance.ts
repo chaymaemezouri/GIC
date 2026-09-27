@@ -7,6 +7,7 @@ import { upload } from '../lib/upload.js';
 import { sendExcel } from '../lib/exportExcel.js';
 import { findMovementBySource } from '../lib/cashSync.js';
 import { CHAUFFEUR_CATEGORY } from '../lib/workforceScope.js';
+import { ENGAGED_STATUSES } from '../lib/purchaseWorkflow.js';
 
 function buildMovementWhere(
   accountId: string,
@@ -304,6 +305,12 @@ router.get('/movements/:id', async (req, res) => {
     sourceHref = `/encaissements/${movement.sourceId}`;
   } else if (movement.sourceType === 'achat' && movement.sourceId) {
     sourceHref = `/achats/${movement.sourceId}`;
+  } else if (movement.sourceType === 'achat_paiement' && movement.sourceId) {
+    const payment = await prisma.purchasePayment.findUnique({
+      where: { id: movement.sourceId },
+      select: { purchaseId: true },
+    });
+    if (payment) sourceHref = `/achats/${payment.purchaseId}`;
   } else if (movement.sourceType === 'main_oeuvre' && movement.sourceId) {
     const payroll = await prisma.workforcePayrollRecord.findUnique({
       where: { id: movement.sourceId },
@@ -399,7 +406,7 @@ router.get('/comptabilite/stats', async (req, res) => {
     prisma.cashMovement.aggregate({ _sum: { debit: true, credit: true }, where: dateFilter }),
     prisma.purchase.aggregate({
       _sum: { totalPrice: true },
-      where: { status: { not: 'brouillon' }, ...dateFilter },
+      where: { status: { in: ENGAGED_STATUSES }, ...dateFilter },
     }),
     prisma.sale.aggregate({ _sum: { totalPaid: true, remaining: true, netPrice: true } }),
     prisma.cashAccount.count({ where: { isActive: true } }),
@@ -484,7 +491,7 @@ router.get('/comptabilite/journal', async (req, res) => {
     }),
     prisma.purchase.findMany({
       where: {
-        status: { not: 'brouillon' },
+        status: { in: ENGAGED_STATUSES },
         AND: [
           dateFrom || dateTo
             ? {
@@ -597,7 +604,7 @@ router.get('/comptabilite/journal/export/csv', async (req, res) => {
   const [payments, movements, purchases] = await Promise.all([
     prisma.payment.findMany({ where: dateFilter, include: { sale: true, rental: true }, orderBy: { date: 'desc' }, take: 1000 }),
     prisma.cashMovement.findMany({ where: dateFilter, include: { account: true }, orderBy: { date: 'desc' }, take: 1000 }),
-    prisma.purchase.findMany({ where: { status: { not: 'brouillon' }, ...(dateFilter || {}) }, orderBy: { date: 'desc' }, take: 1000 }),
+    prisma.purchase.findMany({ where: { status: { in: ENGAGED_STATUSES }, ...(dateFilter || {}) }, orderBy: { date: 'desc' }, take: 1000 }),
   ]);
 
   for (const p of payments) {
@@ -644,10 +651,10 @@ router.get('/decaissements/stats', async (req, res) => {
       : {};
 
   const [achats, mainOeuvre, chauffeursPayroll, equipeInterne, maintenanceAgg, fuelAgg, movementAgg] = await Promise.all([
-    prisma.purchase.aggregate({
-      _sum: { totalPrice: true },
+    prisma.purchasePayment.aggregate({
+      _sum: { amount: true },
       _count: true,
-      where: { status: 'contrôlé', ...dateFilter },
+      where: dateFilter,
     }),
     prisma.workforcePayrollRecord.aggregate({
       _sum: { amountPaid: true, remaining: true, netDue: true },
@@ -734,7 +741,7 @@ router.get('/decaissements/stats', async (req, res) => {
 
   res.json({
     totalDebit: movementAgg._sum.debit || 0,
-    achats: achats._sum.totalPrice || 0,
+    achats: achats._sum.amount || 0,
     achatsCount: achats._count,
     mainOeuvre: mainOeuvre._sum.amountPaid || 0,
     mainOeuvreDue: mainOeuvre._sum.netDue || 0,
@@ -805,25 +812,30 @@ router.get('/decaissements', async (req, res) => {
       : { paidAt: { not: null } };
 
   if (includeAll || category === 'achat') {
-    const purchases = await prisma.purchase.findMany({
-      where: { status: 'contrôlé', ...(dateFilter || {}) },
-      include: { supplier: { select: { companyName: true } } },
+    const purchasePayments = await prisma.purchasePayment.findMany({
+      where: dateFilter || {},
+      include: {
+        purchase: {
+          select: { id: true, reference: true, designation: true, status: true, supplier: { select: { companyName: true } } },
+        },
+      },
       orderBy: { date: 'desc' },
       take: 500,
     });
-    for (const a of purchases) {
+    const kindLabels: Record<string, string> = { avance: 'Avance', complement: 'Paiement', solde: 'Solde' };
+    for (const pay of purchasePayments) {
       items.push({
-        id: `ach-${a.id}`,
-        date: a.date,
+        id: `achp-${pay.id}`,
+        date: pay.date,
         category: 'achat',
-        reference: a.reference,
-        label: a.designation,
-        supplier: a.supplier?.companyName || undefined,
-        amount: a.totalPrice,
-        mode: a.paymentMode,
-        status: a.status,
+        reference: pay.purchase.reference,
+        label: `${kindLabels[pay.kind] || 'Paiement'} — ${pay.purchase.designation}`,
+        supplier: pay.purchase.supplier?.companyName || undefined,
+        amount: pay.amount,
+        mode: pay.mode,
+        status: pay.purchase.status,
         entityType: 'purchase',
-        entityId: a.id,
+        entityId: pay.purchase.id,
       });
     }
   }

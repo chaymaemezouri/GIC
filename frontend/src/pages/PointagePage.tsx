@@ -1,10 +1,10 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   CheckCircle, Download, Printer, Trash2, Pencil, Clock, Users, Wallet,
-  SlidersHorizontal, Check, Save, ArrowUp, ArrowDown, RotateCcw,
+  SlidersHorizontal, Check, Save, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import {
   api, downloadCsv, downloadExcel, fetchChantierList, fetchWorkforceList, formatDate, formatMad, type PaginatedResponse,
@@ -18,7 +18,11 @@ import {
   workforceDetailPathForCategory,
   type WorkforceScope,
 } from '../lib/workforceScope';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
+import PointageSessionManager from '../components/PointageSessionManager';
+import PointageWorkerSummary from '../components/PointageWorkerSummary';
 
 type Pointage = {
   id: string;
@@ -35,9 +39,12 @@ type Pointage = {
   chantier?: { id: string; name: string } | null;
 };
 
+type MatrixWorker = { id: string; firstName: string; lastName: string; reference?: string; category?: string };
+
 type Stats = { total: number; validated: number; pending: number; totalDays: number; advances: number; bonuses: number; estimatedCost: number };
 
-type Tab = 'saisie' | 'matrice' | 'historique';
+type Tab = 'gestion' | 'synthese' | 'matrice' | 'historique';
+const TABS: Tab[] = ['gestion', 'synthese', 'matrice', 'historique'];
 type SortOrder = 'asc' | 'desc';
 type PointageRowEdit = { days: string; dayRate: string; advance: string; bonus: string };
 
@@ -86,24 +93,23 @@ export default function PointagePage() {
   );
   const isChauffeur = scope === 'chauffeur';
   const [tab, setTab] = useState<Tab>(() => {
+    const urlTab = searchParams.get('tab') as Tab | null;
+    if (urlTab && TABS.includes(urlTab)) return urlTab;
     if (searchParams.get('workforceId')) return 'historique';
     if (searchParams.get('view') === 'matrice') return 'matrice';
-    return 'saisie';
+    return 'gestion';
   });
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [chantierId, setChantierId] = useState(searchParams.get('chantierId') || '');
   const [trancheFilter, setTrancheFilter] = useState(searchParams.get('tranche') || '');
   const [chantiers, setChantiers] = useState<{ id: string; name: string; status?: string }[]>([]);
-  const [chantierTranches, setChantierTranches] = useState<{ id: string; name: string }[]>([]);
   const [workforce, setWorkforce] = useState<any[]>([]);
   const [pointages, setPointages] = useState<Pointage[]>([]);
-  const [rows, setRows] = useState<Record<string, PointageRowEdit>>({});
   const [workerQ, setWorkerQ] = useState('');
   const [dayStats, setDayStats] = useState<Stats>({ total: 0, validated: 0, pending: 0, totalDays: 0, advances: 0, bonuses: 0, estimatedCost: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
-  const [savingAll, setSavingAll] = useState(false);
   /** Chantiers visibles en colonnes (matrice) — vide = tous actifs */
   const [matrixChantierIds, setMatrixChantierIds] = useState<string[]>([]);
   const [matrixDrafts, setMatrixDrafts] = useState<Record<string, string>>({});
@@ -134,6 +140,8 @@ export default function PointagePage() {
   const [histRows, setHistRows] = useState<Record<string, PointageRowEdit>>({});
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteMotif, setDeleteMotif] = useState('');
+  const histSelection = useRowSelection<Pointage>();
+  const matrixSelection = useRowSelection<MatrixWorker>();
 
   useEffect(() => {
     fetchChantierList<{ id: string; name: string; status?: string }>().then(setChantiers);
@@ -143,29 +151,14 @@ export default function PointagePage() {
     fetchWorkforceList(scopeQueryParams(scope)).then(setWorkforce);
   }, [scope]);
 
-  function loadTranchesForChantier(id: string, target: 'saisie' | 'historique') {
-    if (!id) {
-      if (target === 'saisie') setChantierTranches([]);
-      else setHistTranches([]);
+  useEffect(() => {
+    if (!histChantier) {
+      setHistTranches([]);
       return;
     }
-    api<{ id: string; name: string }[]>(`/chantiers/${id}/tranches`)
-      .then((items) => {
-        if (target === 'saisie') setChantierTranches(items);
-        else setHistTranches(items);
-      })
-      .catch(() => {
-        if (target === 'saisie') setChantierTranches([]);
-        else setHistTranches([]);
-      });
-  }
-
-  useEffect(() => {
-    loadTranchesForChantier(chantierId, 'saisie');
-  }, [chantierId]);
-
-  useEffect(() => {
-    loadTranchesForChantier(histChantier, 'historique');
+    api<{ id: string; name: string }[]>(`/chantiers/${histChantier}/tranches`)
+      .then(setHistTranches)
+      .catch(() => setHistTranches([]));
   }, [histChantier]);
 
   useEffect(() => {
@@ -192,13 +185,14 @@ export default function PointagePage() {
   }, [tab, dateFrom, dateTo, histChantier, histTranche, histWorker, validatedFilter, histSort, histOrder, histPage, setSearchParams]);
 
   useEffect(() => {
-    if (tab !== 'saisie' && tab !== 'matrice') return;
+    if (tab === 'historique') return;
     const qs = new URLSearchParams();
-    if (tab === 'matrice') qs.set('view', 'matrice');
-    if (chantierId) qs.set('chantierId', chantierId);
-    if (trancheFilter) qs.set('tranche', trancheFilter);
+    qs.set('tab', tab);
+    if (tab !== 'matrice' && chantierId) qs.set('chantierId', chantierId);
+    if (tab !== 'matrice' && chantierId && trancheFilter) qs.set('tranche', trancheFilter);
+    if (isChauffeur) qs.set('scope', 'chauffeur');
     setSearchParams(qs, { replace: true });
-  }, [tab, chantierId, trancheFilter, setSearchParams]);
+  }, [tab, chantierId, trancheFilter, isChauffeur, setSearchParams]);
 
   useEffect(() => {
     if (!showFilters) return;
@@ -216,16 +210,11 @@ export default function PointagePage() {
     };
   }, [showFilters]);
 
-  function loadDay(forMatrix = tab === 'matrice') {
+  function loadDay() {
     setLoading(true);
     setError('');
-    const filterChantier = forMatrix ? '' : chantierId;
     const qs = new URLSearchParams({ dateFrom: date, dateTo: date });
-    if (filterChantier) qs.set('chantierId', filterChantier);
-    if (!forMatrix && trancheFilter) qs.set('tranche', trancheFilter);
     const dayQs = new URLSearchParams({ date });
-    if (filterChantier) dayQs.set('chantierId', filterChantier);
-    if (!forMatrix && trancheFilter) dayQs.set('tranche', trancheFilter);
     Promise.all([
       api<Pointage[]>(`/chantiers/pointage/day?${dayQs}`),
       api<Stats>(`/chantiers/pointage/stats?${qs}`),
@@ -233,8 +222,7 @@ export default function PointagePage() {
       .then(([pts, st]) => {
         setPointages(pts);
         setDayStats(st);
-        setRows({});
-        if (forMatrix) setMatrixDrafts({});
+        setMatrixDrafts({});
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
       .finally(() => setLoading(false));
@@ -258,11 +246,12 @@ export default function PointagePage() {
 
   function buildExportQuery() {
     const qs = new URLSearchParams();
-    if (tab === 'saisie' || tab === 'matrice') {
+    if (tab === 'matrice') {
       qs.set('dateFrom', date);
       qs.set('dateTo', date);
-      if (tab === 'saisie' && chantierId) qs.set('chantierId', chantierId);
-      if (tab === 'saisie' && trancheFilter) qs.set('tranche', trancheFilter);
+    } else if (tab === 'gestion' || tab === 'synthese') {
+      if (chantierId) qs.set('chantierId', chantierId);
+      if (chantierId && trancheFilter) qs.set('tranche', trancheFilter);
     } else {
       if (dateFrom) qs.set('dateFrom', dateFrom);
       if (dateTo) qs.set('dateTo', dateTo);
@@ -295,54 +284,12 @@ export default function PointagePage() {
   }
 
   useEffect(() => {
-    if (tab === 'saisie' || tab === 'matrice') loadDay(tab === 'matrice');
-  }, [date, chantierId, trancheFilter, tab]);
+    if (tab === 'matrice') loadDay();
+  }, [date, tab]);
 
   useEffect(() => {
     if (tab === 'historique') loadHistory(histPage);
   }, [tab, histSort, histOrder]);
-
-  function findDayPointage(workforceId: string) {
-    return pointages.find(
-      (p) =>
-        p.workforceId === workforceId
-        && (!chantierId || p.chantier?.id === chantierId),
-    );
-  }
-
-  function getRowDefaults(id: string): PointageRowEdit {
-    const existing = findDayPointage(id);
-    const w = workforce.find((x) => x.id === id);
-    const days = existing != null ? existing.dayValue : 1;
-    return {
-      days: formatDays(days),
-      dayRate: String(existing?.dayRate ?? w?.dailySalary ?? ''),
-      advance: String(existing?.advance ?? 0),
-      bonus: String(existing?.bonus ?? 0),
-    };
-  }
-
-  function getRow(id: string) {
-    return rows[id] || getRowDefaults(id);
-  }
-
-  function setRow(id: string, patch: Partial<PointageRowEdit>) {
-    setRows((prev) => ({ ...prev, [id]: { ...(prev[id] || getRowDefaults(id)), ...patch } }));
-  }
-
-  function rowTotalDay(id: string) {
-    const n = Number(getRow(id).days);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
-  }
-
-  function rowHours(id: string) {
-    return rowTotalDay(id) * HOURS_PER_DAY;
-  }
-
-  function rowBrut(id: string, fallbackSalary = 0) {
-    const r = getRow(id);
-    return pointageBrut(rowTotalDay(id), Number(r.dayRate) || null, fallbackSalary);
-  }
 
   function parseDayRate(value: string) {
     if (value === '' || value == null) return null;
@@ -350,141 +297,11 @@ export default function PointagePage() {
     return Number.isNaN(n) || n <= 0 ? null : n;
   }
 
-  function buildSavePayload(workforceId: string, validated: boolean) {
-    const r = getRow(workforceId);
-    return {
-      date,
-      workforceId,
-      chantierId,
-      dayValue: rowTotalDay(workforceId),
-      dayRate: parseDayRate(r.dayRate),
-      advance: Number(r.advance) || 0,
-      bonus: Number(r.bonus) || 0,
-      validated,
-    };
-  }
-
-  async function saveOne(workforceId: string, validated = false, reload = true) {
-    if (!chantierId) {
-      await appAlert(t('msg.selectSiteFirst'));
-      return;
-    }
-    setSaving(workforceId);
-    try {
-      const existing = findDayPointage(workforceId);
-      const payload = buildSavePayload(workforceId, validated);
-      if (existing?.id) {
-        await api(`/chantiers/pointage/${existing.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            dayValue: payload.dayValue,
-            dayRate: payload.dayRate,
-            advance: payload.advance,
-            bonus: payload.bonus,
-            validated: payload.validated,
-            chantierId: payload.chantierId,
-          }),
-        });
-      } else {
-        await api('/chantiers/pointage', {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
-      }
-      if (payload.dayRate != null && payload.dayRate > 0) {
-        setWorkforce((prev) =>
-          prev.map((w) => (w.id === workforceId ? { ...w, dailySalary: payload.dayRate } : w)),
-        );
-      }
-      if (reload) loadDay(false);
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-      throw err;
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  async function saveAll(validated = false) {
-    if (!chantierId) {
-      await appAlert(t('msg.selectSiteFirst'));
-      return;
-    }
-    if (filteredWorkforce.length === 0) return;
-    setSavingAll(true);
-    setError('');
-    const failures: string[] = [];
-    try {
-      for (const w of filteredWorkforce) {
-        try {
-          await saveOne(w.id, validated, false);
-        } catch (err) {
-          failures.push(`${w.firstName} ${w.lastName}: ${err instanceof Error ? err.message : t('common.error')}`);
-        }
-      }
-      loadDay(false);
-      if (failures.length > 0) {
-        await appAlert(t('msg.someLinesFailed', { details: failures.join('\n') }));
-      }
-    } finally {
-      setSavingAll(false);
-    }
-  }
-
-  async function validateAll() {
-    await saveAll(true);
-  }
-
   async function setPointageValidated(pointageId: string, validated: boolean) {
     await api(`/chantiers/pointage/${pointageId}`, {
       method: 'PUT',
       body: JSON.stringify({ validated }),
     });
-  }
-
-  async function unvalidateOne(workforceId: string) {
-    const existing = findDayPointage(workforceId);
-    if (!existing?.id) return;
-    setSaving(workforceId);
-    try {
-      await setPointageValidated(existing.id, false);
-      loadDay(false);
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  async function unvalidateAll() {
-    const validatedRows = filteredWorkforce.filter((w) => {
-      const p = findDayPointage(w.id);
-      return p?.validated;
-    });
-    if (validatedRows.length === 0) return;
-    setSavingAll(true);
-    const failures: string[] = [];
-    try {
-      for (const w of validatedRows) {
-        const existing = findDayPointage(w.id);
-        if (!existing?.id) continue;
-        try {
-          await setPointageValidated(existing.id, false);
-        } catch (err) {
-          failures.push(`${w.firstName} ${w.lastName}: ${err instanceof Error ? err.message : t('common.error')}`);
-        }
-      }
-      loadDay(false);
-      if (failures.length > 0) {
-        await appAlert(t('msg.someValidationsFailed', { details: failures.join('\n') }));
-      }
-    } finally {
-      setSavingAll(false);
-    }
-  }
-
-  async function unlockForEdit(workforceId: string) {
-    await unvalidateOne(workforceId);
   }
 
   function histRowDefaults(p: Pointage): PointageRowEdit {
@@ -565,7 +382,7 @@ export default function PointagePage() {
       setDeleteId(null);
       setDeleteMotif('');
       if (tab === 'historique') loadHistory(histPage);
-      else loadDay(tab === 'matrice');
+      else loadDay();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
@@ -625,7 +442,7 @@ export default function PointagePage() {
         delete next[key];
         return next;
       });
-      loadDay(true);
+      loadDay();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -641,41 +458,83 @@ export default function PointagePage() {
     downloadExcel(`/chantiers/pointage/export/xlsx?${buildExportQuery()}`, 'pointage-gic.xlsx');
   }
 
-  async function printList(items: Pointage[]) {
-
-    await printWithCompany({ title: t('pages.attendance'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.attendance')} GIC</title></head><body>
-      <h1>${t('pages.attendance')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('common.date')}</th><th>${t('columns.worker')}</th><th>${t('columns.chantier')}</th><th>${t('columns.totalDays')}</th><th>${t('columns.validated')}</th></tr>
-        ${items.map((p) => `<tr>
-          <td>${formatDate(p.date)}</td>
-          <td>${p.workforce.firstName} ${p.workforce.lastName}</td>
-          <td>${p.chantier?.name || '—'}</td>
-          <td>${p.totalDay.toFixed(2)}</td>
-          <td>${p.validated ? t('common.yes') : t('common.no')}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function pointageDays(p: Pointage) {
+    return p.dayValue ?? p.totalDay ?? 0;
   }
 
-  const filteredWorkforce = workforce.filter((w) => {
-    if (String(w.salaryPeriod || '').toLowerCase() === 'mois') return false;
-    if (chantierId) {
-      const assignmentsOnChantier = (w.assignments || []).filter(
-        (a: { chantierId?: string; chantier?: { id: string }; tranche?: string | null }) =>
-          a.chantierId === chantierId || a.chantier?.id === chantierId,
-      );
-      if (assignmentsOnChantier.length === 0) return false;
-      if (trancheFilter) {
-        const onTranche = assignmentsOnChantier.some((a: { tranche?: string | null }) => a.tranche === trancheFilter);
-        if (!onTranche) return false;
-      }
-    }
-    if (!workerQ) return true;
-    const s = workerQ.toLowerCase();
-    return `${w.firstName} ${w.lastName}`.toLowerCase().includes(s)
-      || (w.category || '').toLowerCase().includes(s)
-      || (w.reference || '').toLowerCase().includes(s);
-  });
+  function workerLabel(w: { firstName: string; lastName: string; reference?: string }) {
+    return `${w.reference ? `${w.reference} — ` : ''}${w.firstName} ${w.lastName}`;
+  }
+
+  function printHistory() {
+    const worker = workforce.find((w) => w.id === histWorker);
+    printRows<Pointage>({
+      title: `${t('pages.attendance')} — ${t('tabs.history')}`,
+      subtitle: isChauffeur ? t('pages.drivers') : t('pages.workforce'),
+      filters: [
+        [t('listPrint.period'), dateFrom || dateTo ? `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}` : ''],
+        [t('columns.chantier'), histChantier && chantiers.find((c) => c.id === histChantier)?.name],
+        [t('fields.tranche'), histTranche],
+        [t('columns.worker'), worker ? workerLabel(worker) : ''],
+        [t('msg.validation'), validatedFilter && validatedFilters.find((f) => f.id === validatedFilter)?.label],
+        [t('listPrint.sort'), `${histSort === 'totalDay' ? t('msg.totalDaysSort') : t('common.date')} (${histOrder === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (p) => formatDate(p.date) },
+        { label: t('columns.worker'), value: (p) => `${p.workforce.firstName} ${p.workforce.lastName}` },
+        { label: t('columns.chantier'), value: (p) => p.chantier?.name },
+        { label: t('columns.days'), value: (p) => formatDays(pointageDays(p)), align: 'right', total: (rows) => formatDays(rows.reduce((s, p) => s + pointageDays(p), 0)) },
+        { label: t('columns.hours'), value: (p) => (pointageDays(p) * HOURS_PER_DAY).toFixed(1), align: 'right' },
+        { label: t('columns.dailyRate'), value: (p) => formatMad(p.dayRate ?? p.workforce.dailySalary ?? 0), align: 'right' },
+        {
+          label: t('columns.brut'),
+          value: (p) => formatMad(pointageBrut(pointageDays(p), p.dayRate, p.workforce.dailySalary || 0)),
+          align: 'right',
+          total: (rows) => formatMad(rows.reduce((s, p) => s + pointageBrut(pointageDays(p), p.dayRate, p.workforce.dailySalary || 0), 0)),
+        },
+        { label: t('columns.advance'), value: (p) => formatMad(p.advance || 0), align: 'right', total: (rows) => formatMad(rows.reduce((s, p) => s + (p.advance || 0), 0)) },
+        { label: t('columns.bonus'), value: (p) => formatMad(p.bonus || 0), align: 'right', total: (rows) => formatMad(rows.reduce((s, p) => s + (p.bonus || 0), 0)) },
+        { label: t('columns.validated'), value: (p) => p.validated },
+      ],
+      rows: histSelection.count ? histSelection.rows : () => fetchAllRows<Pointage>('/chantiers/pointage', buildHistoryQuery(1)),
+      selectedCount: histSelection.count,
+    });
+  }
+
+  function printMatrix() {
+    const cellDays = (w: MatrixWorker, cid: string) => {
+      const v = Number(matrixCellValue(w.id, cid));
+      return Number.isFinite(v) ? v : 0;
+    };
+    const rowTotal = (w: MatrixWorker) => matrixColumns.reduce((s, c) => s + cellDays(w, c.id), 0);
+    printRows<MatrixWorker>({
+      title: `${t('pages.attendance')} — ${t('tabs.matrixMultiSite')}`,
+      subtitle: isChauffeur ? t('pages.drivers') : t('pages.workforce'),
+      filters: [
+        [t('common.date'), formatDate(date)],
+        [t('listPrint.search'), workerQ],
+        [t('columns.chantier'), matrixChantierIds.length > 0 ? matrixColumns.map((c) => c.name).join(', ') : t('msg.allSites')],
+      ],
+      columns: [
+        { label: t('columns.worker'), value: (w) => `${workerLabel(w)}${w.category ? ` (${w.category})` : ''}` },
+        ...matrixColumns.map((c) => ({
+          label: c.name,
+          value: (w: MatrixWorker) => matrixCellValue(w.id, c.id),
+          align: 'center' as const,
+          total: (rows: MatrixWorker[]) => formatDays(rows.reduce((s, w) => s + cellDays(w, c.id), 0)),
+        })),
+        { label: t('columns.totalDays'), value: (w) => rowTotal(w).toFixed(3), align: 'right', total: (rows) => rows.reduce((s, w) => s + rowTotal(w), 0).toFixed(3) },
+      ],
+      rows: matrixSelection.count ? matrixSelection.rows : matrixWorkers,
+      selectedCount: matrixSelection.count,
+    });
+  }
+
+  function printList() {
+    if (tab === 'historique') printHistory();
+    else printMatrix();
+  }
+
 
   const matrixWorkers = workforce.filter((w) => {
     if (String(w.salaryPeriod || '').toLowerCase() === 'mois') return false;
@@ -718,11 +577,6 @@ export default function PointagePage() {
         ? `${activeChantierName}${activeTranche ? ` · ${activeTranche}` : ` · ${t('msg.allTranches')}`}`
         : t('pages.attendanceSubtitle'));
 
-  const hasValidatedToday = tab === 'saisie' && filteredWorkforce.some((w) => {
-    const p = findDayPointage(w.id);
-    return p?.validated;
-  });
-
   function toggleMatrixChantier(id: string) {
     setMatrixChantierIds((prev) => {
       // Premier clic depuis « tous » : partir de la liste complète puis retirer
@@ -746,18 +600,21 @@ export default function PointagePage() {
             <Link to={isChauffeur ? '/salaires?type=chauffeur' : '/salaires?type=main_oeuvre'}><Btn variant="secondary" icon={Wallet}>{t('pages.salaries')}</Btn></Link>
             <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>
             <Btn variant="secondary" icon={Download} onClick={exportExcel}>{t('common.excel')}</Btn>
-            <div className="mac-action-group">
-              <MacActionBtn
-                icon={Printer}
-                tone="gray"
-                title={t('common.print')}
-                onClick={() => printList(tab === 'historique' ? histItems : pointages)}
-              />
-            </div>
+            {(tab === 'matrice' || tab === 'historique') && (
+              <div className="mac-action-group">
+                <MacActionBtn
+                  icon={Printer}
+                  tone="gray"
+                  title={t('common.print')}
+                  onClick={printList}
+                />
+              </div>
+            )}
           </>
         }
       />
 
+      {(tab === 'matrice' || tab === 'historique') && (
       <div className="mac-kpi-grid mac-kpi-grid-4">
         <KpiCard title={t('columns.attendanceCount')} value={stats.total} icon={Clock} tone="violet" />
         <KpiCard title={t('columns.validated')} value={stats.validated} icon={CheckCircle} tone="emerald" delta={t('msg.pendingCount', { count: stats.pending })} deltaTone="muted" />
@@ -772,6 +629,7 @@ export default function PointagePage() {
           deltaTone="muted"
         />
       </div>
+      )}
 
       <Card className="mb-4 !pb-0">
         <MacToolbarTabs
@@ -791,7 +649,8 @@ export default function PointagePage() {
             }, { replace: true });
           }}
           viewTabs={[
-            { id: 'saisie', label: t('tabs.dayEntry') },
+            { id: 'gestion', label: t('actions.enterAttendance') },
+            { id: 'synthese', label: t('pointageMgmt.byWorkerTab') },
             { id: 'matrice', label: t('tabs.matrixMultiSite') },
             { id: 'historique', label: t('tabs.history') },
           ]}
@@ -808,7 +667,7 @@ export default function PointagePage() {
             className="mt-2"
             onClick={() => {
               if (tab === 'historique') loadHistory(histPage);
-              else loadDay(tab === 'matrice');
+              else loadDay();
             }}
           >
             {t('common.retry')}
@@ -816,211 +675,25 @@ export default function PointagePage() {
         </Card>
       )}
 
-      {tab === 'saisie' && (
-        <>
-          <div className="mac-filters-panel">
-            <div className="mac-filters-row mac-filters-row-between">
-              <div className="mac-filters-toolbar">
-                <MacSearch
-                  value={workerQ}
-                  onChange={setWorkerQ}
-                  placeholder={isChauffeur ? t('msg.searchDriver') : t('msg.searchWorker')}
-                />
-                <MacDateInput value={date} onChange={setDate} placeholder={t('common.date')} className="w-36 shrink-0" />
-                <MacSelect
-                  value={chantierId}
-                  onChange={(v) => {
-                    setChantierId(v);
-                    setTrancheFilter('');
-                  }}
-                  options={[
-                    { value: '', label: t('msg.chooseSite') },
-                    ...chantiers.map((c) => ({ value: c.id, label: c.name })),
-                  ]}
-                  className="w-44 shrink-0"
-                />
-                {chantierId && (
-                  <MacSelect
-                    value={trancheFilter}
-                    onChange={setTrancheFilter}
-                    options={[
-                      { value: '', label: t('msg.allTranches') },
-                      ...chantierTranches.map((tr) => ({ value: tr.name, label: tr.name })),
-                    ]}
-                    className="w-44 shrink-0"
-                  />
-                )}
-                {chantierId && (
-                  <span className="text-[11px] text-gic-muted shrink-0">
-                    {t('msg.assignedWorkers', { count: filteredWorkforce.length })}
-                    {trancheFilter ? ` · ${trancheFilter}` : ''}
-                  </span>
-                )}
-                {!chantierId && (
-                  <span className="text-[11px] text-gic-coral shrink-0">{t('msg.siteRequiredToSave')}</span>
-                )}
-              </div>
-              <div className="mac-filters-actions">
-                <Btn
-                  icon={Save}
-                  variant="secondary"
-                  onClick={() => saveAll(false)}
-                  disabled={loading || savingAll || !chantierId || filteredWorkforce.length === 0}
-                >
-                  {savingAll ? t('auth.saving') : t('actions.saveAll')}
-                </Btn>
-                <Btn
-                  icon={CheckCircle}
-                  onClick={validateAll}
-                  disabled={loading || savingAll || !chantierId || filteredWorkforce.length === 0}
-                >
-                  {t('actions.validateDay')}
-                </Btn>
-                {hasValidatedToday && (
-                  <Btn
-                    icon={RotateCcw}
-                    variant="secondary"
-                    onClick={unvalidateAll}
-                    disabled={loading || savingAll}
-                  >
-                    {t('actions.unvalidateAll')}
-                  </Btn>
-                )}
-              </div>
-            </div>
-          </div>
+      {tab === 'gestion' && (
+        <PointageSessionManager
+          chantiers={chantiers}
+          chantierId={chantierId}
+          onChantierChange={(v) => { setChantierId(v); setTrancheFilter(''); }}
+          tranche={trancheFilter}
+          onTrancheChange={setTrancheFilter}
+          workforce={workforce}
+        />
+      )}
 
-          <Card padding={false}>
-            {loading ? (
-              <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
-            ) : !chantierId ? (
-              <EmptyState title={t('msg.selectSiteForDayEntry')} />
-            ) : filteredWorkforce.length === 0 ? (
-              <EmptyState title={t('msg.emptyActiveWorkers')} />
-            ) : (
-              <TableWrap mac>
-                <thead>
-                  <tr>
-                    <Th mac>{t('columns.worker')}</Th>
-                    <Th mac>{t('columns.days')}</Th>
-                    <Th mac>{t('columns.hours')}</Th>
-                    <Th mac>{t('columns.dailyRateMad')}</Th>
-                    <Th mac>{t('columns.brutAuto')}</Th>
-                    <Th mac>{t('columns.advance')}</Th>
-                    <Th mac>{t('columns.bonus')}</Th>
-                    <Th mac>{t('columns.status')}</Th>
-                    <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredWorkforce.map((w) => {
-                    const r = getRow(w.id);
-                    const brut = rowBrut(w.id, w.dailySalary || 0);
-                    const existing = findDayPointage(w.id);
-                    const validated = existing?.validated;
-                    const locked = !!validated;
-                    return (
-                      <tr key={w.id} className={validated ? 'bg-gic-emerald-soft/20' : ''}>
-                        <Td mac>
-                          <Link to={workforceDetailPathForCategory(w.category, w.id)} className="mac-table-ref">
-                            {w.reference ? `${w.reference} — ` : ''}{w.firstName} {w.lastName}
-                          </Link>
-                          {w.category && <span className="block text-[10px] text-gic-muted">{w.category}</span>}
-                        </Td>
-                        <Td mac>
-                          <input
-                            className={cellInputClass(locked)}
-                            type="number"
-                            min={0}
-                            step={DAY_STEP}
-                            readOnly={locked}
-                            value={r.days}
-                            onChange={(e) => setRow(w.id, { days: e.target.value })}
-                            title={t('msg.dayStepHint')}
-                          />
-                        </Td>
-                        <Td mac className="mac-table-muted">{rowHours(w.id).toFixed(1)} h</Td>
-                        <Td mac>
-                          <input
-                            className={cellInputClass(locked, 'w-20')}
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            readOnly={locked}
-                            value={r.dayRate}
-                            onChange={(e) => setRow(w.id, { dayRate: e.target.value })}
-                          />
-                        </Td>
-                        <Td mac className="mac-table-muted">{formatMad(brut)}</Td>
-                        <Td mac>
-                          <input
-                            className={cellInputClass(locked)}
-                            readOnly={locked}
-                            value={r.advance}
-                            onChange={(e) => setRow(w.id, { advance: e.target.value })}
-                          />
-                        </Td>
-                        <Td mac>
-                          <input
-                            className={cellInputClass(locked)}
-                            readOnly={locked}
-                            value={r.bonus}
-                            onChange={(e) => setRow(w.id, { bonus: e.target.value })}
-                          />
-                        </Td>
-                        <Td mac>
-                          {validated ? (
-                            <StatusPill status="validé" quiet />
-                          ) : existing ? (
-                            <StatusPill status="brouillon" quiet />
-                          ) : (
-                            '—'
-                          )}
-                        </Td>
-                        <Td mac className="mac-td-actions">
-                          <div className="mac-actions">
-                            <MacActionBtn
-                              icon={Save}
-                              tone="blue"
-                              title={saving === w.id ? t('auth.saving') : t('common.save')}
-                              disabled={saving === w.id || savingAll || locked || !chantierId}
-                              onClick={() => saveOne(w.id, false)}
-                            />
-                            <MacActionBtn
-                              icon={CheckCircle}
-                              tone="green"
-                              title={t('actions.validate')}
-                              disabled={saving === w.id || savingAll || validated || !chantierId}
-                              onClick={() => saveOne(w.id, true)}
-                            />
-                            {validated && existing && (
-                              <MacActionBtn
-                                icon={Pencil}
-                                tone="orange"
-                                title={t('actions.editInList')}
-                                disabled={saving === w.id || savingAll}
-                                onClick={() => unlockForEdit(w.id)}
-                              />
-                            )}
-                            {existing && (
-                              <MacActionBtn
-                                icon={Trash2}
-                                tone="red"
-                                title={t('common.delete')}
-                                disabled={saving === w.id || savingAll}
-                                onClick={() => { setDeleteId(existing.id); setDeleteMotif(''); }}
-                              />
-                            )}
-                          </div>
-                        </Td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </TableWrap>
-            )}
-          </Card>
-        </>
+      {tab === 'synthese' && (
+        <PointageWorkerSummary
+          chantiers={chantiers}
+          chantierId={chantierId}
+          onChantierChange={(v) => { setChantierId(v); setTrancheFilter(''); }}
+          tranche={trancheFilter}
+          onTrancheChange={setTrancheFilter}
+        />
       )}
 
       {tab === 'matrice' && (
@@ -1067,6 +740,8 @@ export default function PointagePage() {
             )}
           </div>
 
+          <SelectionBar selection={matrixSelection} onPrint={printMatrix} />
+
           <Card padding={false}>
             {loading ? (
               <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -1079,6 +754,7 @@ export default function PointagePage() {
                 <table className="mac-table">
                   <thead>
                     <tr>
+                      <SelectAllTh selection={matrixSelection} rows={matrixWorkers as MatrixWorker[]} />
                       <Th mac className="sticky left-0 z-10 bg-[#f5f5f7]">{t('columns.worker')}</Th>
                       {matrixColumns.map((c) => (
                         <Th mac key={c.id} className="min-w-[5.5rem] text-center">
@@ -1096,6 +772,7 @@ export default function PointagePage() {
                       }, 0);
                       return (
                         <tr key={w.id}>
+                          <SelectTd selection={matrixSelection} row={w as MatrixWorker} />
                           <Td mac className="sticky left-0 z-10 bg-white">
                             <Link to={workforceDetailPathForCategory(w.category, w.id)} className="mac-table-ref">
                               {w.reference ? `${w.reference} — ` : ''}{w.firstName} {w.lastName}
@@ -1259,6 +936,8 @@ export default function PointagePage() {
             </div>
           </div>
 
+          <SelectionBar selection={histSelection} onPrint={printHistory} />
+
           <Card padding={false}>
             {loading ? (
               <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -1268,6 +947,7 @@ export default function PointagePage() {
               <TableWrap mac>
                 <thead>
                   <tr>
+                    <SelectAllTh selection={histSelection} rows={histItems} />
                     <Th mac>{t('columns.date')}</Th>
                     <Th mac>{t('columns.worker')}</Th>
                     <Th mac>{t('columns.chantier')}</Th>
@@ -1292,6 +972,7 @@ export default function PointagePage() {
                       key={p.id}
                       className={p.validated ? ' bg-gic-emerald-soft/10' : ''}
                     >
+                      <SelectTd selection={histSelection} row={p} />
                       <Td mac className="mac-table-muted">{formatDate(p.date)}</Td>
                       <Td mac>
                         <Link to={workforceDetailPathForCategory(p.workforce.category, p.workforce.id)} className="mac-table-ref">

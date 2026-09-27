@@ -3,12 +3,12 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, Pencil, Trash2, Printer, Plus, Users, ShoppingCart,
+  Pencil, Trash2, Printer, Plus, Users, ShoppingCart,
   HardHat, FileText, ExternalLink, Upload, Camera, Video,
-  Clock, FolderOpen, Layers, Building2, Image, Package,
-  MapPin, Images, UserMinus, TrendingUp, Truck, Wallet,
+  Clock, Layers, Building2, Image,
+  MapPin, Images, TrendingUp, Truck, Wallet,
 } from 'lucide-react';
-import { api, fetchSupplierList, fetchWorkforceList, formatDate, formatMad, uploadDocument, uploadForm, type PaginatedResponse } from '../lib/api';
+import { api, fetchSupplierList, formatDate, formatMad, uploadDocument, uploadForm, type PaginatedResponse } from '../lib/api';
 import { googleMapsSearchUrl } from '../lib/googleMaps';
 import { workforceDetailPathForCategory } from '../lib/workforceScope';
 import {
@@ -18,24 +18,27 @@ import { useI18n } from '../i18n/I18nContext';
 import { photoSrc } from '../lib/photoUrl';
 
 import {
-  ChantierFormFields, chantierToForm, emptyChantierForm, type ChantierFormData,
+  ChantierFormFields, chantierToForm, chantierDateError, emptyChantierForm, type ChantierFormData,
   type ProjectOption, type ChefOption,
 } from '../components/ChantierFormFields';
 import ChantierOverviewPanel, { type ChantierOverview } from '../components/ChantierOverview';
 import ChantierDetailNav, { buildChantierNavGroups, type ChantierTab } from '../components/ChantierDetailNav';
-import { ChantierStockPanel, ChantierSubcontractorsPanel } from '../components/ChantierExtraPanels';
+import { ChantierSubcontractorsPanel } from '../components/ChantierExtraPanels';
 import {
   ChantierTranchesList, ChantierTrancheView, type TrancheListItem,
 } from '../components/ChantierTrancheView';
-import { EntityPickerPanel, enginToPickerItem, workforceToPickerItem } from '../components/EntityPickerPanel';
-import { PurchaseFormFields, emptyPurchaseForm, type PurchaseFormData } from '../components/PurchaseFormFields';
+import { SiteEnginsPanel } from '../components/engins/SiteEngins';
+import { EntityPickerPanel, enginToPickerItem } from '../components/EntityPickerPanel';
+import { PurchaseFormFields, emptyPurchaseForm, purchaseFormToBody, validatePurchaseForm, type PurchaseFormData } from '../components/PurchaseFormFields';
+import { MediaGallery } from '../components/MediaGallery';
+import { ENGAGED_PURCHASE_STATUSES } from '../lib/purchases';
+import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from '../components/PurchaseBadges';
 
 type Tab = ChantierTab;
 
-/** Achats réglés (visa / contrôle / payé) — diminuent le budget global. */
+/** Achats engagés (bon de commande émis et au-delà) — diminuent le budget global. */
 function isPurchaseSettled(status?: string | null) {
-  const s = String(status || '').toLowerCase();
-  return ['contrôlé', 'controle', 'visé', 'vise', 'payé', 'paye', 'validé', 'valide'].includes(s);
+  return (ENGAGED_PURCHASE_STATUSES as string[]).includes(String(status || ''));
 }
 
 export default function ChantierDetailPage() {
@@ -76,12 +79,6 @@ export default function ChantierDetailPage() {
   const [pointageLoading, setPointageLoading] = useState(false);
   const [editCamera, setEditCamera] = useState<any>(null);
   const [docExpiresAt, setDocExpiresAt] = useState('');
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [assignPickerQuery, setAssignPickerQuery] = useState('');
-  const [workforce, setWorkforce] = useState<any[]>([]);
-  const [assignForm, setAssignForm] = useState({ workforceId: '', functionRole: '', tranche: '' });
-  const [assignSelectedIds, setAssignSelectedIds] = useState<string[]>([]);
-  const [assignMissionFilter, setAssignMissionFilter] = useState<'all' | 'mission' | 'free'>('all');
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState<PurchaseFormData>(emptyPurchaseForm());
   const [suppliers, setSuppliers] = useState<{ id: string; reference: string; companyName: string }[]>([]);
@@ -120,6 +117,10 @@ export default function ChantierDetailPage() {
   async function saveTranche(e: React.FormEvent) {
     e.preventDefault();
     if (!id || !trancheForm.name.trim()) return;
+    if (chantierDateError(trancheForm.estimatedStartDate, trancheForm.estimatedEndDate)) {
+      await appAlert(t('inline.dateOrderError'));
+      return;
+    }
     try {
       const created = await api<{ id: string }>(`/chantiers/${id}/tranches`, {
         method: 'POST',
@@ -155,14 +156,14 @@ export default function ChantierDetailPage() {
 
   useEffect(() => {
     if (selectedTrancheId) return;
-    const urlTab = searchParams.get('tab') as Tab | null;
+    const rawTab = searchParams.get('tab');
+    const urlTab = (rawTab === 'stock' ? 'vue' : rawTab) as Tab | null;
     if (urlTab && urlTab !== tab) setTab(urlTab);
   }, [searchParams, selectedTrancheId]);
 
   useEffect(() => {
     if (tab === 'historique') loadHistory();
     if (tab === 'pointage' && id) loadPointages();
-    if (tab === 'personnel') fetchWorkforceList().then(setWorkforce).catch(() => {});
     if (tab === 'achats') {
       fetchSupplierList().then(setSuppliers).catch(() => {});
       api('/achats/families').then(setFamilies).catch(() => {});
@@ -178,25 +179,15 @@ export default function ChantierDetailPage() {
   async function savePurchase(e: React.FormEvent) {
     e.preventDefault();
     if (!id) return;
+    const invalid = validatePurchaseForm(purchaseForm, t);
+    if (invalid) {
+      await appAlert(invalid);
+      return;
+    }
     try {
       await api('/achats/purchases', {
         method: 'POST',
-        body: JSON.stringify({
-          designation: purchaseForm.designation,
-          family: purchaseForm.family || null,
-          unit: purchaseForm.unit || null,
-          quantity: purchaseForm.quantity,
-          unitPrice: purchaseForm.unitPrice,
-          tvaRate: purchaseForm.tvaRate || '20',
-          supplierId: purchaseForm.supplierId || null,
-          chantierId: id,
-          tranche: purchaseForm.tranche || null,
-          paymentMode: purchaseForm.paymentMode,
-          author: purchaseForm.author || null,
-          remark: purchaseForm.remark || null,
-          date: purchaseForm.date,
-          invoiced: purchaseForm.invoiced === 'true',
-        }),
+        body: JSON.stringify({ ...purchaseFormToBody(purchaseForm), chantierId: id }),
       });
       setPurchaseOpen(false);
       setPurchaseForm(emptyPurchaseForm());
@@ -204,21 +195,6 @@ export default function ChantierDetailPage() {
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
-  }
-
-  function openAssign() {
-    setAssignForm({ workforceId: '', functionRole: '', tranche: '' });
-    setAssignSelectedIds([]);
-    setAssignMissionFilter('all');
-    setAssignPickerQuery('');
-    fetchWorkforceList().then(setWorkforce).catch(() => {});
-    setAssignOpen(true);
-  }
-
-  function toggleAssignSelect(workforceId: string) {
-    setAssignSelectedIds((prev) => (
-      prev.includes(workforceId) ? prev.filter((id) => id !== workforceId) : [...prev, workforceId]
-    ));
   }
 
   function openMission() {
@@ -244,49 +220,6 @@ export default function ChantierDetailPage() {
       });
       setMissionOpen(false);
       setMissionForm({ enginId: '', mission: '', driverName: '', usage: '', tranche: '' });
-      load();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
-  async function assignWorker(e: React.FormEvent) {
-    e.preventDefault();
-    if (!id || assignSelectedIds.length === 0) return;
-    const failures: string[] = [];
-    for (const workforceId of assignSelectedIds) {
-      const worker = workforce.find((w) => w.id === workforceId);
-      try {
-        await api(`/chantiers/${id}/assign`, {
-          method: 'POST',
-          body: JSON.stringify({
-            workforceId,
-            functionRole: assignForm.functionRole || worker?.category || null,
-            tranche: assignForm.tranche || null,
-          }),
-        });
-      } catch (err) {
-        const name = worker ? `${worker.firstName} ${worker.lastName}` : workforceId;
-        failures.push(`${name}: ${err instanceof Error ? err.message : t('common.error')}`);
-      }
-    }
-    if (failures.length === assignSelectedIds.length) {
-      await appAlert(failures.join('\n'));
-      return;
-    }
-    if (failures.length > 0) {
-      await appAlert(t('msg.someAssignmentsFailed', { failures: failures.join('\n') }));
-    }
-    setAssignOpen(false);
-    setAssignForm({ workforceId: '', functionRole: '', tranche: '' });
-    setAssignSelectedIds([]);
-    load();
-  }
-
-  async function unassignWorker(assignmentId: string) {
-    if (!id || !await appConfirm(t('msg.confirmRemoveWorkerFromSite'))) return;
-    try {
-      await api(`/chantiers/${id}/assign/${assignmentId}`, { method: 'DELETE' });
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -359,6 +292,10 @@ export default function ChantierDetailPage() {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (chantierDateError(form.startDate, form.endDate)) {
+      await appAlert(t('inline.dateOrderError'));
+      return;
+    }
     try {
       await api(`/chantiers/${id}`, {
         method: 'PUT',
@@ -496,16 +433,15 @@ export default function ChantierDetailPage() {
       <p><b>Chef :</b> ${chantier.managerName || '—'}</p>
       <p><b>Avancement :</b> ${Math.round(chantier.progressPct || 0)}%</p>
       <p><b>Statut :</b> ${chantier.status}</p>
-      <p><b>Personnel :</b> ${(chantier.assignments || []).length} affectés</p>
+      <p><b>Ouvriers pointés :</b> ${chantier.pointedWorkersCount ?? 0}</p>
       <p><b>Achats :</b> ${(chantier.purchases || []).length}</p>
     </body></html>`, { grid: true }) });
   }
 
   const navGroups = buildChantierNavGroups(t, {
     tranches: tranches.length,
-    galerie: chantier?.images?.length ?? 0,
-    personnel: chantier?.assignments?.length ?? 0,
-    engins: chantier?.missions?.length ?? 0,
+    galerie: (chantier?.images?.length ?? 0) + (chantier?.documents?.length ?? 0),
+    engins: chantier?.enginCosts?.byEngin?.length || chantier?.missions?.length || 0,
     achats: chantier?.purchases?.length ?? 0,
     documents: chantier?.documents?.length ?? 0,
     cameras: chantier?.cameras?.length ?? 0,
@@ -527,7 +463,6 @@ export default function ChantierDetailPage() {
   }
 
   const purchases = chantier.purchases || [];
-  const assignments = chantier.assignments || [];
   const documents = chantier.documents || [];
   const cameras = chantier.cameras || [];
   const purchaseTotal = purchases.reduce((s: number, p: any) => s + Number(p.totalPrice || 0), 0);
@@ -623,7 +558,6 @@ export default function ChantierDetailPage() {
             <Btn variant="secondary" onClick={() => setActionsOpen((o) => !o)}>{t('common.actions')}</Btn>
             {actionsOpen && (
               <div className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-xl bg-white border border-[#d2d2d7] shadow-lg py-1">
-                <ActionItem label={t('actions.assignWorker')} onClick={() => { openAssign(); setActionsOpen(false); }} />
                 <ActionItem label={t('actions.addCamera')} onClick={() => { setCameraOpen(true); setActionsOpen(false); }} />
                 <Link to={`/pointage?chantierId=${id}`} className="block px-3 py-2 text-[12px] hover:bg-black/[0.03]" onClick={() => setActionsOpen(false)}>
                   {t('tabs.attendance')}
@@ -657,7 +591,7 @@ export default function ChantierDetailPage() {
             delta={budgetGlobal > 0 ? formatMad(budgetGlobal) : undefined}
             deltaTone={budgetOverrun ? 'coral' : 'muted'}
           />
-          <KpiCard title={t('tabs.workers')} value={assignments.length} icon={Users} tone="coral" delta={t('msg.equipmentCount', { count: missions.length })} deltaTone="muted" />
+          <KpiCard title={t('pointageMgmt.pointedWorkers')} value={chantier.pointedWorkersCount ?? 0} icon={Users} tone="coral" delta={t('msg.equipmentCount', { count: missions.length })} deltaTone="muted" />
         </div>
       )}
 
@@ -667,6 +601,8 @@ export default function ChantierDetailPage() {
           trancheId={selectedTrancheId}
           chantierName={chantier.name}
           engins={engins}
+          tranches={tranches}
+          onSelectTranche={openTranche}
           onBack={closeTranche}
           onRefresh={load}
         />
@@ -762,107 +698,58 @@ export default function ChantierDetailPage() {
           <div className="mt-2">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
               <p className="text-[12px] text-gic-muted flex items-center gap-1.5">
-                <Images size={14} /> {t('msg.sitePhotoCount', { count: images.length })}
+                <Images size={14} /> {t('gallery.summary', { images: images.length, documents: documents.length })}
               </p>
-              <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
-                <Upload size={14} />
-                {galleryUploading ? t('auth.sending') : t('actions.addImages')}
-                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.webp" multiple onChange={onGalleryUpload} disabled={galleryUploading} />
-              </label>
-            </div>
-            {images.length === 0 ? (
-              <p className="text-[12px] text-gic-muted py-6 text-center">{t('msg.emptySitePhotos')}</p>
-            ) : (
-              <div className="mac-project-gallery">
-                {images.map((img: { id: string; path: string }) => (
-                  <div key={img.id} className={`mac-project-gallery-item${chantier.photo === img.path ? ' mac-project-gallery-cover' : ''}`}>
-                    <img src={img.path} alt="" />
-                    <div className="mac-project-gallery-actions">
-                      {chantier.photo !== img.path && (
-                        <button type="button" className="mac-project-gallery-btn" onClick={() => setCoverImage(img.id)} title={t('common.view')}>
-                          <Image size={12} />
-                        </button>
-                      )}
-                      <button type="button" className="mac-project-gallery-btn mac-project-gallery-btn-danger" onClick={() => deleteGalleryImage(img.id)} title={t('common.delete')}>
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                    {chantier.photo === img.path && <span className="mac-project-gallery-badge">{t('fields.cover')}</span>}
-                  </div>
-                ))}
+              <div className="flex flex-wrap gap-2">
+                <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
+                  <Upload size={14} />
+                  {galleryUploading ? t('auth.sending') : t('actions.addImages')}
+                  <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.webp" multiple onChange={onGalleryUpload} disabled={galleryUploading} />
+                </label>
+                <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
+                  <FileText size={14} />
+                  {docUploading ? t('auth.sending') : t('gallery.addDocument')}
+                  <input type="file" className="hidden" onChange={onDocUpload} disabled={docUploading} />
+                </label>
               </div>
-            )}
+            </div>
+            <MediaGallery
+              emptyLabel={t('msg.emptySitePhotos')}
+              items={[
+                ...images.map((img: { id: string; path: string; createdAt?: string }) => ({
+                  id: `img-${img.id}`,
+                  url: img.path,
+                  name: img.path.split('/').pop() || '',
+                  date: img.createdAt,
+                  isCover: chantier.photo === img.path,
+                })),
+                ...documents.map((d: any) => ({
+                  id: `doc-${d.id}`,
+                  url: d.path,
+                  name: d.name,
+                  date: d.createdAt,
+                  subtitle: d.category || null,
+                })),
+              ]}
+              onSetCover={(item) => {
+                if (item.id.startsWith('img-')) setCoverImage(item.id.slice(4));
+              }}
+              onDelete={(item) => {
+                if (item.id.startsWith('img-')) deleteGalleryImage(item.id.slice(4));
+                else removeDocument(item.id.slice(4));
+              }}
+            />
           </div>
         )}
 
-        {tab === 'personnel' && (
-          <Card padding={false} className="mt-2 overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-gic-border/80 bg-[#fafafa]">
-              <div>
-                <p className="text-[13px] font-medium text-gic-ink tracking-tight inline-flex items-center gap-1.5">
-                  <Users size={15} /> {t('msg.workersAssignedTitle')}
-                </p>
-                <p className="text-[11px] text-gic-muted mt-0.5">
-                  {t('msg.workersOnSiteCount', { count: assignments.length })}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Btn icon={Plus} size="sm" onClick={openAssign}>{t('actions.assignWorker')}</Btn>
-              </div>
-            </div>
-            {assignments.length === 0 ? (
-              <div className="py-10 text-center">
-                <p className="text-[12px] text-gic-muted">{t('msg.emptyWorkerOnSite')}</p>
-                <Btn icon={Plus} className="mt-3" size="sm" onClick={openAssign}>{t('actions.assignWorker')}</Btn>
-              </div>
-            ) : (
-              <TableWrap mac>
-                <thead>
-                  <tr>
-                    <Th mac>{t('columns.worker')}</Th>
-                    <Th mac>{t('columns.category')}</Th>
-                    <Th mac>{t('columns.function')}</Th>
-                    <Th mac>{t('columns.tranche')}</Th>
-                    <Th mac>{t('fields.declared')}</Th>
-                    <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {assignments.map((a: any) => (
-                    <tr key={a.id}>
-                      <Td mac>
-                        <Link to={workforceDetailPathForCategory(a.workforce?.category, a.workforce?.id || '')} className="mac-table-ref">
-                          {a.workforce?.firstName} {a.workforce?.lastName}
-                        </Link>
-                      </Td>
-                      <Td mac className="mac-table-muted">{a.workforce?.category || '—'}</Td>
-                      <Td mac>{a.functionRole || '—'}</Td>
-                      <Td mac className="mac-table-muted">{a.tranche || '—'}</Td>
-                      <Td mac>
-                        {a.workforce?.declared ? (
-                          <span className="mac-chip mac-chip-blue">CNSS</span>
-                        ) : (
-                          <span className="text-gic-muted">{t('common.no')}</span>
-                        )}
-                      </Td>
-                      <Td mac className="mac-td-actions">
-                        <MacActionBtn
-                          icon={UserMinus}
-                          tone="red"
-                          title={t('common.remove')}
-                          onClick={() => unassignWorker(a.id)}
-                        />
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </TableWrap>
-            )}
-          </Card>
-        )}
-
-        {tab === 'engins' && (
-          <Card padding={false} className="mt-2 overflow-hidden">
+        {tab === 'engins' && id && (
+          <SiteEnginsPanel
+            chantierId={id}
+            costs={chantier.enginCosts}
+            onChanged={load}
+            missionsCount={missions.length}
+            missions={
+          <div className="overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-gic-border/80 bg-[#fafafa]">
               <div>
                 <p className="text-[13px] font-medium text-gic-ink tracking-tight inline-flex items-center gap-1.5">
@@ -912,7 +799,9 @@ export default function ChantierDetailPage() {
                 </tbody>
               </TableWrap>
             )}
-          </Card>
+          </div>
+            }
+          />
         )}
 
         {tab === 'pointage' && (
@@ -928,9 +817,14 @@ export default function ChantierDetailPage() {
                   </p>
                 )}
               </div>
-              <Link to={`/pointage?chantierId=${id}`}>
-                <Btn icon={Clock}>{t('actions.enterAttendance')}</Btn>
-              </Link>
+              <div className="flex flex-wrap gap-2">
+                <Link to={`/pointage?chantierId=${id}&tab=synthese`}>
+                  <Btn variant="secondary" icon={Users}>{t('pointageMgmt.byWorkerTab')}</Btn>
+                </Link>
+                <Link to={`/pointage?chantierId=${id}&tab=gestion`}>
+                  <Btn icon={Clock}>{t('actions.enterAttendance')}</Btn>
+                </Link>
+              </div>
             </div>
             {pointageLoading ? (
               <p className="py-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -1011,7 +905,12 @@ export default function ChantierDetailPage() {
               <p className="text-[13px] font-medium text-gic-ink tracking-tight">
                 {t('msg.purchasesAttachedToSite', { count: purchases.length })}
               </p>
-              <Btn icon={Plus} onClick={openPurchase}>{t('actions.addPurchase')}</Btn>
+              <div className="flex flex-wrap gap-2">
+                <Btn variant="secondary" icon={TrendingUp} onClick={() => navigate(`/achats?tab=analyse&chantierId=${id}`)}>
+                  {t('purchase.list.tabAnalytics')}
+                </Btn>
+                <Btn icon={Plus} onClick={openPurchase}>{t('actions.addPurchase')}</Btn>
+              </div>
             </div>
             {purchases.length === 0 ? (
               <div className="py-8 text-center">
@@ -1028,6 +927,8 @@ export default function ChantierDetailPage() {
                     <Th mac>{t('columns.supplier')}</Th>
                     <Th mac>{t('columns.tranche')}</Th>
                     <Th mac>{t('columns.amount')}</Th>
+                    <Th mac>{t('purchase.list.payment')}</Th>
+                    <Th mac>{t('purchase.list.delivery')}</Th>
                     <Th mac>{t('columns.status')}</Th>
                   </tr>
                 </thead>
@@ -1044,17 +945,20 @@ export default function ChantierDetailPage() {
                       </Td>
                       <Td mac className="mac-table-muted">{p.tranche || '—'}</Td>
                       <Td mac>{formatMad(p.totalPrice)}</Td>
-                      <Td mac><StatusPill status={p.status} quiet /></Td>
+                      <Td mac>
+                        <PurchasePaymentPill status={p.paymentStatus} />
+                        {p.totalPrice - (p.paidAmount || 0) > 0.009 && (
+                          <p className="text-[10px] text-gic-muted">{t('purchase.list.remainingShort', { amount: formatMad(p.totalPrice - (p.paidAmount || 0)) })}</p>
+                        )}
+                      </Td>
+                      <Td mac><PurchaseDeliveryPill status={p.deliveryStatus} /></Td>
+                      <Td mac><PurchaseStatusPill status={p.status} /></Td>
                     </tr>
                   ))}
                 </tbody>
               </TableWrap>
             )}
           </div>
-        )}
-
-        {tab === 'stock' && id && (
-          <ChantierStockPanel chantierId={id} tranches={tranches.map((t) => t.name)} />
         )}
 
         {tab === 'subcontractors' && id && (
@@ -1178,7 +1082,7 @@ export default function ChantierDetailPage() {
       )}
 
       <Modal open={trancheOpen} title={t('actions.newTranche')} onClose={() => setTrancheOpen(false)}
-        footer={<><Btn variant="secondary" onClick={() => setTrancheOpen(false)}>{t('common.cancel')}</Btn><Btn form="tranche-form" type="submit">{t('actions.create')}</Btn></>}
+        footer={<><Btn variant="secondary" onClick={() => setTrancheOpen(false)}>{t('common.cancel')}</Btn><Btn form="tranche-form" type="submit" disabled={chantierDateError(trancheForm.estimatedStartDate, trancheForm.estimatedEndDate)}>{t('actions.create')}</Btn></>}
       >
         <form id="tranche-form" onSubmit={saveTranche} className="grid gap-3 sm:grid-cols-2">
           <Input
@@ -1205,9 +1109,13 @@ export default function ChantierDetailPage() {
           <Input
             label={t('fields.estimatedEndDate')}
             type="date"
+            min={trancheForm.estimatedStartDate || undefined}
             value={trancheForm.estimatedEndDate}
             onChange={(e) => setTrancheForm({ ...trancheForm, estimatedEndDate: e.target.value })}
           />
+          {chantierDateError(trancheForm.estimatedStartDate, trancheForm.estimatedEndDate) && (
+            <p className="sm:col-span-2 text-[11px] text-gic-coral">{t('inline.dateOrderError')}</p>
+          )}
         </form>
       </Modal>
 
@@ -1266,51 +1174,6 @@ export default function ChantierDetailPage() {
         )}
       </Modal>
 
-      <Modal open={assignOpen} title={t('actions.assignWorkers')} onClose={() => setAssignOpen(false)} size="lg"
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setAssignOpen(false)}>{t('common.cancel')}</Btn>
-            <Btn form="chantier-assign-form" type="submit" disabled={assignSelectedIds.length === 0}>
-              {assignSelectedIds.length > 0
-                ? t('actions.assignWithCount', { count: assignSelectedIds.length })
-                : t('common.assign')}
-            </Btn>
-          </>
-        }
-      >
-        <form id="chantier-assign-form" onSubmit={assignWorker} className="grid gap-3">
-          <EntityPickerPanel
-            items={workforce.filter((w) => w.isActive).map(workforceToPickerItem)}
-            excludeIds={assignments.map((a: any) => a.workforce?.id).filter(Boolean)}
-            multiple
-            selectedIds={assignSelectedIds}
-            onToggleSelect={toggleAssignSelect}
-            query={assignPickerQuery}
-            onQueryChange={setAssignPickerQuery}
-            open={assignOpen}
-            showMissionFilter
-            missionFilter={assignMissionFilter}
-            onMissionFilterChange={setAssignMissionFilter}
-            searchPlaceholder={t('fields.filterNameRefCinCat')}
-            emptyMessage={t('msg.emptyWorkersAvailable')}
-            countLabel={(n) => t('msg.workersAvailableCount', { count: n })}
-            ariaLabel={t('msg.ariaSelectWorkers')}
-          />
-          <Select label={t('fields.trancheOptional')} value={assignForm.tranche} onChange={(e) => setAssignForm({ ...assignForm, tranche: e.target.value })}>
-            <option value="">{t('msg.wholeSite')}</option>
-            {tranches.map((trancheRow) => (
-              <option key={trancheRow.id} value={trancheRow.name}>{trancheRow.name}</option>
-            ))}
-          </Select>
-          <Input
-            label={t('fields.functionAppliedAll')}
-            value={assignForm.functionRole}
-            onChange={(e) => setAssignForm({ ...assignForm, functionRole: e.target.value })}
-            placeholder={t('fields.functionOnTranchePlaceholder')}
-          />
-        </form>
-      </Modal>
-
       <Modal open={missionOpen} title={`${t('actions.newMission')} — ${chantier?.name || t('msg.siteFallback')}`} onClose={() => setMissionOpen(false)}
         footer={<><Btn variant="secondary" onClick={() => setMissionOpen(false)}>{t('common.cancel')}</Btn><Btn form="chantier-mission-form" type="submit">{t('actions.create')}</Btn></>}
       >
@@ -1318,7 +1181,14 @@ export default function ChantierDetailPage() {
           <EntityPickerPanel
             items={engins.map(enginToPickerItem)}
             selectedId={missionForm.enginId || null}
-            onSelect={(enginId) => setMissionForm({ ...missionForm, enginId })}
+            onSelect={(enginId) => {
+              const driver = engins.find((e) => e.id === enginId)?.driverAssignments?.[0]?.workforce;
+              setMissionForm({
+                ...missionForm,
+                enginId,
+                driverName: missionForm.driverName || (driver ? `${driver.firstName} ${driver.lastName}` : ''),
+              });
+            }}
             query={missionPickerQuery}
             onQueryChange={setMissionPickerQuery}
             open={missionOpen}
@@ -1343,11 +1213,11 @@ export default function ChantierDetailPage() {
         open={purchaseOpen}
         title={t('detail.newPurchaseFor', { name: chantier?.name || t('msg.siteFallback') })}
         onClose={() => setPurchaseOpen(false)}
-        size="lg"
+        size="xl"
         footer={
           <>
             <Btn variant="secondary" onClick={() => setPurchaseOpen(false)}>{t('common.cancel')}</Btn>
-            <Btn form="chantier-purchase-form" type="submit">{t('actions.create')}</Btn>
+            <Btn form="chantier-purchase-form" type="submit">{t('msg.createPurchase')}</Btn>
           </>
         }
       >
@@ -1356,7 +1226,7 @@ export default function ChantierDetailPage() {
             form={purchaseForm}
             setForm={setPurchaseForm}
             suppliers={suppliers}
-            chantiers={chantier ? [{ id: chantier.id, name: chantier.name }] : []}
+            chantiers={chantier ? [{ id: chantier.id, name: chantier.name, project: chantier.project }] : []}
             families={families}
             tranches={tranches.map((t) => ({ id: t.id, name: t.name }))}
             lockChantier={id}

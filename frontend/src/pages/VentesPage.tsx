@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -12,7 +12,9 @@ import {
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { SaleFormFields, emptySaleForm, saleFormToCreateBody, type SaleFormData } from '../components/SaleFormFields';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { printSaleReceipt } from '../lib/printSale';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Sale = {
@@ -74,6 +76,7 @@ export default function VentesPage() {
   const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Sale>();
 
   function buildStatsQuery(overrides?: { q?: string; status?: string; clientId?: string }) {
     const qs = new URLSearchParams();
@@ -232,22 +235,27 @@ export default function VentesPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.sales'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.sales')} — GIC</title></head><body>
-      <h1>${t('pages.sales')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.ref')}</th><th>${t('columns.client')}</th><th>${t('columns.property')}</th><th>${t('columns.net')}</th><th>${t('columns.paid')}</th><th>${t('columns.remaining')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((s) => `<tr>
-          <td>${s.reference}</td>
-          <td>${s.client.firstName} ${s.client.lastName}</td>
-          <td>${s.property.name}</td>
-          <td>${s.netPrice}</td>
-          <td>${s.totalPaid}</td>
-          <td>${s.remaining}</td>
-          <td>${s.status}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    const client = clientFilter ? clients.find((c) => c.id === clientFilter) : null;
+    printRows<Sale>({
+      title: t('pages.sales'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('columns.client'), client ? `${client.reference} — ${client.lastName}` : ''],
+        [t('listPrint.status'), statusFilter && statusFilters.find((f) => f.id === statusFilter)?.label],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (s) => s.reference },
+        { label: t('columns.client'), value: (s) => `${s.client.firstName} ${s.client.lastName}` },
+        { label: t('columns.property'), value: (s) => s.property.name },
+        { label: t('columns.netPrice'), value: (s) => formatMad(s.netPrice), align: 'right', total: (rows) => formatMad(rows.reduce((sum, s) => sum + Number(s.netPrice || 0), 0)) },
+        { label: t('columns.paid'), value: (s) => formatMad(s.totalPaid), align: 'right', total: (rows) => formatMad(rows.reduce((sum, s) => sum + Number(s.totalPaid || 0), 0)) },
+        { label: t('columns.remaining'), value: (s) => formatMad(s.remaining), align: 'right', total: (rows) => formatMad(rows.reduce((sum, s) => sum + Number(s.remaining || 0), 0)) },
+        { label: t('columns.status'), value: (s) => (s.status ?? '').replace(/_/g, ' ') },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Sale>('/transactions/sales', buildListQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const statusFilters = [
@@ -417,6 +425,8 @@ export default function VentesPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -426,6 +436,7 @@ export default function VentesPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.client')}</Th>
                 <Th mac>{t('columns.property')}</Th>
@@ -443,6 +454,7 @@ export default function VentesPage() {
                   className="cursor-pointer"
                   onClick={() => navigate(`/ventes/${s.id}`)}
                 >
+                  <SelectTd selection={selection} row={s} />
                   <Td mac>
                     <Link to={`/ventes/${s.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{s.reference}</Link>
                   </Td>

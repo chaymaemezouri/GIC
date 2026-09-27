@@ -1,24 +1,28 @@
 import { prisma } from './prisma.js';
-import type { Payment, Purchase, InternalStaffSalaryRecord, WorkforcePayrollRecord, Maintenance, FuelLog } from '@prisma/client';
+import type { Payment, Purchase, PurchasePayment, InternalStaffSalaryRecord, WorkforcePayrollRecord, Maintenance, FuelLog, EnginExpense } from '@prisma/client';
 import type { Request } from 'express';
 import { audit } from './audit.js';
 
 export const MOVEMENT_TAGS = {
   ENCAISSEMENT: 'GIC_ENCAISSEMENT:',
   ACHAT: 'GIC_ACHAT:',
+  ACHAT_PAIEMENT: 'GIC_ACHAT_PAIEMENT:',
   MAIN_OEUVRE: 'GIC_MAIN_OEUVRE:',
   EQUIPE_INTERNE: 'GIC_EQUIPE_INTERNE:',
   MAINTENANCE: 'GIC_MAINTENANCE:',
   CARBURANT: 'GIC_CARBURANT:',
+  ENGIN_DEPENSE: 'GIC_ENGIN_DEPENSE:',
 } as const;
 
 export type CashSourceType =
   | 'encaissement'
   | 'achat'
+  | 'achat_paiement'
   | 'main_oeuvre'
   | 'equipe_interne'
   | 'maintenance'
-  | 'carburant';
+  | 'carburant'
+  | 'engin_depense';
 
 export function accountIdForPaymentMode(mode: string | null | undefined) {
   if (mode === 'especes') return 'caisse-principale';
@@ -49,10 +53,12 @@ function movementTag(sourceType: CashSourceType, sourceId: string) {
   const map: Record<CashSourceType, string> = {
     encaissement: MOVEMENT_TAGS.ENCAISSEMENT,
     achat: MOVEMENT_TAGS.ACHAT,
+    achat_paiement: MOVEMENT_TAGS.ACHAT_PAIEMENT,
     main_oeuvre: MOVEMENT_TAGS.MAIN_OEUVRE,
     equipe_interne: MOVEMENT_TAGS.EQUIPE_INTERNE,
     maintenance: MOVEMENT_TAGS.MAINTENANCE,
     carburant: MOVEMENT_TAGS.CARBURANT,
+    engin_depense: MOVEMENT_TAGS.ENGIN_DEPENSE,
   };
   return `${map[sourceType]}${sourceId}`;
 }
@@ -161,6 +167,36 @@ export async function syncPurchaseMovement(
     debit: purchase.totalPrice,
     credit: 0,
     remarkExtra: `${purchase.reference}${supplierLabel}`,
+    req,
+  });
+}
+
+const PURCHASE_PAYMENT_KIND_LABELS: Record<string, string> = {
+  avance: 'Avance',
+  complement: 'Paiement',
+  solde: 'Solde',
+};
+
+export async function syncPurchasePaymentMovement(
+  payment: PurchasePayment,
+  purchase: Pick<Purchase, 'reference' | 'designation'> & { supplier?: { companyName: string } | null },
+  req?: Request,
+) {
+  if (payment.amount <= 0) {
+    await removeAutomaticMovement('achat_paiement', payment.id);
+    return null;
+  }
+  const kind = PURCHASE_PAYMENT_KIND_LABELS[payment.kind] || 'Paiement';
+  const supplierLabel = purchase.supplier?.companyName ? ` · ${purchase.supplier.companyName}` : '';
+  return upsertAutomaticMovement({
+    sourceType: 'achat_paiement',
+    sourceId: payment.id,
+    date: payment.date,
+    designation: `${kind} achat ${purchase.reference} — ${purchase.designation}`,
+    mode: payment.mode,
+    debit: payment.amount,
+    credit: 0,
+    remarkExtra: [purchase.reference + supplierLabel, payment.reference].filter(Boolean).join(' · '),
     req,
   });
 }
@@ -275,6 +311,30 @@ export async function syncFuelMovement(
     debit: cost,
     credit: 0,
     remarkExtra: log.remark || `${log.liters} L`,
+    req,
+  });
+}
+
+export async function syncEnginExpenseMovement(
+  expense: EnginExpense & { engin?: { code: string | null; designation: string | null; matricule: string | null } | null },
+  req?: Request,
+) {
+  if (!(expense.amount > 0)) {
+    await removeAutomaticMovement('engin_depense', expense.id);
+    return null;
+  }
+  const enginLabel = expense.engin
+    ? [expense.engin.code, expense.engin.designation || expense.engin.matricule].filter(Boolean).join(' ')
+    : 'Engin';
+  return upsertAutomaticMovement({
+    sourceType: 'engin_depense',
+    sourceId: expense.id,
+    date: expense.date,
+    designation: `Dépense ${enginLabel} — ${expense.designation}`,
+    mode: expense.paymentMode || 'especes',
+    debit: expense.amount,
+    credit: 0,
+    remarkExtra: expense.supplier || expense.invoiceRef || undefined,
     req,
   });
 }

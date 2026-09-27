@@ -31,10 +31,15 @@ export async function api<T = any>(
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.message || `Erreur serveur (${res.status})`);
+    throw Object.assign(new Error(data.message || `Erreur serveur (${res.status})`), {
+      status: res.status,
+      data,
+    }) as ApiError;
   }
   return data as T;
 }
+
+export type ApiError = Error & { status?: number; data?: Record<string, unknown> };
 
 export type PaginatedClients<T = Record<string, unknown>> = {
   items: T[];

@@ -90,6 +90,7 @@ export type BuildPrintDocumentOptions = {
   bodyHtml: string;
   metaRight?: string;
   settings?: CompanyPrintSettings;
+  landscape?: boolean;
 };
 
 export function buildPrintDocumentHtml({
@@ -98,6 +99,7 @@ export function buildPrintDocumentHtml({
   bodyHtml,
   metaRight,
   settings = {},
+  landscape = false,
 }: BuildPrintDocumentOptions): string {
   const company = settings.companyName || 'GIC — Expertise & Consulting';
   const accent = safeColor(settings.printPrimaryColor);
@@ -118,11 +120,14 @@ export function buildPrintDocumentHtml({
 <html lang="fr"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/>
 <title>${escHtml(title)}</title>
 <style>
-  @page{size:A4;margin:14mm 13mm 16mm}
+  @page{size:A4${landscape ? ' landscape' : ''};margin:14mm 13mm 16mm}
   *{box-sizing:border-box}
   :root{--accent:${accent};--ink:#1d1d1f;--muted:#666;--line:#d9d9de;--soft:#f7f7f9}
   body{margin:0;color:var(--ink);font:11px/1.45 "Segoe UI",Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .print-sheet{max-width:184mm;margin:0 auto}
+  .print-sheet{max-width:${landscape ? '271mm' : '184mm'};margin:0 auto}
+  .print-filters{display:flex;flex-wrap:wrap;gap:4px 14px;padding:8px 10px;margin:0 0 6px;background:var(--soft);border:1px solid var(--line);border-radius:8px;font-size:10px}
+  .print-filters .k{font-weight:600}.print-count{color:var(--muted);font-size:10px;margin:6px 0 0}
+  tfoot td{font-weight:700;background:var(--soft);border-top:1.5px solid var(--accent)}.r{text-align:right;white-space:nowrap}.c{text-align:center}
   .accent{height:4px;background:var(--accent);border-radius:4px;margin-bottom:13px}
   .company-header{display:flex;align-items:flex-start;gap:13px;padding-bottom:12px;border-bottom:1px solid var(--line)}
   .company-logo{width:62px;height:62px;object-fit:contain;flex:0 0 auto}
@@ -172,8 +177,10 @@ function writePrintWindow(printWindow: Window, html: string) {
 }
 
 export async function printWithCompany(
-  opts: Omit<BuildPrintDocumentOptions, 'settings' | 'title'> & {
+  opts: Omit<BuildPrintDocumentOptions, 'settings' | 'title' | 'bodyHtml'> & {
     title: string | ((settings: CompanyPrintSettings) => string);
+    /** A loader lets the popup open synchronously while rows are fetched. */
+    bodyHtml: string | (() => Promise<string>);
   },
 ) {
   // Open synchronously from the click handler so browsers do not block the popup
@@ -182,9 +189,12 @@ export async function printWithCompany(
   if (!printWindow) return null;
   printWindow.document.write('<p style="font:13px Segoe UI,sans-serif;padding:24px">Préparation du document…</p>');
   try {
-    const settings = await fetchCompanySettings();
+    const [settings, bodyHtml] = await Promise.all([
+      fetchCompanySettings(),
+      typeof opts.bodyHtml === 'function' ? opts.bodyHtml() : Promise.resolve(opts.bodyHtml),
+    ]);
     const title = typeof opts.title === 'function' ? opts.title(settings) : opts.title;
-    writePrintWindow(printWindow, buildPrintDocumentHtml({ ...opts, title, settings }));
+    writePrintWindow(printWindow, buildPrintDocumentHtml({ ...opts, bodyHtml, title, settings }));
     return printWindow;
   } catch (error) {
     printWindow.close();

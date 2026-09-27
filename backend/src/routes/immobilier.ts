@@ -42,7 +42,24 @@ router.get('/locations', async (_req, res) => {
 });
 
 router.post('/locations', async (req, res) => {
-  const loc = await prisma.location.create({ data: req.body });
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ message: 'Nom de la localisation requis' });
+  const city = req.body.city ? String(req.body.city).trim() : null;
+  const all = await prisma.location.findMany({ select: { id: true, name: true, city: true } });
+  const dup = all.find(
+    (l) =>
+      l.name.trim().toLowerCase() === name.toLowerCase() &&
+      (l.city || '').trim().toLowerCase() === (city || '').toLowerCase(),
+  );
+  if (dup) return res.status(400).json({ message: `La localisation « ${name} » existe déjà` });
+  const loc = await prisma.location.create({
+    data: {
+      name,
+      city,
+      description: req.body.description ? String(req.body.description).trim() : null,
+    },
+  });
+  await audit(req, 'création', 'Location', loc.id, loc.name);
   res.status(201).json(loc);
 });
 

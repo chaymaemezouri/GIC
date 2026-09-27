@@ -25,6 +25,11 @@ const ChantiersPage = lazy(() => import('./pages/ChantiersPage'));
 const ChantierDetailPage = lazy(() => import('./pages/ChantierDetailPage'));
 const EnginsPage = lazy(() => import('./pages/EnginsPage'));
 const EnginDetailPage = lazy(() => import('./pages/EnginDetailPage'));
+const FleetModulePage = lazy(() => import('./pages/engins/FleetModulePage'));
+const FleetPlanningPage = lazy(() => import('./pages/engins/FleetPlanningPage'));
+const FleetCostsPage = lazy(() => import('./pages/engins/FleetCostsPage'));
+const FleetDashboardPage = lazy(() => import('./pages/engins/FleetDashboardPage'));
+const FleetLayout = lazy(() => import('./components/engins/FleetLayout'));
 const DocumentsPage = lazy(() => import('./pages/DocumentsPage'));
 const DocumentDetailPage = lazy(() => import('./pages/DocumentDetailPage'));
 const ArchiveDetailPage = lazy(() => import('./pages/ArchiveDetailPage'));
@@ -161,7 +166,21 @@ export default function App() {
               <Route path="pointage" element={<PointagePage />} />
               <Route path="equipe-interne" element={<EquipeInternePage />} />
               <Route path="equipe-interne/:id" element={<EquipeInterneDetailPage />} />
-              <Route path="engins" element={<EnginsPage />} />
+              <Route element={<FleetLayout />}>
+                <Route path="engins" element={<EnginsPage />} />
+                <Route path="engins/affectations" element={<FleetModulePage key="affectations" section="affectations" />} />
+                <Route path="engins/retours" element={<FleetModulePage key="retours" section="retours" />} />
+                <Route path="engins/utilisation" element={<FleetModulePage key="utilisation" section="utilisation" />} />
+                <Route path="engins/carburant" element={<FleetModulePage key="carburant" section="carburant" />} />
+                <Route path="engins/depenses" element={<FleetModulePage key="depenses" section="depenses" />} />
+                <Route path="engins/documents" element={<FleetModulePage key="documents" section="documents" />} />
+                <Route path="engins/historique" element={<FleetModulePage key="historique" section="historique" />} />
+                <Route path="engins/entretien" element={<MaintenancePage key="entretien" kind="entretien" />} />
+                <Route path="engins/reparations" element={<MaintenancePage key="reparation" kind="reparation" />} />
+                <Route path="engins/planning" element={<FleetPlanningPage />} />
+                <Route path="engins/couts" element={<FleetCostsPage />} />
+                <Route path="engins/tableau-de-bord" element={<FleetDashboardPage />} />
+              </Route>
               <Route path="engins/:id" element={<EnginDetailPage />} />
               <Route path="documents" element={<DocumentsPage />} />
               <Route path="documents/:id" element={<DocumentDetailPage />} />

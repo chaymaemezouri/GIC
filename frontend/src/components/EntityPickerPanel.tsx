@@ -373,20 +373,24 @@ export function mandantToPickerItem(m: {
 
 export function enginToPickerItem(e: {
   id: string;
+  code?: string | null;
+  designation?: string | null;
   brand?: string | null;
   matricule?: string | null;
   genre?: string | null;
   status?: string | null;
   photo?: string | null;
 }): EntityPickerItem {
-  const title = [e.brand, e.matricule].filter(Boolean).join(' — ') || 'Engin';
-  const subtitle = [e.matricule, e.genre].filter(Boolean).join(' · ');
+  const name = e.designation || [e.brand, e.matricule].filter(Boolean).join(' — ') || 'Engin';
+  const title = e.code ? `${e.code} — ${name}` : name;
+  const subtitle = [e.matricule, e.genre, e.brand].filter(Boolean).join(' · ');
+  const busy = e.status === 'affecte' || e.status === 'en_utilisation' || e.status === 'en_mission';
   return {
     id: e.id,
     title,
     subtitle,
-    avatarLabel: (e.matricule?.slice(-3) || e.brand?.slice(0, 3) || 'EN').toUpperCase(),
+    avatarLabel: (e.code?.slice(-3) || e.matricule?.slice(-3) || e.brand?.slice(0, 3) || 'EN').toUpperCase(),
     photo: e.photo,
-    badge: e.status || undefined,
+    badge: busy ? 'en_mission' : e.status || undefined,
   };
 }

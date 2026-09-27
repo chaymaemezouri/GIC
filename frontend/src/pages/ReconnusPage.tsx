@@ -1,4 +1,4 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -12,7 +12,9 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ReconnuFormFields, emptyReconnuForm, reconnuToForm, type ReconnuFormData } from '../components/ReconnuFormFields';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Reconnu = {
@@ -50,10 +52,9 @@ export default function ReconnusPage() {
   const [form, setForm] = useState<ReconnuFormData>(emptyReconnuForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Reconnu>();
 
-  function load(pageNum = page, overrides?: { active?: string }) {
-    setLoading(true);
-    setError('');
+  function buildQuery(pageNum = page, overrides?: { active?: string }) {
     const active = overrides?.active ?? activeFilter;
     const qs = new URLSearchParams();
     if (q) qs.set('q', q);
@@ -61,9 +62,14 @@ export default function ReconnusPage() {
     qs.set('sort', sort);
     qs.set('page', String(pageNum));
     qs.set('limit', String(PAGE_SIZE));
+    return qs;
+  }
 
+  function load(pageNum = page, overrides?: { active?: string }) {
+    setLoading(true);
+    setError('');
     Promise.all([
-      api<PaginatedResponse<Reconnu>>(`/reconnus?${qs}`),
+      api<PaginatedResponse<Reconnu>>(`/reconnus?${buildQuery(pageNum, overrides)}`),
       api<Stats>('/reconnus/stats'),
     ])
       .then(([res, st]) => {
@@ -152,22 +158,32 @@ export default function ReconnusPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.reconnus'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.reconnus')} — GIC</title></head><body>
-      <h1>${t('pages.reconnus')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.ref')}</th><th>${t('columns.name')}</th><th>${t('columns.relation')}</th><th>${t('columns.phoneFull')}</th><th>${t('columns.movements')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((r) => `<tr>
-          <td>${r.reference || '—'}</td>
-          <td>${r.firstName} ${r.lastName}</td>
-          <td>${r.relation || '—'}</td>
-          <td>${r.phone1 || '—'}</td>
-          <td>${r._count?.movements ?? 0}</td>
-          <td>${r.isActive === false ? 'Inactif' : 'Actif'}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    printRows<Reconnu>({
+      title: t('pages.reconnus'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.status'), activeFilter && activeFilters.find((f) => f.id === activeFilter)?.label],
+        [t('listPrint.sort'), sortOptions.find((o) => o.value === sort)?.label],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (r) => r.reference },
+        { label: t('columns.name'), value: (r) => `${r.firstName} ${r.lastName}` },
+        { label: t('columns.relation'), value: (r) => r.relation },
+        { label: t('columns.phoneFull'), value: (r) => r.phone1 },
+        { label: t('columns.movements'), value: (r) => r._count?.movements ?? 0, align: 'right' },
+        { label: t('columns.status'), value: (r) => (r.isActive === false ? t('status.inactive') : t('status.active')) },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Reconnu>('/reconnus', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
+
+  const sortOptions = [
+    { value: 'lastName', label: t('common.name') },
+    { value: 'reference', label: t('fields.reference') },
+    { value: 'createdAt', label: t('msg.creationSort') },
+  ];
 
   const activeFilters = [
     { id: '', label: t('common.allStatuses') },
@@ -212,11 +228,7 @@ export default function ReconnusPage() {
             <MacSelect
               value={sort}
               onChange={(v) => setSort(v)}
-              options={[
-                { value: 'lastName', label: t('common.name') },
-                { value: 'reference', label: t('fields.reference') },
-                { value: 'createdAt', label: t('msg.creationSort') },
-              ]}
+              options={sortOptions}
               className="w-36 shrink-0"
             />
             <div ref={filtersRef} className="relative shrink-0 z-50">
@@ -264,6 +276,8 @@ export default function ReconnusPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -276,6 +290,7 @@ export default function ReconnusPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.name')}</Th>
                 <Th mac>{t('columns.relation')}</Th>
@@ -288,6 +303,7 @@ export default function ReconnusPage() {
             <tbody>
               {items.map((r) => (
                 <tr key={r.id} className="cursor-pointer" onClick={() => navigate(`/reconnus/${r.id}`)}>
+                  <SelectTd selection={selection} row={r} />
                   <Td mac className="mac-table-muted">{r.reference || '—'}</Td>
                   <Td mac>
                     <Link to={`/reconnus/${r.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>

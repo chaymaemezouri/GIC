@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -11,9 +11,11 @@ import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
-import { ChantierFormFields, emptyChantierForm, chantierToForm, type ChantierFormData, type ProjectOption, type ChefOption } from '../components/ChantierFormFields';
+import { ChantierFormFields, emptyChantierForm, chantierToForm, chantierDateError, type ChantierFormData, type ProjectOption, type ChefOption } from '../components/ChantierFormFields';
 import MacAvatar from '../components/MacAvatar';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Chantier = {
@@ -72,6 +74,7 @@ export default function ChantiersPage() {
   const [projectFilter, setProjectFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Chantier>();
 
   function buildQuery(pageNum = page, overrides?: { status?: string; projectId?: string }) {
     const qs = new URLSearchParams();
@@ -176,6 +179,10 @@ export default function ChantiersPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    if (chantierDateError(form.startDate, form.endDate)) {
+      setError(t('inline.dateOrderError'));
+      return;
+    }
     try {
       const body = toBody(form);
       if (editId) {
@@ -202,21 +209,35 @@ export default function ChantiersPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.sites'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.sites')} — GIC</title></head><body>
-      <h1>${t('pages.sites')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.name')}</th><th>${t('columns.address')}</th><th>${t('columns.chef')}</th><th>${t('tabs.workers')}</th><th>${t('columns.progress')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((c) => `<tr>
-          <td>${c.name}</td>
-          <td>${c.address || '—'}</td>
-          <td>${c.managerName || '—'}</td>
-          <td>${c.workerCount}</td>
-          <td>${Math.round(c.progressPct || 0)}%</td>
-          <td>${c.status}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    const sortOptions: Record<string, string> = {
+      createdAt: t('msg.newestFirst'),
+      name: t('common.name'),
+      progressPct: t('columns.progress'),
+      workerCount: t('tabs.workers'),
+    };
+    printRows<Chantier>({
+      title: t('pages.sites'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('columns.project'), projectFilter && projects.find((p) => p.id === projectFilter)?.name],
+        [t('listPrint.status'), statusFilter && statusFilters.find((f) => f.id === statusFilter)?.label],
+        [t('listPrint.sort'), (sort !== 'createdAt' || order !== 'desc') && `${sortOptions[sort] || sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.name'), value: (c) => c.name },
+        { label: t('columns.project'), value: (c) => c.project?.name },
+        { label: t('columns.address'), value: (c) => c.address },
+        { label: t('columns.start'), value: (c) => (c.startDate ? formatDate(c.startDate) : '') },
+        { label: t('columns.chef'), value: (c) => c.managerName },
+        { label: t('columns.staff'), value: (c) => `${c._count?.assignments ?? 0} / ${c.workerCount}`, align: 'center' },
+        { label: t('columns.purchases'), value: (c) => c._count?.purchases ?? 0, align: 'center' },
+        { label: t('columns.progress'), value: (c) => `${Math.min(100, Math.round(c.progressPct || 0))}%`, align: 'right' },
+        { label: t('columns.status'), value: (c) => (c.status ?? '').replace(/_/g, ' ') },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Chantier>('/chantiers', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const statusFilters = [
@@ -372,6 +393,8 @@ export default function ChantiersPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -381,6 +404,7 @@ export default function ChantiersPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac className="w-12" aria-label={t('fields.photo')} />
                 <Th mac>{t('columns.name')}</Th>
                 <Th mac>{t('columns.project')}</Th>
@@ -400,6 +424,7 @@ export default function ChantiersPage() {
                 const initials = c.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
                 return (
                   <tr key={c.id} className="cursor-pointer" onClick={() => navigate(`/chantiers/${c.id}`)}>
+                    <SelectTd selection={selection} row={c} />
                     <Td mac>
                       <MacAvatar
                         photo={c.photo}

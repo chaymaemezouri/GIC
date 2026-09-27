@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
-  RefreshCw, RotateCcw, ChevronRight, Calendar,
+  RefreshCw, RotateCcw, ChevronRight, Calendar, Printer,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { api, fetchProjectList, fetchChantierList, formatMad } from '../lib/api';
+import { api, fetchProjectList, fetchChantierList, formatDate, formatMad } from '../lib/api';
+import { escHtml, printWithCompany } from '../lib/companyPrint';
+import { buildFiltersHtml, buildRowsTableHtml } from '../lib/listPrint';
 import { useAuth } from '../context/AuthContext';
 import { canAccessRoute } from '../lib/permissions';
 import { Btn, Card, MacDateInput, MacSelect, SectionTitle, StatCell, StatusPill } from '../components/ui';
@@ -103,6 +105,73 @@ export default function DashboardPage() {
   const recentClients = data?.recent.clients ?? [];
   const hasActiveFilters =
     !!filters.projectId || !!filters.chantierId || !!filters.dateFrom || !!filters.dateTo;
+  const alertItems = [
+    { label: t('nav.receipts'), value: data?.alertes.paiementsASuivre, to: '/ventes' },
+    { label: t('nav.purchases'), value: data?.alertes.achatsAction, to: '/achats' },
+    { label: t('nav.maintenance'), value: data?.alertes.enginsMaintenance, to: '/engins' },
+    { label: t('nav.documents'), value: data?.alertes.documentsExpirant, to: '/documents?alert=expiring' },
+    { label: t('docs.lateDossiers'), value: data?.alertes.documentsEnRetard, to: '/documents?alert=late' },
+  ].filter((a) => (a.value ?? 0) > 0 && (!user || canAccessRoute(user.role, a.to.split('?')[0])));
+
+  function printDashboard() {
+    if (!data) return;
+    const grid = (rows: [string, unknown][]) => `<div class="grid">${rows
+      .map(([k, v]) => `<p><span class="k">${escHtml(k)} :</span> ${escHtml(v ?? '—')}</p>`)
+      .join('')}</div>`;
+    const period = filters.dateFrom || filters.dateTo
+      ? `${filters.dateFrom ? formatDate(filters.dateFrom) : '…'} → ${filters.dateTo ? formatDate(filters.dateTo) : '…'}`
+      : '';
+    const bodyHtml = `${buildFiltersHtml([
+      [t('fields.project'), filters.projectId && projects.find((p) => p.id === filters.projectId)?.name],
+      [t('fields.chantier'), filters.chantierId && chantiers.find((c) => c.id === filters.chantierId)?.name],
+      [t('listPrint.period'), period],
+    ])}
+      ${grid([
+        [t('nav.clients'), `${data.immobilier.clients ?? 0}${clientDelta ? ` (${clientDelta})` : ''}`],
+        [t('dashboard.availableProperties'), `${data.immobilier.disponibles ?? 0} (${data.immobilier.reserves ?? 0} ${t('dashboard.reserved')})`],
+        [t('dashboard.activeProjects'), `${data.immobilier.projectsEncore ?? 0} (${data.immobilier.projectsValides ?? 0} ${t('dashboard.validated')})`],
+        [t('dashboard.activeSites'), `${data.chantier.actifs ?? 0} (${data.chantier.avancement ?? 0}% ${t('dashboard.progressPct')})`],
+      ])}
+      <h2>${escHtml(t('dashboard.alerts'))}</h2>
+      ${alertItems.length ? grid(alertItems.map((a) => [a.label, a.value])) : `<p class="muted">${escHtml(t('dashboard.noAlerts'))}</p>`}
+      <h2>${escHtml(`${t('dashboard.summary')} — ${t('nav.group.finance')}`)}</h2>
+      ${grid([
+        [t('dashboard.totalSales'), formatMad(data.finance.ventesTotal)],
+        [t('dashboard.toCollect'), formatMad(data.finance.reste)],
+        [t('dashboard.balanceSolde'), formatMad(data.finance.solde)],
+        [t('dashboard.sitePurchases'), formatMad(data.finance.achats)],
+      ])}
+      <h2>${escHtml(`${t('dashboard.summary')} — ${t('nav.group.realEstate')}`)}</h2>
+      ${grid([
+        [t('nav.projects'), data.immobilier.projects],
+        [t('dashboard.soldProperties'), data.immobilier.vendus],
+        [t('dashboard.activeRentals'), data.immobilier.rentals],
+        [t('dashboard.prospects'), data.immobilier.prospects],
+      ])}
+      <h2>${escHtml(`${t('dashboard.summary')} — ${t('nav.sites')}`)}</h2>
+      ${grid([
+        [t('dashboard.workers'), data.chantier.ouvriers],
+        [t('dashboard.avgProgress'), `${data.chantier.avancement ?? 0} %`],
+        [t('nav.equipment'), data.chantier.engins],
+        [t('dashboard.inMaintenance'), data.chantier.enginsMaintenance],
+      ])}
+      <h2>${escHtml(t('dashboard.lastSales'))}</h2>
+      ${recentSales.length ? buildRowsTableHtml<DashboardData['recent']['sales'][number]>([
+        { label: t('common.reference'), value: (s) => s.reference },
+        { label: t('fields.client'), value: (s) => `${s.client.firstName} ${s.client.lastName}` },
+        { label: t('fields.property'), value: (s) => s.property?.name },
+        { label: t('common.status'), value: (s) => (s.status || '').replace(/_/g, ' ') },
+        { label: t('dashboard.remaining'), value: (s) => formatMad(s.remaining), align: 'right' },
+      ], recentSales) : `<p class="muted">${escHtml(t('dashboard.noSales'))}</p>`}
+      <h2>${escHtml(t('dashboard.lastClients'))}</h2>
+      ${recentClients.length ? buildRowsTableHtml<DashboardData['recent']['clients'][number]>([
+        { label: t('common.reference'), value: (c) => c.reference },
+        { label: t('common.name'), value: (c) => `${c.firstName} ${c.lastName}` },
+        { label: t('common.email'), value: (c) => c.email },
+        { label: t('common.type'), value: (c) => [c.isProspect && t('fields.prospect'), c.isBuyer && t('fields.buyer'), c.isTenant && t('fields.tenant')].filter(Boolean).join(', ') },
+      ], recentClients) : `<p class="muted">${escHtml(t('dashboard.noClients'))}</p>`}`;
+    void printWithCompany({ title: t('pages.dashboard'), subtitle: formatDateLocalized(lang), bodyHtml });
+  }
 
   return (
     <div className="space-y-6 w-full">
@@ -128,6 +197,15 @@ export default function DashboardPage() {
             className={`!px-2 !py-2 ${refreshing ? '[&_svg]:animate-spin' : ''}`}
             onClick={() => loadDashboard(true)}
             disabled={refreshing}
+          />
+          <Btn
+            variant="secondary"
+            icon={Printer}
+            title={t('common.print')}
+            aria-label={t('common.print')}
+            className="!px-2 !py-2"
+            onClick={printDashboard}
+            disabled={!data}
           />
         </div>
       </div>
@@ -257,13 +335,6 @@ export default function DashboardPage() {
             </div>
             {loading && <p className="text-[12px] text-gic-muted py-6 text-center">{t('common.loading')}</p>}
             {!loading && (() => {
-              const alertItems = [
-                { label: t('nav.receipts'), value: data?.alertes.paiementsASuivre, to: '/ventes' },
-                { label: t('nav.purchases'), value: data?.alertes.achatsAction, to: '/achats' },
-                { label: t('nav.maintenance'), value: data?.alertes.enginsMaintenance, to: '/engins' },
-                { label: t('nav.documents'), value: data?.alertes.documentsExpirant, to: '/documents?alert=expiring' },
-                { label: t('docs.lateDossiers'), value: data?.alertes.documentsEnRetard, to: '/documents?alert=late' },
-              ].filter((a) => (a.value ?? 0) > 0 && (!user || canAccessRoute(user.role, a.to.split('?')[0])));
               if (alertItems.length === 0) {
                 return <p className="text-[12px] text-gic-muted py-6 text-center">{t('dashboard.noAlerts')}</p>;
               }

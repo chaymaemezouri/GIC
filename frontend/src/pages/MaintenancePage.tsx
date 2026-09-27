@@ -1,36 +1,44 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { appAlert } from '../lib/dialog';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Download, Printer, Wrench, Truck, Wallet, Eye, SlidersHorizontal, Check, Plus,
-  ClipboardList, ArrowUp, ArrowDown, Pencil, Trash2,
+  Download, Printer, Wrench, Truck, Wallet, Eye, Plus, ArrowUp, ArrowDown, Pencil, Trash2, Hammer, Clock, RotateCcw,
 } from 'lucide-react';
 import {
-  api, downloadCsv, downloadExcel, fetchEnginList, formatDate, formatMad, type PaginatedResponse,
+  api, downloadCsv, downloadExcel, formatDate, formatMad, type PaginatedResponse,
 } from '../lib/api';
+import { chantierTrancheLabel, enginLabel, errorMessage, fleetStatusLabel, type EnginRef } from '../lib/engins';
 import {
-  Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
-  Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
+  Btn, Card, EmptyState, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
+  PageHeader, Pagination, TableWrap, Td, Th,
 } from '../components/ui';
+import { DeleteMotifModal, FleetStatusPill, invalidateFleetRefs, useFleetRefs } from '../components/engins/FleetCommon';
+import { MaintenanceModal, type MaintenanceRecord } from '../components/engins/MaintenanceModal';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
-type Maintenance = {
-  id: string;
-  date: string;
-  designation: string;
-  budget?: number;
-  responsible?: string;
-  supervisor?: string;
-  engin: { id: string; brand?: string; matricule?: string; status: string };
+type Maintenance = MaintenanceRecord & {
+  engin: EnginRef;
+  chantier?: { id: string; name: string } | null;
 };
 
 type ListResponse = PaginatedResponse<Maintenance> & { budgetTotal: number };
-type Stats = { total: number; budgetTotal: number; enginsEnMaintenance: number };
+type Stats = {
+  total: number;
+  budgetTotal: number;
+  downtimeDays: number;
+  partsCost: number;
+  laborCost: number;
+  enginsEnMaintenance: number;
+  enginsEnReparation: number;
+};
 
 const PAGE_SIZE = 20;
 type SortOrder = 'asc' | 'desc';
+type Kind = '' | 'entretien' | 'reparation';
 
 function monthStartISO() {
   const d = new Date();
@@ -48,50 +56,51 @@ function formatMadCompact(n: number | null | undefined) {
   return formatMad(v);
 }
 
-export default function MaintenancePage() {
+const EMPTY_STATS: Stats = { total: 0, budgetTotal: 0, downtimeDays: 0, partsCost: 0, laborCost: 0, enginsEnMaintenance: 0, enginsEnReparation: 0 };
+
+export default function MaintenancePage({ kind: fixedKind }: { kind?: Kind } = {}) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { engins } = useFleetRefs();
 
+  const [kind, setKind] = useState<Kind>(fixedKind ?? ((searchParams.get('kind') as Kind) || ''));
   const [items, setItems] = useState<Maintenance[]>([]);
   const [page, setPage] = useState(Number(searchParams.get('page') || 1));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [budgetTotal, setBudgetTotal] = useState(0);
-  const [stats, setStats] = useState<Stats>({ total: 0, budgetTotal: 0, enginsEnMaintenance: 0 });
-  const [engins, setEngins] = useState<{ id: string; matricule?: string; brand?: string }[]>([]);
+  const [stats, setStats] = useState<Stats>(EMPTY_STATS);
   const [q, setQ] = useState(searchParams.get('q') || '');
   const [enginFilter, setEnginFilter] = useState(searchParams.get('enginId') || '');
   const [dateFrom, setDateFrom] = useState(searchParams.get('dateFrom') || monthStartISO());
   const [dateTo, setDateTo] = useState(searchParams.get('dateTo') || new Date().toISOString().slice(0, 10));
   const [sort, setSort] = useState(searchParams.get('sort') || 'date');
   const [order, setOrder] = useState<SortOrder>(searchParams.get('order') === 'asc' ? 'asc' : 'desc');
-  const [showFilters, setShowFilters] = useState(false);
-  const filtersRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [editRecord, setEditRecord] = useState<Maintenance | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleteMotif, setDeleteMotif] = useState('');
-  const [maintForm, setMaintForm] = useState({
-    enginId: searchParams.get('enginId') || '',
-    designation: '',
-    budget: '',
-    responsible: '',
-    supervisor: '',
-    counterValue: '',
-    remark: '',
-    date: new Date().toISOString().slice(0, 10),
-  });
+  const selection = useRowSelection<Maintenance>();
 
-  function buildQuery(pageNum = page, overrides?: { enginId?: string; q?: string }) {
+  useEffect(() => {
+    if (fixedKind !== undefined) setKind(fixedKind);
+  }, [fixedKind]);
+
+  function filterParams(overrides?: { enginId?: string; q?: string }) {
     const qs = new URLSearchParams();
     const enginId = overrides?.enginId !== undefined ? overrides.enginId : enginFilter;
     const query = overrides?.q !== undefined ? overrides.q : q;
     if (query) qs.set('q', query);
     if (enginId) qs.set('enginId', enginId);
+    if (kind) qs.set('kind', kind);
     if (dateFrom) qs.set('dateFrom', dateFrom);
     if (dateTo) qs.set('dateTo', dateTo);
+    return qs;
+  }
+
+  function buildQuery(pageNum = page, overrides?: { enginId?: string; q?: string }) {
+    const qs = filterParams(overrides);
     if (sort !== 'date') qs.set('sort', sort);
     if (order !== 'desc') qs.set('order', order);
     qs.set('page', String(pageNum));
@@ -99,195 +108,198 @@ export default function MaintenancePage() {
     return qs.toString();
   }
 
-  function buildStatsQuery(overrides?: { enginId?: string; q?: string }) {
-    const qs = new URLSearchParams();
-    const enginId = overrides?.enginId !== undefined ? overrides.enginId : enginFilter;
-    const query = overrides?.q !== undefined ? overrides.q : q;
-    if (query) qs.set('q', query);
-    if (enginId) qs.set('enginId', enginId);
-    if (dateFrom) qs.set('dateFrom', dateFrom);
-    if (dateTo) qs.set('dateTo', dateTo);
-    return qs.toString();
-  }
-
   function load(pageNum = page, overrides?: { enginId?: string; q?: string }) {
     setLoading(true);
     setError('');
-    const listQs = buildQuery(pageNum, overrides);
-    const statsQs = buildStatsQuery(overrides);
     Promise.all([
-      api<ListResponse>(`/engins/maintenances?${listQs}`),
-      api<Stats>(`/engins/maintenances/stats?${statsQs}`),
+      api<ListResponse>(`/engins/maintenances?${buildQuery(pageNum, overrides)}`),
+      api<Stats>(`/engins/maintenances/stats?${filterParams(overrides).toString()}`),
     ])
       .then(([res, st]) => {
         setItems(res.items);
         setPage(res.page);
         setPages(res.pages);
         setTotal(res.total);
-        setBudgetTotal(res.budgetTotal);
-        setStats(st);
+        setStats({ ...EMPTY_STATS, ...st });
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t('msg.serverError')))
+      .catch((err) => setError(errorMessage(err, t('msg.serverError'))))
       .finally(() => setLoading(false));
   }
-
-  useEffect(() => {
-    fetchEnginList<{ id: string; matricule?: string; brand?: string }>().then(setEngins);
-  }, []);
 
   useEffect(() => {
     const qs = new URLSearchParams();
     if (q) qs.set('q', q);
     if (enginFilter) qs.set('enginId', enginFilter);
+    if (kind && fixedKind === undefined) qs.set('kind', kind);
     if (dateFrom) qs.set('dateFrom', dateFrom);
     if (dateTo) qs.set('dateTo', dateTo);
     if (sort !== 'date') qs.set('sort', sort);
     if (order !== 'desc') qs.set('order', order);
     if (page > 1) qs.set('page', String(page));
     setSearchParams(qs, { replace: true });
-  }, [q, enginFilter, dateFrom, dateTo, sort, order, page, setSearchParams]);
+  }, [q, enginFilter, kind, fixedKind, dateFrom, dateTo, sort, order, page, setSearchParams]);
 
   useEffect(() => {
     setPage(1);
     load(1);
-  }, [sort, order]);
-
-  useEffect(() => {
-    if (!showFilters) return;
-    function onClick(e: MouseEvent) {
-      if (filtersRef.current && !filtersRef.current.contains(e.target as Node)) setShowFilters(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setShowFilters(false);
-    }
-    document.addEventListener('mousedown', onClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [showFilters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sort, order, kind, enginFilter, dateFrom, dateTo]);
 
   function openCreate() {
-    setMaintForm({
-      enginId: enginFilter || '',
-      designation: '',
-      budget: '',
-      responsible: '',
-      supervisor: '',
-      date: new Date().toISOString().slice(0, 10),
-      counterValue: '',
-      remark: '',
-    });
+    setEditRecord(null);
     setCreateOpen(true);
   }
 
   useCreateQuery(openCreate);
 
-  async function createMaint(e: React.FormEvent) {
-    e.preventDefault();
-    if (!maintForm.enginId) return;
+  async function confirmDelete(motif: string) {
+    if (!deleteId) return;
     try {
-      await api(`/engins/${maintForm.enginId}/maintenances`, {
-        method: 'POST',
-        body: JSON.stringify({
-          date: maintForm.date,
-          designation: maintForm.designation,
-          budget: maintForm.budget || null,
-          responsible: maintForm.responsible || null,
-          supervisor: maintForm.supervisor || null,
-          counterValue: maintForm.counterValue || null,
-          remark: maintForm.remark || null,
-        }),
-      });
-      setCreateOpen(false);
-      load(page);
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
-  async function confirmDelete() {
-    if (!deleteId || !deleteMotif.trim()) return;
-    try {
-      await api(`/engins/maintenances/${deleteId}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ motif: deleteMotif }),
-      });
+      await api(`/engins/maintenances/${deleteId}`, { method: 'DELETE', body: JSON.stringify({ motif }) });
       setDeleteId(null);
-      setDeleteMotif('');
       load(page);
     } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
+      await appAlert(errorMessage(err, t('common.error')));
     }
   }
 
-  function exportCsv() {
-    downloadCsv(`/engins/maintenances/export/csv?${buildStatsQuery()}`, 'maintenances-gic.csv');
+  async function releaseEngin(enginId: string) {
+    try {
+      await api(`/engins/${enginId}/release`, { method: 'POST', body: JSON.stringify({}) });
+      invalidateFleetRefs();
+      load(page);
+    } catch (err) {
+      await appAlert(errorMessage(err, t('common.error')));
+    }
   }
 
-  function exportExcel() {
-    downloadExcel(`/engins/maintenances/export/xlsx?${buildStatsQuery()}`, 'maintenances-gic.xlsx');
+  const fileBase = kind === 'reparation' ? 'reparations-gic' : kind === 'entretien' ? 'entretiens-gic' : 'maintenances-gic';
+  const title = kind === 'reparation' ? t('fleet.nav.reparations') : kind === 'entretien' ? t('fleet.nav.entretien') : t('pages.maintenance');
+  const subtitle = kind === 'reparation' ? t('fleet.pages.reparationsSubtitle') : kind === 'entretien' ? t('fleet.pages.entretienSubtitle') : t('pages.maintenanceSubtitle');
+
+  function typeLabel(m: Maintenance) {
+    if (m.kind === 'reparation') return m.breakdownNature || t('fleet.maintKind.reparation');
+    return m.maintenanceType ? t(`fleet.maintType.${m.maintenanceType}`) : t('fleet.maintKind.entretien');
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.maintenance'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.maintenance')} GIC</title></head><body>
-      <h1>${t('pages.maintenancePrintTitle')}</h1>
-      <p>${t('fields.period')} : ${dateFrom} → ${dateTo} · ${t('kpi.budgetFiltered')} : ${formatMad(budgetTotal)}</p>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.date')}</th><th>${t('columns.engin')}</th><th>${t('columns.designation')}</th><th>${t('columns.budget')}</th><th>${t('columns.manager')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((m) => `<tr>
-          <td>${formatDate(m.date)}</td>
-          <td>${m.engin.matricule || ''} — ${m.engin.brand || ''}</td>
-          <td>${m.designation}</td>
-          <td>${m.budget ?? ''}</td>
-          <td>${m.responsible || '—'}</td>
-          <td>${m.engin.status}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function allocationLabel(m: Maintenance) {
+    if (m.allocation === 'direct') return chantierTrancheLabel(m.chantier?.name, m.tranche);
+    return t('fleet.allocationShort.reparti');
   }
 
-  const hasActiveFilters = !!enginFilter;
+  const sortOptions = [
+    { value: 'date', label: t('columns.date') },
+    { value: 'designation', label: t('columns.designation') },
+    { value: 'budget', label: t('columns.budget') },
+  ];
+
+  function printList() {
+    printRows<Maintenance>({
+      title,
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.type'), fixedKind === undefined && kind ? t(`fleet.maintKind.${kind}`) : ''],
+        [t('listPrint.period'), dateFrom || dateTo ? `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}` : ''],
+        [t('columns.engin'), enginFilter && enginLabel(engins.find((e) => e.id === enginFilter))],
+        [t('listPrint.sort'), `${sortOptions.find((o) => o.value === sort)?.label || sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (m) => formatDate(m.date) },
+        { label: t('columns.engin'), value: (m) => enginLabel(m.engin) },
+        {
+          label: kind === 'reparation' ? t('fleet.fields.breakdownNature') : kind === 'entretien' ? t('fleet.fields.maintenanceType') : t('fleet.fields.maintKind'),
+          value: (m) => (kind ? typeLabel(m) : `${t(`fleet.maintKind.${m.kind || 'entretien'}`)} — ${typeLabel(m)}`),
+        },
+        { label: t('columns.designation'), value: (m) => [m.designation, m.repairer].filter(Boolean).join(' — ') },
+        {
+          label: t('fleet.fields.totalCostMaint'),
+          value: (m) => (m.budget != null ? formatMad(m.budget) : ''),
+          align: 'right',
+          total: (rows) => formatMad(rows.reduce((s, m) => s + (m.budget || 0), 0)),
+        },
+        {
+          label: t('fleet.fields.downtimeDays'),
+          value: (m) => (m.downtimeDays ? t('fleet.hints.daysShort', { days: m.downtimeDays }) : ''),
+          align: 'right',
+          total: (rows) => t('fleet.hints.daysShort', { days: rows.reduce((s, m) => s + (m.downtimeDays || 0), 0) }),
+        },
+        { label: t('fleet.fields.allocation'), value: (m) => allocationLabel(m) },
+        { label: t('columns.enginStatus'), value: (m) => fleetStatusLabel(m.engin.status, t) },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Maintenance>('/engins/maintenances', buildQuery(1)),
+      selectedCount: selection.count,
+    });
+  }
+
+  const kindTabs: { value: Kind; label: string }[] = [
+    { value: '', label: t('common.all') },
+    { value: 'entretien', label: t('fleet.nav.entretien') },
+    { value: 'reparation', label: t('fleet.nav.reparations') },
+  ];
 
   return (
     <div className="space-y-0">
       <PageHeader
         mac
-        title={t('pages.maintenance')}
-        subtitle={t('pages.maintenanceSubtitle')}
+        title={title}
+        backTo={fixedKind ? false : undefined}
+        subtitle={subtitle}
         actions={
           <>
-            <Link to="/engins"><Btn variant="secondary" icon={Truck}>{t('pages.equipmentPark')}</Btn></Link>
-            <Link to="/missions"><Btn variant="secondary" icon={ClipboardList}>{t('pages.missions')}</Btn></Link>
-            <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>
-            <Btn variant="secondary" icon={Download} onClick={exportExcel}>{t('common.excel')}</Btn>
+            <Btn variant="secondary" icon={Download} onClick={() => downloadCsv(`/engins/maintenances/export/csv?${filterParams().toString()}`, `${fileBase}.csv`)}>{t('common.csv')}</Btn>
+            <Btn variant="secondary" icon={Download} onClick={() => downloadExcel(`/engins/maintenances/export/xlsx?${filterParams().toString()}`, `${fileBase}.xlsx`)}>{t('common.excel')}</Btn>
             <div className="mac-action-group">
               <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
             </div>
-            <Btn icon={Plus} onClick={openCreate}>{t('common.add')}</Btn>
+            <Btn icon={Plus} onClick={openCreate}>{kind === 'reparation' ? t('fleet.actions.newRepair') : t('fleet.actions.newMaintenance')}</Btn>
           </>
         }
       />
 
       <div className="mac-kpi-grid mac-kpi-grid-4">
-        <KpiCard title={t('columns.intervention')} value={stats.total} icon={Wrench} tone="violet" />
-        <KpiCard title={t('kpi.budgetPeriod')} value={formatMadCompact(stats.budgetTotal)} icon={Wallet} tone="amber" compact />
         <KpiCard
-          title={t('kpi.budgetFiltered')}
-          value={formatMadCompact(budgetTotal)}
+          title={kind === 'reparation' ? t('fleet.nav.reparations') : kind === 'entretien' ? t('fleet.kpi.maintenances') : t('columns.intervention')}
+          value={stats.total}
+          icon={kind === 'reparation' ? Hammer : Wrench}
+          tone="violet"
+        />
+        <KpiCard
+          title={t('kpi.budgetPeriod')}
+          value={formatMadCompact(stats.budgetTotal)}
           icon={Wallet}
-          tone="emerald"
+          tone="amber"
           compact
-          delta={t('kpi.currentList')}
+          delta={t('fleet.kpi.partsLaborDelta', { parts: formatMadCompact(stats.partsCost), labor: formatMadCompact(stats.laborCost) })}
           deltaTone="muted"
         />
-        <KpiCard title={t('kpi.equipmentInMaintenance')} value={stats.enginsEnMaintenance} icon={Truck} tone="coral" />
+        <KpiCard title={t('fleet.kpi.downtime')} value={t('fleet.hints.daysShort', { days: stats.downtimeDays })} icon={Clock} tone="coral" />
+        <KpiCard
+          title={t('fleet.kpi.inRepair')}
+          value={stats.enginsEnMaintenance + stats.enginsEnReparation}
+          icon={Truck}
+          tone="teal"
+          delta={t('fleet.kpi.repairDelta', { repair: stats.enginsEnReparation, maint: stats.enginsEnMaintenance })}
+          deltaTone="muted"
+        />
       </div>
 
-      <div className={`mac-filters-panel${showFilters ? ' mac-filters-panel-open' : ''}`}>
+      <div className="mac-filters-panel">
         <div className="mac-filters-row">
           <div className="mac-filters-toolbar">
+            {fixedKind === undefined && (
+              <div className="flex rounded-lg border border-black/[0.08] overflow-hidden shrink-0">
+                {kindTabs.map((k) => (
+                  <button
+                    key={k.value || 'all'}
+                    type="button"
+                    className={`px-3 py-1.5 text-[12px] ${kind === k.value ? 'bg-[#007aff] text-white' : 'bg-white hover:bg-black/[0.03]'}`}
+                    onClick={() => setKind(k.value)}
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <MacSearch
               value={q}
               onChange={setQ}
@@ -299,23 +311,13 @@ export default function MaintenancePage() {
             <MacSelect
               value={enginFilter}
               onChange={setEnginFilter}
-              options={[
-                { value: '', label: t('pages.allEquipment') },
-                ...engins.map((e) => ({
-                  value: e.id,
-                  label: `${e.matricule || ''} — ${e.brand || e.id}`,
-                })),
-              ]}
-              className="w-48 shrink-0"
+              options={[{ value: '', label: t('pages.allEquipment') }, ...engins.map((e) => ({ value: e.id, label: enginLabel(e) }))]}
+              className="w-56 shrink-0"
             />
             <MacSelect
               value={sort}
               onChange={setSort}
-              options={[
-                { value: 'date', label: t('columns.date') },
-                { value: 'designation', label: t('columns.designation') },
-                { value: 'budget', label: t('columns.budget') },
-              ]}
+              options={sortOptions}
               className="w-36 shrink-0"
             />
             <Btn
@@ -325,72 +327,6 @@ export default function MaintenancePage() {
               title={order === 'asc' ? t('msg.ascending') : t('msg.descending')}
               onClick={() => setOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
             />
-            <div ref={filtersRef} className="relative shrink-0 z-50">
-              <Btn
-                variant="secondary"
-                icon={SlidersHorizontal}
-                title={t('common.filters')}
-                aria-label={t('common.filters')}
-                className={`!px-2 !py-2 relative${hasActiveFilters ? ' ring-1 ring-[#007aff]/40' : ''}`}
-                onClick={() => setShowFilters((v) => !v)}
-              >
-                {hasActiveFilters && <span className="mac-filter-dot" aria-hidden />}
-              </Btn>
-              {showFilters && (
-                <div className="mac-filter-menu" role="menu">
-                  <p className="mac-filter-menu-section">{t('columns.engin')}</p>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={`mac-filter-menu-item${enginFilter === '' ? ' mac-filter-menu-item-active' : ''}`}
-                    onClick={() => {
-                      setEnginFilter('');
-                      setPage(1);
-                      load(1, { enginId: '' });
-                      setShowFilters(false);
-                    }}
-                  >
-                    <span>{t('common.all')}</span>
-                    {enginFilter === '' && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
-                  </button>
-                  {engins.slice(0, 40).map((e) => (
-                    <button
-                      key={e.id}
-                      type="button"
-                      role="menuitem"
-                      className={`mac-filter-menu-item${enginFilter === e.id ? ' mac-filter-menu-item-active' : ''}`}
-                      onClick={() => {
-                        setEnginFilter(e.id);
-                        setPage(1);
-                        load(1, { enginId: e.id });
-                        setShowFilters(false);
-                      }}
-                    >
-                      <span className="truncate">{e.matricule} — {e.brand}</span>
-                      {enginFilter === e.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
-                    </button>
-                  ))}
-                  {hasActiveFilters && (
-                    <>
-                      <div className="mac-filter-menu-sep" />
-                      <button
-                        type="button"
-                        className="mac-filter-menu-item mac-filter-menu-reset"
-                        onClick={() => {
-                          setEnginFilter('');
-                          setQ('');
-                          setPage(1);
-                          load(1, { enginId: '', q: '' });
-                          setShowFilters(false);
-                        }}
-                      >
-                        {t('auth.reset')}
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
             <Btn variant="secondary" onClick={() => { setPage(1); load(1); }}>{t('common.filter')}</Btn>
           </div>
         </div>
@@ -403,54 +339,66 @@ export default function MaintenancePage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
         ) : items.length === 0 ? (
-          <EmptyState title={t('msg.emptyMaintenance')} action={<Btn icon={Plus} onClick={openCreate}>{t('common.add')}</Btn>} />
+          <EmptyState
+            title={kind === 'reparation' ? t('fleet.empty.repairs') : kind === 'entretien' ? t('fleet.empty.maintenances') : t('msg.emptyMaintenance')}
+            action={<Btn icon={Plus} onClick={openCreate}>{kind === 'reparation' ? t('fleet.actions.newRepair') : t('fleet.actions.newMaintenance')}</Btn>}
+          />
         ) : (
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.date')}</Th>
                 <Th mac>{t('columns.engin')}</Th>
+                <Th mac>{kind === 'reparation' ? t('fleet.fields.breakdownNature') : kind === 'entretien' ? t('fleet.fields.maintenanceType') : t('fleet.fields.maintKind')}</Th>
                 <Th mac>{t('columns.designation')}</Th>
-                <Th mac>{t('columns.budget')}</Th>
-                <Th mac>{t('columns.manager')}</Th>
-                <Th mac>{t('columns.supervisor')}</Th>
+                <Th mac className="text-right">{t('fleet.fields.totalCostMaint')}</Th>
+                <Th mac className="text-right">{t('fleet.fields.downtimeDays')}</Th>
+                <Th mac>{t('fleet.fields.allocation')}</Th>
                 <Th mac>{t('columns.enginStatus')}</Th>
                 <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
               </tr>
             </thead>
             <tbody>
               {items.map((m) => (
-                <tr
-                  key={m.id}
-                  className="cursor-pointer"
-                  onClick={() => navigate(`/maintenance/${m.id}`)}
-                >
+                <tr key={m.id} className="cursor-pointer" onClick={() => navigate(`/maintenance/${m.id}`)}>
+                  <SelectTd selection={selection} row={m} />
                   <Td mac className="text-[11px]">{formatDate(m.date)}</Td>
                   <Td mac>
-                    <Link
-                      to={`/engins/${m.engin.id}`}
-                      className="mac-table-ref"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {m.engin.matricule || '—'} — {m.engin.brand || ''}
+                    <Link to={`/engins/${m.engin.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>
+                      {enginLabel(m.engin)}
                     </Link>
                   </Td>
-                  <Td mac>{m.designation}</Td>
-                  <Td mac>{m.budget ? formatMad(m.budget) : '—'}</Td>
-                  <Td mac className="mac-table-muted">{m.responsible || '—'}</Td>
-                  <Td mac className="mac-table-muted">{m.supervisor || '—'}</Td>
+                  {kind ? (
+                    <Td mac className="text-[12px]">{typeLabel(m)}</Td>
+                  ) : (
+                    <Td mac>
+                      <span className={m.kind === 'reparation' ? 'mac-chip-orange' : 'mac-chip-blue'}>{t(`fleet.maintKind.${m.kind || 'entretien'}`)}</span>
+                      <span className="block text-[10px] text-gic-muted mt-0.5">{typeLabel(m)}</span>
+                    </Td>
+                  )}
                   <Td mac>
-                    <StatusPill status={m.engin.status} quiet />
+                    {m.designation}
+                    {m.repairer && <span className="block text-[10px] text-gic-muted">{m.repairer}</span>}
                   </Td>
+                  <Td mac className="text-right tabular-nums">{m.budget != null ? formatMad(m.budget) : '—'}</Td>
+                  <Td mac className="text-right tabular-nums">{m.downtimeDays ? t('fleet.hints.daysShort', { days: m.downtimeDays }) : '—'}</Td>
+                  <Td mac className="mac-table-muted text-[11px]">{allocationLabel(m)}</Td>
+                  <Td mac><FleetStatusPill status={m.engin.status} /></Td>
                   <Td mac className="mac-td-actions" onClick={(e) => e.stopPropagation()}>
                     <div className="mac-actions">
                       <MacActionBtn icon={Eye} tone="blue" title={t('actions.openFiche')} onClick={() => navigate(`/maintenance/${m.id}`)} />
-                      <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => navigate(`/maintenance/${m.id}`, { state: { edit: true } })} />
-                      <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { setDeleteId(m.id); setDeleteMotif(''); }} />
+                      <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => { setEditRecord(m); setCreateOpen(true); }} />
+                      {(m.engin.status === 'en_maintenance' || m.engin.status === 'en_reparation') && (
+                        <MacActionBtn icon={RotateCcw} tone="green" title={t('fleet.actions.release')} onClick={() => releaseEngin(m.engin.id)} />
+                      )}
+                      <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => setDeleteId(m.id)} />
                     </div>
                   </Td>
                 </tr>
@@ -461,48 +409,21 @@ export default function MaintenancePage() {
         <Pagination page={page} pages={pages} total={total} limit={PAGE_SIZE} onPage={(p) => { setPage(p); load(p); }} mac />
       </Card>
 
-      <Modal
+      <MaintenanceModal
         open={createOpen}
-        title={t('actions.newMaintenance')}
-        onClose={() => setCreateOpen(false)}
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Btn>
-            <Btn form="maint-create-form" type="submit">{t('common.save')}</Btn>
-          </>
-        }
-      >
-        <form id="maint-create-form" onSubmit={createMaint} className="grid gap-3">
-          <Select label={t('fields.enginRequiredStar')} required value={maintForm.enginId} onChange={(e) => setMaintForm({ ...maintForm, enginId: e.target.value })}>
-            <option value="">—</option>
-            {engins.map((e) => (
-              <option key={e.id} value={e.id}>{e.matricule || '—'} — {e.brand || ''}</option>
-            ))}
-          </Select>
-          <Input label={t('fields.date')} type="date" value={maintForm.date} onChange={(e) => setMaintForm({ ...maintForm, date: e.target.value })} />
-          <Input label={t('fields.designationRequired')} required value={maintForm.designation} onChange={(e) => setMaintForm({ ...maintForm, designation: e.target.value })} />
-          <Input label={t('fields.budgetMad')} type="number" min="0" value={maintForm.budget} onChange={(e) => setMaintForm({ ...maintForm, budget: e.target.value })} />
-          <Input label={t('fields.counter')} type="number" value={maintForm.counterValue} onChange={(e) => setMaintForm({ ...maintForm, counterValue: e.target.value })} />
-          <Input label={t('fields.responsible')} value={maintForm.responsible} onChange={(e) => setMaintForm({ ...maintForm, responsible: e.target.value })} />
-          <Input label={t('fields.supervisor')} value={maintForm.supervisor} onChange={(e) => setMaintForm({ ...maintForm, supervisor: e.target.value })} />
-          <Input label={t('fields.remark')} value={maintForm.remark} onChange={(e) => setMaintForm({ ...maintForm, remark: e.target.value })} />
-        </form>
-      </Modal>
+        record={editRecord}
+        defaultKind={kind || 'entretien'}
+        enginId={!editRecord && enginFilter ? enginFilter : undefined}
+        onClose={() => { setCreateOpen(false); setEditRecord(null); }}
+        onSaved={() => { invalidateFleetRefs(); load(page); }}
+      />
 
-      <Modal
+      <DeleteMotifModal
         open={!!deleteId}
         title={t('actions.deleteMaintenance')}
         onClose={() => setDeleteId(null)}
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setDeleteId(null)}>{t('common.cancel')}</Btn>
-            <Btn variant="danger" onClick={confirmDelete} disabled={!deleteMotif.trim()}>{t('common.delete')}</Btn>
-          </>
-        }
-      >
-        <p className="text-[12px] text-gic-muted mb-3">{t('msg.attachmentDeleteHint')}</p>
-        <textarea className="w-full h-24 rounded-xl border border-gic-border p-3 text-[12px]" placeholder={t('msg.motifPlaceholder')} value={deleteMotif} onChange={(e) => setDeleteMotif(e.target.value)} />
-      </Modal>
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

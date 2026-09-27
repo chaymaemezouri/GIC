@@ -2,15 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus, Pencil, Users, Download, Eye, SlidersHorizontal, Check,
-  ArrowUp, ArrowDown, UserCheck, Shield,
+  ArrowUp, ArrowDown, UserCheck, Shield, Printer,
 } from 'lucide-react';
 import { api, downloadCsv, downloadExcel, type PaginatedResponse } from '../lib/api';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 
@@ -93,6 +96,7 @@ export default function UsersPage() {
   const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<UserRow>();
 
   const roleOptions = rolesForSelect(t, me?.role);
 
@@ -217,6 +221,41 @@ export default function UsersPage() {
     downloadExcel(`/auth/users/export/xlsx?${buildStatsQuery()}`, 'utilisateurs-gic.xlsx');
   }
 
+  function printList() {
+    printRows<UserRow>({
+      title: t('pages.usersPlatform'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.status'), activeFilter && activeFilters.find((f) => f.id === activeFilter)?.label],
+        [t('fields.role'), roleFilter && t(roleI18nKey(roleFilter))],
+        [t('listPrint.sort'), `${sortOptions.find((o) => o.value === sort)?.label ?? sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.user'), value: (u) => `${u.firstName} ${u.lastName}` },
+        { label: t('columns.email'), value: (u) => u.email },
+        { label: t('columns.role'), value: (u) => t(roleI18nKey(u.role)) },
+        { label: t('columns.hrFile'), value: (u) => (u.internalStaff ? u.internalStaff.reference || t('columns.hrFile') : '') },
+        { label: t('columns.status'), value: (u) => (u.isActive ? t('status.active') : t('status.inactive')) },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<UserRow>('/auth/users', buildQuery(1)),
+      selectedCount: selection.count,
+    });
+  }
+
+  const sortOptions = [
+    { value: 'lastName', label: t('columns.lastName') },
+    { value: 'firstName', label: t('columns.firstName') },
+    { value: 'email', label: t('columns.email') },
+    { value: 'role', label: t('columns.role') },
+    { value: 'lastLoginAt', label: t('columns.lastLogin') },
+  ];
+
+  const activeFilters = [
+    { id: '', label: t('common.all') },
+    { id: 'true', label: t('kpi.active') },
+    { id: 'false', label: t('kpi.inactive') },
+  ];
+
   const hasActiveFilters = !!roleFilter || !!activeFilter;
 
   return (
@@ -227,6 +266,7 @@ export default function UsersPage() {
         subtitle={t('pages.usersSubtitle')}
         actions={
           <>
+            <Btn variant="secondary" icon={Printer} onClick={printList}>{t('common.print')}</Btn>
             <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>
             <Btn variant="secondary" icon={Download} onClick={exportExcel}>{t('common.excel')}</Btn>
             <Btn icon={Plus} onClick={openCreate}>{t('actions.newUser')}</Btn>
@@ -256,13 +296,7 @@ export default function UsersPage() {
                 setPage(1);
                 load(1, { sort: v });
               }}
-              options={[
-                { value: 'lastName', label: t('columns.lastName') },
-                { value: 'firstName', label: t('columns.firstName') },
-                { value: 'email', label: t('columns.email') },
-                { value: 'role', label: t('columns.role') },
-                { value: 'lastLoginAt', label: t('columns.lastLogin') },
-              ]}
+              options={sortOptions}
               className="w-40 shrink-0"
             />
             <Btn
@@ -291,11 +325,7 @@ export default function UsersPage() {
               {showFilters && (
                 <div className="mac-filter-menu" role="menu">
                   <p className="mac-filter-menu-section">{t('fields.status')}</p>
-                  {[
-                    { id: '', label: t('common.all') },
-                    { id: 'true', label: t('kpi.active') },
-                    { id: 'false', label: t('kpi.inactive') },
-                  ].map((f) => (
+                  {activeFilters.map((f) => (
                     <button
                       key={f.id || 'all'}
                       type="button"
@@ -341,6 +371,8 @@ export default function UsersPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -350,6 +382,7 @@ export default function UsersPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.user')}</Th>
                 <Th mac>{t('columns.email')}</Th>
                 <Th mac>{t('columns.role')}</Th>
@@ -361,6 +394,7 @@ export default function UsersPage() {
             <tbody>
               {items.map((u) => (
                 <tr key={u.id} className="cursor-pointer" onClick={() => navigate(`/utilisateurs/${u.id}`)}>
+                  <SelectTd selection={selection} row={u} />
                   <Td mac className="font-medium">
                     <p>{u.firstName} {u.lastName}</p>
                     {u.twoFactorEnabled && <Shield size={11} className="inline ml-1.5 text-[#007aff]" aria-label="2FA" />}

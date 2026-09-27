@@ -1,3 +1,5 @@
+import { ENGAGED_STATUSES, OPEN_STATUSES } from './purchaseWorkflow.js';
+
 type PurchaseRow = { id: string; reference: string; designation: string; totalPrice: number; status: string; date: Date; updatedAt: Date };
 type ProgressRow = { id: string; tranche: string | null; groupe: string | null; etage: string | null; taskName: string; percent: number; updatedAt: Date };
 type AssignmentRow = { id: string; workforce: { firstName: string; lastName: string } };
@@ -27,6 +29,10 @@ export function buildChantierOverview(chantier: {
   pointageValidatedToday?: number;
   costMO?: number;
   cnssNonDeclare?: number;
+  /** Ouvriers distincts ayant au moins un pointage sur le chantier */
+  personnelCount?: number;
+  /** Coût réel Engins & Matériels imputé au chantier */
+  costEngins?: number;
 }) {
   const purchases = chantier.purchases || [];
   const progress = chantier.progress || [];
@@ -34,16 +40,14 @@ export function buildChantierOverview(chantier: {
   const documents = chantier.documents || [];
 
   const depenseAchats = purchases
-    .filter((p) => {
-      const s = String(p.status || '').toLowerCase();
-      return ['contrôlé', 'controle', 'visé', 'vise', 'payé', 'paye', 'validé', 'valide'].includes(s);
-    })
+    .filter((p) => (ENGAGED_STATUSES as string[]).includes(p.status))
     .reduce((s, p) => s + Number(p.totalPrice || 0), 0);
   const docsFees = documents.reduce((s, d) => s + Number(d.feeAmount || 0), 0);
-  const depense = depenseAchats + docsFees;
+  const depenseEngins = Math.round(Number(chantier.costEngins || 0) * 100) / 100;
+  const depense = depenseAchats + docsFees + depenseEngins;
   const estimatedBudget = Math.round(depenseAchats * 1.55) || 0;
   const budgetAchats = chantier.budgetAchats != null ? Number(chantier.budgetAchats) : estimatedBudget;
-  const achatsOuverts = purchases.filter((p) => ['brouillon', 'retourné'].includes(p.status)).length;
+  const achatsOuverts = purchases.filter((p) => (OPEN_STATUSES as string[]).includes(p.status)).length;
 
   // Structure Tranche → Groupe → étages
   const trancheMap = new Map<string, Map<string, { percents: number[]; etages: Set<string> }>>();
@@ -106,7 +110,7 @@ export function buildChantierOverview(chantier: {
     alerts.push({
       tone: 'amber',
       title: `${t.taskName} — approvisionnement`,
-      detail: `Lot à ${t.percent}% — vérifier stock matériaux`,
+      detail: `Lot à ${t.percent}% — vérifier les achats de matériaux`,
     });
   }
   if (achatsOuverts > 0) {
@@ -175,13 +179,13 @@ export function buildChantierOverview(chantier: {
   }
 
   const recentPurchases = [...purchases]
-    .filter((p) => !['brouillon'].includes(p.status))
+    .filter((p) => (ENGAGED_STATUSES as string[]).includes(p.status))
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 2);
   for (const p of recentPurchases) {
     activity.push({
       date: p.updatedAt,
-      label: 'Achat validé',
+      label: 'Achat engagé',
       detail: `${p.reference} — ${Math.round(p.totalPrice).toLocaleString('fr-MA')} MAD`,
       tone: 'coral',
     });
@@ -199,11 +203,12 @@ export function buildChantierOverview(chantier: {
 
   return {
     synthèse: {
-      personnel: assignments.length,
+      personnel: chantier.personnelCount ?? assignments.length,
       personnelDeclare: chantier.workerCount,
       budgetAchats,
       depense,
       depenseAchats,
+      depenseEngins,
       docsFees,
       achatsOuverts,
       alertes: alerts.length,

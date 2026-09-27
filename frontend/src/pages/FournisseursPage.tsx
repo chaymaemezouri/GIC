@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -12,7 +12,9 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { SupplierFormFields, emptySupplierForm, supplierToForm, type SupplierFormData } from '../components/SupplierFormFields';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Supplier = {
@@ -73,6 +75,7 @@ export default function FournisseursPage() {
   const [form, setForm] = useState<SupplierFormData>(emptySupplierForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Supplier>();
 
   function buildQuery(pageNum = page, overrides?: { active?: string; withPortal?: string; source?: string }) {
     const qs = new URLSearchParams();
@@ -221,22 +224,37 @@ export default function FournisseursPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.suppliers'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.suppliers')} — GIC</title></head><body>
-      <h1>${t('pages.suppliers')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.ref')}</th><th>${t('columns.companyName')}</th><th>${t('columns.contact')}</th><th>${t('columns.phoneFull')}</th><th>${t('columns.email')}</th><th>${t('columns.purchases')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((s) => `<tr>
-          <td>${s.reference}</td>
-          <td>${s.companyName}</td>
-          <td>${s.contactName || '—'}</td>
-          <td>${s.phone1 || '—'}${s.phone2 ? ' / ' + s.phone2 : ''}</td>
-          <td>${s.email || '—'}</td>
-          <td>${s._count?.purchases ?? 0}</td>
-          <td>${s.isActive ? t('status.active') : t('status.inactive')}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    const sortOptions: Record<string, string> = {
+      companyName: t('fields.companyName'),
+      reference: t('fields.reference'),
+      source: t('fields.source'),
+      createdAt: t('msg.newestFirst'),
+    };
+    printRows<Supplier>({
+      title: t('pages.suppliers'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.status'), activeFilter && statusFilters.find((f) => f.id === activeFilter)?.label],
+        [t('columns.portal'), portalFilter && portalFilters.find((f) => f.id === portalFilter)?.label],
+        [t('fields.source'), sourceFilter],
+        [t('listPrint.sort'), (sort !== 'companyName' || order !== 'asc') && `${sortOptions[sort] || sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (s) => s.reference },
+        { label: t('columns.companyName'), value: (s) => s.companyName },
+        { label: t('columns.contact'), value: (s) => s.contactName },
+        { label: t('columns.cin'), value: (s) => s.cin },
+        { label: t('columns.source'), value: (s) => s.source },
+        { label: t('columns.phoneFull'), value: (s) => [s.phone1, s.phone2].filter(Boolean).join(' / ') },
+        { label: t('columns.email'), value: (s) => s.email },
+        { label: t('columns.purchases'), value: (s) => s._count?.purchases ?? 0, align: 'center' },
+        { label: t('columns.portal'), value: (s) => (s.passwordHash ? t('status.activated') : s.email ? t('common.withoutAccess') : '') },
+        { label: t('columns.status'), value: (s) => (s.isActive ? t('status.active') : t('status.inactive')) },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Supplier>('/achats/suppliers', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   function exportCsv() {
@@ -434,6 +452,8 @@ export default function FournisseursPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -443,6 +463,7 @@ export default function FournisseursPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.companyName')}</Th>
                 <Th mac>{t('columns.contact')}</Th>
@@ -459,6 +480,7 @@ export default function FournisseursPage() {
             <tbody>
               {items.map((s) => (
                 <tr key={s.id} className="cursor-pointer" onClick={() => navigate(`/fournisseurs/${s.id}`)}>
+                  <SelectTd selection={selection} row={s} />
                   <Td mac>
                     <Link to={`/fournisseurs/${s.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{s.reference}</Link>
                   </Td>

@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows, type PrintColumn } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -12,7 +12,9 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import {
   CHAUFFEUR_CATEGORY,
   scopeQueryParams,
@@ -39,7 +41,8 @@ type Worker = {
   isActive: boolean;
   contractType?: string;
   assignments?: { chantier: { id: string; name: string } }[];
-  _count?: { pointages: number; assignments: number };
+  vehicleAssignments?: { engin: { id: string; brand?: string | null; genre?: string | null; matricule?: string | null } }[];
+  _count?: { pointages: number; assignments: number; vehicleAssignments?: number };
 };
 
 type Stats = { total: number; actifs: number; inactifs: number; declared: number; assigned: number; avgSalary: number; categories: string[]; groupes: string[] };
@@ -98,6 +101,12 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
   const [importCsv, setImportCsv] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const selection = useRowSelection<Worker>();
+  const clearSelection = selection.clear;
+
+  useEffect(() => {
+    clearSelection();
+  }, [mode, clearSelection]);
 
   function appendScope(qs: URLSearchParams) {
     if (scopeParams.category) qs.set('category', scopeParams.category);
@@ -284,23 +293,50 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
     setPage(1);
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: isChauffeur ? 'Chauffeurs' : "Main-d'œuvre", bodyHtml: extractLegacyPrintBody(`<html><head><title>${isChauffeur ? 'Chauffeurs' : 'Main-d\'œuvre'} GIC</title></head><body>
-      <h1>${isChauffeur ? 'Chauffeurs' : 'Main-d\'œuvre'} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.name')}</th><th>${t('columns.cin')}</th><th>${t('columns.category')}</th><th>${t('columns.group')}</th><th>${t('columns.dailyRate')}</th><th>${t('columns.chantier')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((worker) => `<tr>
-          <td>${worker.firstName} ${worker.lastName}</td>
-          <td>${worker.cin || '—'}</td>
-          <td>${worker.category || '—'}</td>
-          <td>${worker.groupe || '—'}</td>
-          <td>${worker.dailySalary}</td>
-          <td>${worker.assignments?.[0]?.chantier?.name || '—'}</td>
-          <td>${worker.isActive ? t('status.active') : t('status.inactive')}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    const columns: PrintColumn<Worker>[] = [
+      { label: t('columns.ref'), value: (w) => w.reference },
+      { label: t('columns.name'), value: (w) => `${w.firstName} ${w.lastName}` },
+      { label: t('columns.cin'), value: (w) => w.cin },
+      ...(isChauffeur ? [] : [{ label: t('columns.category'), value: (w: Worker) => w.category }]),
+      { label: t('columns.group'), value: (w) => w.groupe },
+      { label: t('columns.mode'), value: (w) => (w.salaryPeriod === 'mois' ? 'Mois' : 'Jour') },
+      { label: t('columns.salary'), value: (w) => formatMad(w.salaryPeriod === 'mois' ? (w.monthlySalary || 0) : w.dailySalary), align: 'right' },
+      {
+        label: isChauffeur ? t('driverMgmt.currentVehicle') : t('columns.chantier'),
+        value: (w) => {
+          if (!isChauffeur) return w.assignments?.[0]?.chantier?.name;
+          const engin = w.vehicleAssignments?.[0]?.engin;
+          return engin ? engin.matricule || [engin.brand, engin.genre].filter(Boolean).join(' ') : t('driverMgmt.noVehicleShort');
+        },
+      },
+      { label: t('columns.cnss'), value: (w) => (w.declared ? 'Déclaré' : 'Non décl.') },
+      { label: t('columns.attendanceCount'), value: (w) => (w.salaryPeriod === 'mois' ? '' : (w._count?.pointages ?? 0)), align: 'right' },
+      { label: t('columns.status'), value: (w) => (w.isActive ? t('status.active') : t('status.inactive')) },
+    ];
+    printRows<Worker>({
+      title: isChauffeur ? t('pages.drivers') : t('pages.workforce'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('columns.chantier'), chantierFilter && chantiers.find((c) => c.id === chantierFilter)?.name],
+        [t('listPrint.status'), activeFilter && statusFilters.find((f) => f.id === activeFilter)?.label],
+        [t('fields.cnss'), declaredFilter && declaredFilters.find((f) => f.id === declaredFilter)?.label],
+        [t('fields.category'), !isChauffeur && categoryFilter],
+        [t('fields.group'), groupeFilter],
+        [t('listPrint.sort'), `${sortOptions.find((o) => o.value === sort)?.label ?? sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns,
+      rows: selection.count ? selection.rows : () => fetchAllRows<Worker>('/chantiers/workforce', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
+
+  const sortOptions = [
+    { value: 'lastName', label: t('common.name') },
+    { value: 'category', label: t('fields.category') },
+    { value: 'dailySalary', label: t('fields.salary') },
+    { value: 'createdAt', label: t('msg.newestFirst') },
+  ];
 
   const statusFilters = [
     { id: '', label: t('common.all') },
@@ -368,12 +404,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
             <MacSelect
               value={sort}
               onChange={setSort}
-              options={[
-                { value: 'lastName', label: t('common.name') },
-                { value: 'category', label: t('fields.category') },
-                { value: 'dailySalary', label: t('fields.salary') },
-                { value: 'createdAt', label: t('msg.newestFirst') },
-              ]}
+              options={sortOptions}
               className="w-40 shrink-0"
             />
             <Btn
@@ -537,6 +568,8 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -546,6 +579,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.name')}</Th>
                 <Th mac>{t('columns.cin')}</Th>
@@ -553,7 +587,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
                 <Th mac>{t('columns.group')}</Th>
                 <Th mac>{t('columns.mode')}</Th>
                 <Th mac>{t('columns.salary')}</Th>
-                <Th mac>{t('columns.chantier')}</Th>
+                <Th mac>{isChauffeur ? t('driverMgmt.currentVehicle') : t('columns.chantier')}</Th>
                 <Th mac>{t('columns.cnss')}</Th>
                 <Th mac>{t('columns.attendanceCount')}</Th>
                 <Th mac>{t('columns.status')}</Th>
@@ -565,6 +599,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
                 const isMois = w.salaryPeriod === 'mois';
                 return (
                 <tr key={w.id} className="cursor-pointer" onClick={() => navigate(workforceDetailPath(mode, w.id))}>
+                  <SelectTd selection={selection} row={w} />
                   <Td mac className="mac-table-muted text-[11px]">{w.reference || '—'}</Td>
                   <Td mac>
                     <span className="mac-table-ref">
@@ -580,8 +615,16 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
                     </span>
                   </Td>
                   <Td mac>{formatMad(isMois ? (w.monthlySalary || 0) : w.dailySalary)}</Td>
-                  <Td mac>
-                    {w.assignments?.[0]?.chantier ? (
+                  <Td mac onClick={isChauffeur ? (e) => e.stopPropagation() : undefined}>
+                    {isChauffeur ? (
+                      w.vehicleAssignments?.[0]?.engin ? (
+                        <Link to={`/engins/${w.vehicleAssignments[0].engin.id}`} className="mac-table-ref">
+                          {w.vehicleAssignments[0].engin.matricule
+                            || [w.vehicleAssignments[0].engin.brand, w.vehicleAssignments[0].engin.genre].filter(Boolean).join(' ')
+                            || '—'}
+                        </Link>
+                      ) : <span className="mac-table-muted">{t('driverMgmt.noVehicleShort')}</span>
+                    ) : w.assignments?.[0]?.chantier ? (
                       <Link to={`/chantiers/${w.assignments[0].chantier.id}`} className="mac-table-ref">
                         {w.assignments[0].chantier.name}
                       </Link>

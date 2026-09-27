@@ -1,5 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { fetchAllRows, printRows } from '../lib/listPrint';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -13,7 +13,9 @@ import {
 } from '../components/ui';
 import { ProjectFormFields, emptyProjectForm, projectToForm, projectFormToBody, projectOwnershipLabel, type ProjectFormData } from '../components/ProjectFormFields';
 import MacAvatar from '../components/MacAvatar';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 
 type Project = {
@@ -72,6 +74,7 @@ export default function ProjetsPage() {
   const [form, setForm] = useState<ProjectFormData>(emptyProjectForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<Project>();
 
   function buildQuery(pageNum = page, overrides?: { status?: string; locationId?: string; ownershipType?: string }) {
     const qs = new URLSearchParams();
@@ -215,24 +218,30 @@ export default function ProjetsPage() {
     }
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: t('pages.projects'), bodyHtml: extractLegacyPrintBody(`<html><head><title>${t('pages.projects')} — GIC</title></head><body>
-      <h1>${t('pages.projects')} — GIC</h1>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:12px">
-        <tr><th>${t('columns.project')}</th><th>${t('columns.type')}</th><th>${t('columns.client')}</th><th>${t('columns.city')}</th><th>${t('columns.localization')}</th><th>${t('columns.remark')}</th><th>${t('columns.tranches')}</th><th>${t('columns.properties')}</th><th>${t('columns.status')}</th></tr>
-        ${items.map((p) => `<tr>
-          <td>${p.name}</td>
-          <td>${projectOwnershipLabel(p.ownershipType, t)}</td>
-          <td>${p.client ? `${p.client.firstName} ${p.client.lastName}` : '—'}</td>
-          <td>${p.city || '—'}</td>
-          <td>${p.location?.name || '—'}</td>
-          <td>${p.remark || '—'}</td>
-          <td>${p._count?.tranches ?? 0}</td>
-          <td>${p._count?.properties ?? 0}</td>
-          <td>${p.status}</td>
-        </tr>`).join('')}
-      </table></body></html>`, { grid: false }) });
+  function printList() {
+    printRows<Project>({
+      title: t('pages.projects'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.status'), statusFilter && statusFilters.find((f) => f.id === statusFilter)?.label],
+        [t('fields.localization'), locationFilter && locations.find((l) => l.id === locationFilter)?.name],
+        [t('listPrint.type'), ownershipFilter && ownershipFilters.find((f) => f.id === ownershipFilter)?.label],
+      ],
+      columns: [
+        { label: t('columns.ref'), value: (p) => p.reference },
+        { label: t('columns.project'), value: (p) => p.name },
+        { label: t('columns.type'), value: (p) => projectOwnershipLabel(p.ownershipType, t) },
+        { label: t('columns.client'), value: (p) => (p.client ? `${p.client.firstName} ${p.client.lastName}` : '') },
+        { label: t('columns.city'), value: (p) => p.city },
+        { label: t('columns.localization'), value: (p) => p.location?.name },
+        { label: t('columns.remark'), value: (p) => p.remark },
+        { label: t('columns.tranches'), value: (p) => p._count?.tranches ?? 0, align: 'center' },
+        { label: t('columns.properties'), value: (p) => p._count?.properties ?? 0, align: 'center' },
+        { label: t('columns.status'), value: (p) => (p.status ?? '').replace(/_/g, ' ') },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<Project>('/immobilier/projects', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const statusFilters = [
@@ -417,6 +426,8 @@ export default function ProjetsPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -426,6 +437,7 @@ export default function ProjetsPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac className="w-12" aria-label={t('fields.photo')} />
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.project')}</Th>
@@ -442,6 +454,7 @@ export default function ProjetsPage() {
             <tbody>
               {items.map((p) => (
                 <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/projets/${p.id}`)}>
+                  <SelectTd selection={selection} row={p} />
                   <Td mac className="w-12">
                     <div onClick={(e) => e.stopPropagation()}>
                     <MacAvatar photo={p.photo} name={p.name} fallback={<Building2 size={14} />} />
@@ -513,7 +526,12 @@ export default function ProjetsPage() {
         }
       >
         <form id="proj-form" onSubmit={save}>
-          <ProjectFormFields form={form} setForm={setForm} locations={locations} />
+          <ProjectFormFields
+            form={form}
+            setForm={setForm}
+            locations={locations}
+            onLocationCreated={(loc) => setLocations((prev) => [...prev, loc])}
+          />
           {error && <p className="mt-3 text-[11px] text-gic-coral">{error}</p>}
         </form>
       </Modal>

@@ -2,9 +2,9 @@ import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, Trash2, Printer, Clock, Wallet, ExternalLink, Camera, Mail, Phone, Calendar, MapPin, Hash, FileText, User, BadgeCheck, Upload, Plus, Info as InfoIcon, History, MessageCircle, Users } from 'lucide-react';
-import { api, fetchChantierList, formatDate, formatMad, openPrintUrl, uploadDocument, uploadForm } from '../lib/api';
-import { Btn, Card, Input, KpiCard, MacActionBtn, MacDateInput, MacSelect, Modal, StatusPill, TableWrap, Td, Th, PageBackLink } from '../components/ui';
+import { ArrowLeft, Pencil, Trash2, Printer, Clock, Wallet, Camera, Mail, Phone, Calendar, MapPin, Hash, FileText, User, BadgeCheck, Upload, Info as InfoIcon, History, MessageCircle, Truck } from 'lucide-react';
+import { api, formatDate, formatMad, openPrintUrl, uploadDocument, uploadForm } from '../lib/api';
+import { Btn, Card, KpiCard, MacActionBtn, MacDateInput, MacSelect, Modal, StatusPill, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -12,7 +12,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
-import { EntityPickerPanel, chantierToPickerItem } from '../components/EntityPickerPanel';
+import DriverVehiclePanel from '../components/DriverVehiclePanel';
 import {
   CHAUFFEUR_CATEGORY,
   workforceListPath,
@@ -20,7 +20,7 @@ import {
   type WorkforceScope,
 } from '../lib/workforceScope';
 
-type Tab = 'infos' | 'affectations' | 'pointages' | 'salaire' | 'documents' | 'echanges' | 'historique';
+type Tab = 'infos' | 'vehicules' | 'pointages' | 'salaire' | 'documents' | 'echanges' | 'historique';
 
 type WorkforceDocBundle = {
   uploaded: Array<{ id: string; name: string; category?: string | null; path: string; createdAt: string }>;
@@ -58,22 +58,9 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
   const [pointageLoading, setPointageLoading] = useState(false);
   const [docPeriodFrom, setDocPeriodFrom] = useState(defaultPeriodFrom);
   const [docPeriodTo, setDocPeriodTo] = useState(new Date().toISOString().slice(0, 10));
-  const [chantiers, setChantiers] = useState<Array<{
-    id: string;
-    name: string;
-    reference?: string | null;
-    address?: string | null;
-    status?: string | null;
-    progressPct?: number | null;
-    project?: { name?: string } | null;
-  }>>([]);
-  const [assignPickerQuery, setAssignPickerQuery] = useState('');
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [assignForm, setAssignForm] = useState({ chantierId: '', functionRole: '', tranche: '' });
-  const [assignError, setAssignError] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteMotif, setDeleteMotif] = useState('');
   const [form, setForm] = useState<WorkforceFormData>(emptyWorkforceForm());
@@ -120,7 +107,6 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
   useEffect(() => {
     load();
     loadDocuments();
-    fetchChantierList().then(setChantiers);
   }, [id]);
 
   useEffect(() => {
@@ -231,37 +217,6 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
     loadDocuments();
   }
 
-  async function saveAssign(e: React.FormEvent) {
-    e.preventDefault();
-    if (!id || !assignForm.chantierId) return;
-    setAssignError('');
-    try {
-      await api(`/chantiers/workforce/${id}/assign`, {
-        method: 'POST',
-        body: JSON.stringify({
-          chantierId: assignForm.chantierId,
-          functionRole: assignForm.functionRole.trim() || null,
-          tranche: assignForm.tranche.trim() || null,
-        }),
-      });
-      setAssignOpen(false);
-      setAssignForm({ chantierId: '', functionRole: '', tranche: '' });
-      load();
-    } catch (err) {
-      setAssignError(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
-  async function unassign(assignmentId: string) {
-    if (!id || !await appConfirm(t('msg.confirmRemoveAssignment'))) return;
-    try {
-      await api(`/chantiers/workforce/${id}/assign/${assignmentId}`, { method: 'DELETE' });
-      load();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
   async function printFiche() {
     if (!worker) return;
 
@@ -289,7 +244,8 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
   }
 
   const pointageCount = worker._count?.pointages ?? worker.pointages?.length ?? 0;
-  const assignmentCount = worker._count?.assignments ?? worker.assignments?.length ?? 0;
+  const vehicleAssignmentCount = worker.vehicleAssignments?.length ?? 0;
+  const currentVehicle = (worker.vehicleAssignments || []).find((a: { endDate?: string | null }) => !a.endDate)?.engin;
   const docCount = docBundle.uploaded.length + docBundle.generated.length;
 
   function printFichePaie() {
@@ -382,6 +338,15 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
         />
         <KpiCard title={t('fields.payMode')} value={worker.salaryPeriod === 'mois' ? t('fields.payMonthly') : t('fields.payDaily')} icon={FileText} tone="violet" />
         <KpiCard title={t('tabs.attendances')} value={pointageCount} icon={Clock} tone="emerald" />
+        {isChauffeur && (
+          <KpiCard
+            title={t('driverMgmt.currentVehicle')}
+            value={currentVehicle ? (currentVehicle.matricule || [currentVehicle.brand, currentVehicle.genre].filter(Boolean).join(' ') || '—') : '—'}
+            icon={Truck}
+            tone="teal"
+            compact
+          />
+        )}
       </div>
 
       <DetailShell
@@ -402,7 +367,9 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
                 id: 'activite',
                 label: t('tabs.activity'),
                 items: [
-                  { id: 'affectations', label: t('tabs.assignments'), icon: Users, badge: assignmentCount },
+                  ...(isChauffeur
+                    ? [{ id: 'vehicules', label: t('driverMgmt.vehiclesTab'), icon: Truck, badge: vehicleAssignmentCount }]
+                    : []),
                   { id: 'pointages', label: t('tabs.attendances'), icon: Clock, badge: pointageCount },
                   { id: 'salaire', label: t('tabs.salary'), icon: Wallet },
                 ],
@@ -460,56 +427,8 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
           </div>
         )}
 
-        {tab === 'affectations' && (
-          <div className="mt-1">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-              <p className="text-[12px] text-gic-muted">
-                {t('msg.assignmentsRecordedCount', { count: assignmentCount })}
-              </p>
-              <Btn icon={Plus} onClick={() => {
-                setAssignForm({ chantierId: '', functionRole: '', tranche: '' });
-                setAssignPickerQuery('');
-                setAssignError('');
-                setAssignOpen(true);
-              }}>
-                {t('actions.assignToSite')}
-              </Btn>
-            </div>
-            {(worker.assignments || []).length === 0 ? (
-              <p className="text-[12px] text-gic-muted py-4">{t('msg.emptyAssignmentFromSite')}</p>
-            ) : (
-              <TableWrap mac>
-                <thead>
-                  <tr>
-                    <Th mac>{t('columns.chantier')}</Th>
-                    <Th mac>{t('columns.function')}</Th>
-                    <Th mac>{t('columns.tranche')}</Th>
-                    <Th mac>{t('columns.since')}</Th>
-                    <Th mac>{t('columns.end')}</Th>
-                    <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {worker.assignments.map((a: any) => (
-                    <tr key={a.id}>
-                      <Td mac>
-                        <Link to={`/chantiers/${a.chantier.id}`} className="mac-table-ref inline-flex items-center gap-1">
-                          {a.chantier.name} <ExternalLink size={11} />
-                        </Link>
-                      </Td>
-                      <Td mac>{a.functionRole || '—'}</Td>
-                      <Td mac className="mac-table-muted">{a.tranche || '—'}</Td>
-                      <Td mac className="mac-table-muted">{formatDate(a.startDate)}</Td>
-                      <Td mac className="mac-table-muted">{formatDate(a.endDate)}</Td>
-                      <Td mac className="mac-td-actions">
-                        <MacActionBtn icon={Trash2} tone="red" title={t('common.remove')} onClick={() => unassign(a.id)} />
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </TableWrap>
-            )}
-          </div>
+        {tab === 'vehicules' && isChauffeur && (
+          <DriverVehiclePanel mode="driver" entityId={worker.id} initial={worker.vehicleAssignments} onChanged={load} />
         )}
 
         {tab === 'pointages' && (
@@ -694,29 +613,6 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
         )}
 
             </DetailShell>
-
-      <Modal open={assignOpen} title={t('actions.assignToSite')} onClose={() => setAssignOpen(false)}
-        footer={<><Btn variant="secondary" onClick={() => setAssignOpen(false)}>{t('common.cancel')}</Btn><Btn form="assign-worker-form" type="submit" disabled={!assignForm.chantierId}>{t('actions.assignWorker')}</Btn></>}
-      >
-        <form id="assign-worker-form" onSubmit={saveAssign} className="grid gap-3">
-          <EntityPickerPanel
-            items={chantiers.map(chantierToPickerItem)}
-            excludeIds={(worker?.assignments || []).map((a: { chantier?: { id?: string } }) => a.chantier?.id).filter(Boolean) as string[]}
-            selectedId={assignForm.chantierId || null}
-            onSelect={(chantierId) => setAssignForm({ ...assignForm, chantierId })}
-            query={assignPickerQuery}
-            onQueryChange={setAssignPickerQuery}
-            open={assignOpen}
-            searchPlaceholder={t('msg.filterSitePicker')}
-            emptyMessage={t('msg.emptySitesAvailable')}
-            countLabel={(n) => t('msg.sitesAvailableCount', { count: n })}
-            ariaLabel={t('msg.ariaSelectChantier')}
-          />
-          <Input label={t('fields.function')} value={assignForm.functionRole} onChange={(e) => setAssignForm({ ...assignForm, functionRole: e.target.value })} placeholder={t('fields.categoryPlaceholder')} />
-          <Input label={t('fields.tranche')} value={assignForm.tranche} onChange={(e) => setAssignForm({ ...assignForm, tranche: e.target.value })} placeholder={t('settings.optionalPlaceholder')} />
-          {assignError && <p className="text-[11px] text-gic-coral">{assignError}</p>}
-        </form>
-      </Modal>
 
       <Modal open={editOpen} size="lg" title={t('actions.editWorker')} onClose={() => setEditOpen(false)}
         footer={<><Btn variant="secondary" onClick={() => setEditOpen(false)}>{t('common.cancel')}</Btn><Btn form="edit-worker-form" type="submit">{t('common.save')}</Btn></>}

@@ -1,16 +1,18 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { fetchAllRows, printRows } from '../lib/listPrint';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Download, Printer, Eye, Shield, Activity, Calendar, Users,
   SlidersHorizontal, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
-import { api, downloadCsv, downloadExcel, type PaginatedResponse } from '../lib/api';
+import { api, downloadCsv, downloadExcel, formatDate, type PaginatedResponse } from '../lib/api';
 import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
   PageHeader, Pagination, TableWrap, Td, Th,
 } from '../components/ui';
 import { ActionBadge, AUDIT_ACTION_FILTERS, auditActionLabel, auditEntityLabel, auditEntityLink, formatAuditDateTime } from '../lib/auditDisplay';
+import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 
@@ -88,6 +90,7 @@ export default function AuditPage() {
   const filtersRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const selection = useRowSelection<AuditLog>();
 
   function buildStatsQuery(overrides?: {
     action?: string;
@@ -204,23 +207,34 @@ export default function AuditPage() {
     downloadExcel(`/audit/export/xlsx?${buildStatsQuery()}`, 'audit-gic.xlsx');
   }
 
-  async function printList() {
-
-    await printWithCompany({ title: "Journal d'audit", bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:11px">
-      <h1>Journal d'audit — GIC</h1>
-      <p>Période : ${dateFrom} → ${dateTo} · ${total} entrée(s)</p>
-      <table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;width:100%">
-        <tr><th>Date</th><th>Utilisateur</th><th>Action</th><th>Entité</th><th>Détails</th><th>IP</th></tr>
-        ${items.map((l) => `<tr>
-          <td>${formatAuditDateTime(l.createdAt)}</td>
-          <td>${l.user ? `${l.user.firstName} ${l.user.lastName}` : '—'}</td>
-          <td>${l.action}</td>
-          <td>${auditEntityLabel(l.entity)}${l.entityId ? ' #' + l.entityId.slice(0, 8) : ''}</td>
-          <td>${l.details || '—'}</td>
-          <td>${l.ipAddress || '—'}</td>
-        </tr>`).join('')}
-      </table>
-    </body></html>`, { grid: false }) });
+  function printList() {
+    const user = userOptions.find((u) => u.id === userFilter);
+    const sortOptions: Record<string, string> = {
+      createdAt: t('fields.date'),
+      action: t('columns.action'),
+      entity: t('columns.entity'),
+    };
+    printRows<AuditLog>({
+      title: t('pages.audit'),
+      filters: [
+        [t('listPrint.search'), q],
+        [t('listPrint.period'), (dateFrom || dateTo) && `${dateFrom ? formatDate(dateFrom) : '…'} → ${dateTo ? formatDate(dateTo) : '…'}`],
+        [t('columns.action'), actionFilter && (AUDIT_ACTION_FILTERS.some((f) => f.id === actionFilter) ? auditActionFilterLabel(actionFilter, t) : auditActionLabel(actionFilter))],
+        [t('columns.entity'), entityFilter && auditEntityLabel(entityFilter)],
+        [t('columns.user'), user && `${user.firstName} ${user.lastName}`],
+        [t('listPrint.sort'), (sort !== 'createdAt' || order !== 'desc') && `${sortOptions[sort] || sort} (${order === 'asc' ? t('msg.ascending') : t('msg.descending')})`],
+      ],
+      columns: [
+        { label: t('columns.date'), value: (l) => formatAuditDateTime(l.createdAt) },
+        { label: t('columns.user'), value: (l) => (l.user ? `${l.user.firstName} ${l.user.lastName}` : t('common.system')) },
+        { label: t('columns.action'), value: (l) => auditActionLabel(l.action) },
+        { label: t('columns.entity'), value: (l) => `${auditEntityLabel(l.entity)}${l.entityId ? ` #${l.entityId.slice(0, 8)}` : ''}` },
+        { label: t('columns.details'), value: (l) => l.details },
+        { label: t('columns.ip'), value: (l) => l.ipAddress },
+      ],
+      rows: selection.count ? selection.rows : () => fetchAllRows<AuditLog>('/audit', buildQuery(1)),
+      selectedCount: selection.count,
+    });
   }
 
   const hasActiveFilters = !!actionFilter || !!entityFilter || !!userFilter;
@@ -441,6 +455,8 @@ export default function AuditPage() {
         </Card>
       )}
 
+      <SelectionBar selection={selection} onPrint={printList} />
+
       <Card padding={false}>
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
@@ -450,6 +466,7 @@ export default function AuditPage() {
           <TableWrap mac>
             <thead>
               <tr>
+                <SelectAllTh selection={selection} rows={items} />
                 <Th mac>{t('columns.date')}</Th>
                 <Th mac>{t('columns.user')}</Th>
                 <Th mac>{t('columns.action')}</Th>
@@ -468,6 +485,7 @@ export default function AuditPage() {
                     className="cursor-pointer"
                     onClick={() => navigate(`/audit/${l.id}`)}
                   >
+                    <SelectTd selection={selection} row={l} />
                     <Td mac className="text-[11px] whitespace-nowrap">{formatAuditDateTime(l.createdAt)}</Td>
                     <Td mac>
                       {l.user ? (
