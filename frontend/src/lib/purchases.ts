@@ -95,6 +95,7 @@ export type PurchaseDetail = {
   expectedDeliveryDate?: string | null;
   advanceMode?: string | null;
   remark?: string | null;
+  purchaseType?: string | null;
   tranche?: string | null;
   supplierId?: string | null;
   chantierId?: string | null;

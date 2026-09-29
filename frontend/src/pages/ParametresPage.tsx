@@ -1217,8 +1217,8 @@ export default function ParametresPage() {
                   onSubmit={() => { setActPage(1); loadActivityWithStats(1); }}
                   placeholder={t('msg.searchActionEntity')}
                 />
-                <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
-                <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0" />
+                <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0"  onSubmit={() => { setActPage(1); loadActivityWithStats(1); }}/>
+                <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0"  onSubmit={() => { setActPage(1); loadActivityWithStats(1); }}/>
                 <MacSelect
                   value={sort}
                   onChange={(v) => {

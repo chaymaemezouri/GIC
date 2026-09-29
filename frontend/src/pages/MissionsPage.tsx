@@ -306,8 +306,8 @@ export default function MissionsPage() {
               onSubmit={() => { setPage(1); load(1); }}
               placeholder={t('pages.missionsSearchPlaceholder')}
             />
-            <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
-            <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0" />
+            <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
+            <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
             <MacSelect
               value={enginFilter}
               onChange={(v) => {

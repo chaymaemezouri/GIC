@@ -328,7 +328,15 @@ router.get('/projects/:id/tree', async (req, res) => {
       images: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
       chantiers: {
         orderBy: { name: 'asc' },
-        select: { id: true, name: true, status: true, progressPct: true, address: true, managerName: true },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          progressPct: true,
+          address: true,
+          managerName: true,
+          _count: { select: { purchases: true, assignments: true, enginAssignments: true } },
+        },
       },
       properties: {
         orderBy: { name: 'asc' },

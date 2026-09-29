@@ -600,8 +600,8 @@ export default function FinancePage() {
                 load(1, { order: next });
               }}
             />
-            <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('fields.from')} className="w-36 shrink-0" />
-            <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('fields.to')} className="w-36 shrink-0" />
+            <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('fields.from')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
+            <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('fields.to')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
             <div ref={filtersRef} className="relative shrink-0 z-50">
               <Btn
                 variant="secondary"

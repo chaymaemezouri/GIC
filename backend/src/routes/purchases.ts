@@ -2,6 +2,7 @@ import { Router, type Request } from 'express';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { nextReference } from '../lib/references.js';
+import { ensureExploitationUsage, plannedCostOf, suggestAssignmentCost } from '../lib/enginCosts.js';
 import { audit } from '../lib/audit.js';
 import { notifyAllAdmins } from '../lib/notifications.js';
 import { sendExcel } from '../lib/exportExcel.js';
@@ -403,9 +404,55 @@ router.post('/', async (req, res) => {
       expectedDeliveryDate: parseDate(req.body.expectedDeliveryDate),
       remark: optionalText(req.body.remark),
       status: 'elabore',
+      purchaseType: req.body.purchaseType === 'outil' ? 'outil' : 'marchandise',
       lines: { create: lines },
     },
   });
+
+  if (purchase.purchaseType === 'outil') {
+    const chantier = chantierId
+      ? await prisma.chantier.findUnique({ where: { id: chantierId }, select: { name: true } })
+      : null;
+    for (const line of lines) {
+      const code = await nextReference('MAT');
+      const engin = await prisma.engin.create({
+        data: {
+          code,
+          kind: 'materiel',
+          designation: line.quantity > 1 ? `${line.product} × ${line.quantity}` : line.product,
+          purchasePrice: line.amountTTC,
+          status: chantierId ? 'en_exploitation' : 'disponible',
+          location: chantier?.name || `Achat ${reference}`,
+        },
+      });
+      if (chantierId) {
+        const suggestion = suggestAssignmentCost(engin, date);
+        const cost = {
+          costMethod: suggestion.costMethod,
+          dailyCost: suggestion.dailyCost,
+          hourlyCost: suggestion.hourlyCost,
+          flatAmount: suggestion.flatAmount,
+          extraCost: suggestion.extraCost ?? 0,
+          plannedCost: 0,
+          startDate: date,
+          endDate: null as Date | null,
+        };
+        cost.plannedCost = plannedCostOf(cost);
+        const assignment = await prisma.enginAssignment.create({
+          data: {
+            enginId: engin.id,
+            chantierId,
+            tranche: purchase.tranche,
+            projectId: purchase.projectId,
+            startDate: date,
+            mode: 'propriete',
+            ...cost,
+          },
+        });
+        await ensureExploitationUsage(assignment);
+      }
+    }
+  }
 
   if (advanceAmount > 0) {
     const payment = await prisma.purchasePayment.create({
@@ -915,8 +962,9 @@ ${detail.lines
 <p><strong>Avance versée :</strong> ${money(detail.totals.advances)} MAD &nbsp; <strong>Reste à payer :</strong> ${money(detail.totals.remaining)} MAD</p>
 ${detail.remark ? `<p><strong>Observations :</strong> ${esc(detail.remark)}</p>` : ''}`;
   }
+  const signs = `<div class="sign-slots"><div class="sign-slot">Établi par<div class="sign-line"></div></div><div class="sign-slot">Cachet et signature<div class="sign-line"></div></div><div class="sign-slot">Reçu par<div class="sign-line"></div></div></div>`;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(wrapCompanyPrintHtml({ title, bodyHtml: body, settings }));
+  res.send(wrapCompanyPrintHtml({ title, bodyHtml: body + signs, settings }));
 });
 
 export default router;

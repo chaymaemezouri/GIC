@@ -9,6 +9,7 @@ import { roleLabel, canManageUsers } from '../lib/permissions';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, Select, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { InternalStaffFormFields, staffFormToBody, staffToForm } from '../components/InternalStaffFormFields';
@@ -587,6 +588,7 @@ export default function EquipeInterneDetailPage() {
 
         {tab === 'documents' && (
           <div className="mt-1 space-y-4">
+            {id && <EntityDocChecklist entityType="staff" entityId={id} />}
             <div className="flex flex-wrap gap-2">
               <label className="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-black/[0.02]">
                 <Upload size={14} /> {t('actions.addDocument')}

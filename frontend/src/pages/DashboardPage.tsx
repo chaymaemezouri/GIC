@@ -15,6 +15,7 @@ type DashboardData = {
   finance: Record<string, number>;
   chantier: Record<string, number>;
   alertes: Record<string, number>;
+  todo?: Array<{ kind: string; title: string; detail: string; path: string }>;
   trends: { clientsLast30: number; clientsDeltaPct: number };
   recent: {
     sales: {
@@ -91,15 +92,15 @@ export default function DashboardPage() {
   }, [loadDashboard]);
 
   const clientDelta = data?.trends
-    ? data.trends.clientsDeltaPct > 0
-      ? `+${data.trends.clientsDeltaPct}%`
-      : data.trends.clientsDeltaPct < 0
-        ? `${data.trends.clientsDeltaPct}%`
+    ? data.trends.clientsLast30 === 0
+      ? t('dashboard.noNewClients')
+      : data.trends.clientsDeltaPct > 0
+        ? `+${data.trends.clientsDeltaPct}%`
         : `${data.trends.clientsLast30} ${t('dashboard.thisMonth')}`
     : undefined;
 
   const clientDeltaTone =
-    data?.trends && data.trends.clientsDeltaPct < 0 ? 'coral' : data?.trends?.clientsLast30 ? 'emerald' : 'muted';
+    data?.trends?.clientsLast30 ? 'emerald' : 'muted';
 
   const recentSales = data?.recent.sales ?? [];
   const recentClients = data?.recent.clients ?? [];
@@ -112,6 +113,14 @@ export default function DashboardPage() {
     { label: t('nav.documents'), value: data?.alertes.documentsExpirant, to: '/documents?alert=expiring' },
     { label: t('docs.lateDossiers'), value: data?.alertes.documentsEnRetard, to: '/documents?alert=late' },
   ].filter((a) => (a.value ?? 0) > 0 && (!user || canAccessRoute(user.role, a.to.split('?')[0])));
+  const todoItems = (data?.todo || []).filter((item) => !user || canAccessRoute(user.role, item.path.split('?')[0]));
+  const todoKind = (kind: string) => {
+    if (kind === 'paper') return t('dashboard.todoPaper');
+    if (kind === 'payment') return t('dashboard.todoPayment');
+    if (kind === 'delivery') return t('dashboard.todoDelivery');
+    if (kind === 'missing') return t('dashboard.todoMissing');
+    return t('dashboard.todoDocument');
+  };
 
   function printDashboard() {
     if (!data) return;
@@ -329,6 +338,28 @@ export default function DashboardPage() {
             ))}
           </Card>
 
+          <div className="space-y-4">
+          <Card padding={false}>
+            <div className="mac-panel-header">
+              <h3 className="mac-panel-title">{t('dashboard.today')}</h3>
+            </div>
+            <div className="max-h-80 overflow-auto">
+            {loading && <p className="text-[12px] text-gic-muted py-6 text-center">{t('common.loading')}</p>}
+            {!loading && todoItems.length === 0 && (
+              <p className="text-[12px] text-gic-muted py-6 text-center">{t('dashboard.todayEmpty')}</p>
+            )}
+            {!loading && todoItems.map((item, index) => (
+              <Link key={`${item.path}-${item.title}-${index}`} to={item.path} className="mac-row">
+                <div className="min-w-0">
+                  <p className="mac-row-title truncate">{item.title}</p>
+                  <p className="mac-row-subtitle truncate">{todoKind(item.kind)} · {item.detail}</p>
+                </div>
+                <ChevronRight size={14} strokeWidth={2} className="mac-row-chevron shrink-0" />
+              </Link>
+            ))}
+            </div>
+          </Card>
+
           <Card padding={false}>
             <div className="mac-panel-header">
               <h3 className="mac-panel-title mac-panel-title-amber">{t('dashboard.alerts')}</h3>
@@ -349,6 +380,7 @@ export default function DashboardPage() {
               ));
             })()}
           </Card>
+          </div>
         </div>
       </section>
 

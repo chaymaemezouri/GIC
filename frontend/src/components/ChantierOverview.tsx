@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ChevronRight, HardHat, Layers, ShoppingCart, Truck, Users,
+  AlertTriangle, ChevronRight, HardHat, Layers, ShoppingCart, Truck, Users, Wallet,
 } from 'lucide-react';
 import { formatMad } from '../lib/api';
 import { Btn } from './ui';
@@ -176,7 +176,8 @@ export default function ChantierOverviewPanel({
           />
         )}
         <MetricChip icon={Users} label={t('tabs.personnel')} value={synthèse.personnel} />
-        <MetricChip icon={ShoppingCart} label={t('fields.budgetRemaining')} value={budgetLabel} tone="accent" />
+        <MetricChip icon={Wallet} label={t('siteOps.moneySpent')} value={formatMad((synthèse.depense || 0) + (synthèse.costMO || 0))} />
+        <MetricChip icon={ShoppingCart} label={t('siteOps.moneyLeft')} value={budgetLabel} tone="accent" />
         {(synthèse.depenseEngins ?? 0) > 0 && (
           <MetricChip icon={Truck} label={t('fleet.hints.overviewEnginCost')} value={formatMad(synthèse.depenseEngins!)} />
         )}

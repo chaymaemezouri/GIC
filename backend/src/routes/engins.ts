@@ -656,6 +656,10 @@ router.post('/missions/:id/documents', upload.single('file'), async (req, res) =
       path: `/uploads/${req.file.filename}`,
       entityType: 'Mission',
       entityId: missionId,
+      expiresAt: req.body.expiresAt ? new Date(req.body.expiresAt) : null,
+      feeAmount: req.body.feeAmount ? Number(req.body.feeAmount) : null,
+      estimatedStartDate: req.body.estimatedStartDate ? new Date(req.body.estimatedStartDate) : null,
+      estimatedEndDate: req.body.estimatedEndDate ? new Date(req.body.estimatedEndDate) : null,
     },
   });
   await audit(req, 'upload', 'Mission', missionId, doc.name);
@@ -880,6 +884,10 @@ router.post('/maintenances/:id/documents', upload.single('file'), async (req, re
       path: `/uploads/${req.file.filename}`,
       entityType: 'Maintenance',
       entityId: maintenanceId,
+      expiresAt: req.body.expiresAt ? new Date(req.body.expiresAt) : null,
+      feeAmount: req.body.feeAmount ? Number(req.body.feeAmount) : null,
+      estimatedStartDate: req.body.estimatedStartDate ? new Date(req.body.estimatedStartDate) : null,
+      estimatedEndDate: req.body.estimatedEndDate ? new Date(req.body.estimatedEndDate) : null,
     },
   });
   await audit(req, 'upload', 'Maintenance', maintenanceId, doc.name);

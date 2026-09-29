@@ -305,7 +305,159 @@ router.get('/', async (req, res) => {
       documentsExpirant: expiringDocs,
       documentsEnRetard: lateDocs,
     },
+    todo: await buildTodayList(),
   });
 });
+
+const DEFAULT_REQUIRED: Record<string, string[]> = {
+  client: ['cin'],
+  mandant: ['cin', 'procuration'],
+  agent: ['cin', 'contrat'],
+  property: ['titre'],
+  sale: ['compromis', 'cin_acheteur'],
+  rental: ['bail', 'cin_locataire'],
+  chantier: ['ordre_service', 'plans', 'assurance'],
+  workforce: ['cin', 'contrat'],
+  staff: ['cin', 'contrat'],
+  engin: ['carte_grise', 'assurance', 'visite'],
+  supplier: ['rc', 'ice'],
+  purchase: ['bon_commande', 'facture'],
+};
+
+function entityPath(type: string | null | undefined, id: string | null | undefined) {
+  if (!type || !id) return '/documents';
+  const map: Record<string, string> = {
+    client: `/clients/${id}`,
+    mandant: `/mandants/${id}`,
+    agent: `/agents/${id}`,
+    property: `/biens/${id}`,
+    sale: `/ventes/${id}`,
+    rental: `/locations/${id}`,
+    chantier: `/chantiers/${id}`,
+    workforce: `/main-oeuvre/${id}`,
+    staff: `/equipe-interne/${id}`,
+    engin: `/engins/${id}`,
+    supplier: `/fournisseurs/${id}`,
+    purchase: `/achats/${id}`,
+    Mission: `/engins`,
+  };
+  return map[type] || '/documents';
+}
+
+function dayLabel(value: Date | null | undefined) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('fr-MA');
+}
+
+async function buildTodayList() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const horizon = new Date(today);
+  horizon.setDate(horizon.getDate() + 30);
+  const [engins, schedules, purchases, documents, checklists] = await Promise.all([
+    prisma.engin.findMany({
+      where: {
+        OR: [
+          { insuranceExpiry: { lte: horizon } },
+          { visitExpiry: { lte: horizon } },
+        ],
+      },
+      take: 8,
+      select: { id: true, designation: true, matricule: true, brand: true, insuranceExpiry: true, visitExpiry: true },
+    }),
+    prisma.paymentSchedule.findMany({
+      where: {
+        status: { not: 'paid' },
+        dueDate: { lt: today },
+        OR: [{ saleId: { not: null } }, { rentalId: { not: null } }],
+      },
+      take: 8,
+      orderBy: { dueDate: 'asc' },
+      include: {
+        sale: { select: { id: true, reference: true } },
+        rental: { select: { id: true, reference: true } },
+      },
+    }),
+    prisma.purchase.findMany({
+      where: {
+        deliveryStatus: { not: 'livre' },
+        expectedDeliveryDate: { lt: today },
+        status: { not: 'archive' },
+      },
+      take: 8,
+      orderBy: { expectedDeliveryDate: 'asc' },
+      select: { id: true, reference: true, designation: true, expectedDeliveryDate: true },
+    }),
+    prisma.document.findMany({
+      where: { OR: [{ expiresAt: { lt: today } }, { status: 'invalid' }] },
+      take: 8,
+      orderBy: { expiresAt: 'asc' },
+      select: { id: true, name: true, entityType: true, entityId: true, expiresAt: true, status: true },
+    }),
+    prisma.documentChecklist.findMany({ take: 40, orderBy: { updatedAt: 'desc' } }),
+  ]);
+
+  const items: Array<{ kind: string; title: string; detail: string; path: string }> = [];
+  const push = (item: { kind: string; title: string; detail: string; path: string }, cap: number) => {
+    if (items.filter((row) => row.kind === item.kind).length >= cap) return;
+    items.push(item);
+  };
+  for (const engin of engins) {
+    const name = engin.designation || engin.brand || engin.matricule || 'Engin';
+    if (engin.insuranceExpiry && engin.insuranceExpiry <= horizon) {
+      push({ kind: 'paper', title: name, detail: `Assurance ${dayLabel(engin.insuranceExpiry)}`, path: `/engins/${engin.id}` }, 5);
+    }
+    if (engin.visitExpiry && engin.visitExpiry <= horizon) {
+      push({ kind: 'paper', title: name, detail: `Contrôle technique ${dayLabel(engin.visitExpiry)}`, path: `/engins/${engin.id}` }, 5);
+    }
+  }
+  for (const schedule of schedules) {
+    const ref = schedule.sale?.reference || schedule.rental?.reference || 'Échéance';
+    const path = schedule.sale ? `/ventes/${schedule.sale.id}` : `/locations/${schedule.rental?.id}`;
+    push({ kind: 'payment', title: ref, detail: `Échéance ${dayLabel(schedule.dueDate)}`, path }, 5);
+  }
+  for (const purchase of purchases) {
+    push({
+      kind: 'delivery',
+      title: purchase.reference,
+      detail: `${purchase.designation} · ${dayLabel(purchase.expectedDeliveryDate)}`,
+      path: `/achats/${purchase.id}`,
+    }, 5);
+  }
+  for (const doc of documents) {
+    push({
+      kind: 'document',
+      title: doc.name,
+      detail: doc.status === 'invalid' ? 'Document refusé' : `Expire le ${dayLabel(doc.expiresAt)}`,
+      path: doc.entityId ? entityPath(doc.entityType, doc.entityId) : `/documents/${doc.id}`,
+    }, 4);
+  }
+
+  const needed = checklists.flatMap((row) => {
+    let cfg: { required?: string[]; hidden?: string[] } = {};
+    try { cfg = JSON.parse(row.config || '{}'); } catch { cfg = {}; }
+    const hidden = new Set(cfg.hidden || []);
+    const keys = (cfg.required?.length ? cfg.required : DEFAULT_REQUIRED[row.entityType] || []).filter((key) => !hidden.has(key));
+    return keys.map((key) => ({ entityType: row.entityType, entityId: row.entityId, key }));
+  });
+  if (needed.length) {
+    const docs = await prisma.document.findMany({
+      where: { OR: needed.map((n) => ({ entityType: n.entityType, entityId: n.entityId, category: n.key })) },
+      select: { entityType: true, entityId: true, category: true },
+    });
+    const have = new Set(docs.map((d) => `${d.entityType}:${d.entityId}:${d.category}`));
+    for (const row of needed) {
+      if (have.has(`${row.entityType}:${row.entityId}:${row.key}`)) continue;
+      push({
+        kind: 'missing',
+        title: row.key,
+        detail: row.entityType,
+        path: entityPath(row.entityType, row.entityId),
+      }, 5);
+      if (items.filter((i) => i.kind === 'missing').length >= 5) break;
+    }
+  }
+  return items.slice(0, 24);
+}
 
 export default router;

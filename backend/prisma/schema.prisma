@@ -585,6 +585,8 @@ model Purchase {
   project       Project? @relation(fields: [projectId], references: [id])
   /// elabore | soumis | livre | valide | facture | paye | archive
   status        String   @default("elabore")
+  /// marchandise | outil
+  purchaseType  String   @default("marchandise")
   requester     String?
   responsible   String?
   expectedDeliveryDate DateTime?
@@ -755,6 +757,10 @@ model ChantierSubcontractor {
   corpsEtat   String?
   phone       String?
   amount      Float?
+  /// Pourcentage d'avancement déclaré (0–100)
+  progressPct Float    @default(0)
+  /// Montant déjà payé au sous-traitant
+  paidAmount  Float    @default(0)
   status      String   @default("actif")
   remark      String?
   createdAt   DateTime @default(now())
@@ -1100,6 +1106,18 @@ model Mission {
   requestedBy   String?
   remark        String?
   createdAt     DateTime @default(now())
+}
+
+/// Checklist de documents standards par fiche (client, chantier, ouvrier…).
+model DocumentChecklist {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  /// { custom, labels, hidden }
+  config     String   @default("{}")
+  updatedAt  DateTime @updatedAt
+
+  @@unique([entityType, entityId])
 }
 
 model Document {

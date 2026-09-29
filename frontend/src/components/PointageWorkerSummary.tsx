@@ -417,6 +417,12 @@ export default function PointageWorkerSummary({
             )}
             <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
             <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0" />
+            <MacDateInput
+              value={dateFrom && dateFrom === dateTo ? dateFrom : ''}
+              onChange={(value) => { setDateFrom(value); setDateTo(value); }}
+              placeholder={t('pointageMgmt.preciseDate')}
+              className="w-36 shrink-0"
+            />
             <MacSelect
               value={validated}
               onChange={setValidated}

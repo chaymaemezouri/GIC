@@ -13,6 +13,7 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { RentalFormFields, rentalToForm, rentalFormToBody, type RentalFormData } from '../components/RentalFormFields';
 import { printRentalReceipt } from '../lib/printRental';
@@ -460,6 +461,7 @@ export default function LocationDetailPage() {
 
         {tab === 'documents' && (
           <div className="mt-1">
+            {id && <EntityDocChecklist entityType="rental" entityId={id} extra={{ rentalId: id }} />}
             <div className="flex items-center justify-between gap-2 mb-3">
               <p className="text-[13px] font-medium text-gic-ink tracking-tight flex items-center gap-2">
                 <FileText size={15} />

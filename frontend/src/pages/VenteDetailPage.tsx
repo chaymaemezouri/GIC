@@ -13,6 +13,7 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { SaleFormFields, saleToForm, saleFormToUpdateBody, type SaleFormData } from '../components/SaleFormFields';
 import { printSaleReceipt } from '../lib/printSale';
@@ -280,6 +281,16 @@ export default function VenteDetailPage() {
                  </div>
       </div>
 
+      {(() => {
+        const overdue = (sale.schedules || []).filter((s: { status: string; dueDate: string }) => s.status !== 'paid' && new Date(s.dueDate) < new Date());
+        if (!overdue.length) return null;
+        return (
+          <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-900">
+            {t('siteOps.paymentOverdue')} · {overdue.length}
+          </div>
+        );
+      })()}
+
       <div className="mac-kpi-grid mac-kpi-grid-4">
         <KpiCard title={t('fields.netPrice')} value={formatMadCompact(sale.netPrice)} icon={FileText} tone="violet" compact />
         <KpiCard title={t('fields.collected')} value={formatMadCompact(sale.totalPaid)} icon={Wallet} tone="emerald" compact />
@@ -481,6 +492,7 @@ export default function VenteDetailPage() {
 
         {tab === 'documents' && (
           <div className="mt-1">
+            {id && <EntityDocChecklist entityType="sale" entityId={id} extra={{ saleId: id }} />}
             <div className="flex items-center justify-between gap-2 mb-3">
               <p className="text-[13px] font-medium text-gic-ink tracking-tight flex items-center gap-2">
                 <FileText size={15} />

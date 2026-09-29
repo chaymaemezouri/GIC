@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Building2, Pencil, Trash2, Printer, Home, Layers, History,
-  TrendingUp, KeyRound, FileText, ExternalLink, Upload, MapPin, Image, HardHat, Camera,
+  TrendingUp, KeyRound, FileText, ExternalLink, Upload, MapPin, Image, HardHat, Camera, Wallet,
   Images, LayoutGrid, PanelTop, Info, MessageCircle, CheckCircle2, XCircle, CircleDashed,
 } from 'lucide-react';
 import { api, formatDate, formatMad, uploadForm, uploadDocument } from '../lib/api';
@@ -12,6 +12,7 @@ import { googleMapsSearchUrl, projectLocationQuery } from '../lib/googleMaps';
 import { Btn, PageBackLink, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentAddButton } from '../components/DocumentAddButton';
 import { fileUrl, photoSrc } from '../lib/photoUrl';
 import {
   buildProjectDocChecklist,
@@ -697,6 +698,8 @@ export default function ProjectDetailPage() {
   }
 
   const totalValue = (project.properties || []).reduce((s: number, p: any) => s + Number(p.price || 0), 0);
+  const encaissé = sales.reduce((s, sale) => s + Number(sale.totalPaid || 0), 0);
+  const resteVentes = sales.reduce((s, sale) => s + Number(sale.remaining || 0), 0);
 
   const dispoCount = (project.properties || []).filter((p: { status: string }) => p.status === 'disponible').length;
   const unassignedProperties = (project.properties || []).filter((p: { floorId?: string | null }) => !p.floorId);
@@ -807,6 +810,8 @@ export default function ProjectDetailPage() {
         <KpiCard title={t('fields.tranche')} value={project.tranches?.length ?? 0} icon={Layers} tone="violet" />
         <KpiCard title={t('tabs.properties')} value={project.properties?.length ?? 0} icon={Home} tone="emerald" delta={`${dispoCount} ${t('status.available').toLowerCase()}.`} deltaTone="muted" />
         <KpiCard title={t('detail.patrimonialStructure')} value={formatMad(totalValue)} icon={TrendingUp} tone="amber" />
+        <KpiCard title={t('fields.collected')} value={formatMad(encaissé)} icon={Wallet} tone="emerald" />
+        <KpiCard title={t('fields.remaining')} value={formatMad(resteVentes)} icon={Wallet} tone="coral" />
       </div>
 
       <DetailShell
@@ -821,6 +826,7 @@ export default function ProjectDetailPage() {
                 label: t('tabs.pilotage'),
                 items: [
                   { id: 'infos', label: t('tabs.informations'), icon: Info },
+                  { id: 'chantiers', label: t('nav.sites'), icon: HardHat, badge: chantierCount || undefined },
                 ],
               },
               {
@@ -853,6 +859,39 @@ export default function ProjectDetailPage() {
           />
         }
       >
+        {tab === 'chantiers' && (
+          <div className="mt-2">
+            {(project.chantiers || []).length === 0 ? (
+              <div className="py-8 text-center">
+                <p className="text-[12px] text-gic-muted">{t('msg.emptySites')}</p>
+                <Btn icon={Plus} className="mt-3" onClick={openCreateChantier}>{t('actions.newSite')}</Btn>
+              </div>
+            ) : (
+              <TableWrap mac>
+                <thead>
+                  <tr>
+                    <Th mac>{t('columns.name')}</Th>
+                    <Th mac>{t('columns.progress')}</Th>
+                    <Th mac>{t('columns.staff')}</Th>
+                    <Th mac>{t('columns.purchases')}</Th>
+                    <Th mac>{t('tabs.equipment')}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(project.chantiers || []).map((ch: any) => (
+                    <tr key={ch.id}>
+                      <Td mac><Link to={`/chantiers/${ch.id}`} className="mac-table-ref">{ch.name}</Link></Td>
+                      <Td mac>{Math.round(ch.progressPct || 0)}%</Td>
+                      <Td mac>{ch._count?.assignments ?? 0}</Td>
+                      <Td mac>{ch._count?.purchases ?? 0}</Td>
+                      <Td mac>{ch._count?.enginAssignments ?? 0}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </TableWrap>
+            )}
+          </div>
+        )}
         {tab === 'infos' && (
           <div className="mt-1">
             <div className="grid sm:grid-cols-2 gap-4 text-[12px]">
@@ -1286,16 +1325,14 @@ export default function ProjectDetailPage() {
               >
                 {t('projectDocs.addChecklistItem')}
               </Btn>
-              <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
-                <Upload size={14} />
-                {docUploading && !docUploadingKey ? t('auth.sending') : t('projectDocs.depositOther')}
-                <input
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => onDocUpload(e, 'autre')}
-                  disabled={docUploading}
+              {id && (
+                <DocumentAddButton
+                  entityType="Project"
+                  entityId={id}
+                  defaultCategory="autre"
+                  onUploaded={() => { reloadDocuments().catch(() => {}); }}
                 />
-              </label>
+              )}
             </div>
           </div>
 

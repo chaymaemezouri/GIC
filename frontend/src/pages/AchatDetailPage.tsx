@@ -9,6 +9,7 @@ import { api, fetchSupplierList, fetchChantierList, formatDate, formatMad, openP
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, Select, TableWrap, Td, Textarea, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { PurchaseFormFields, purchaseFormToBody, purchaseToForm, validatePurchaseForm, type PurchaseFormData } from '../components/PurchaseFormFields';
 import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from '../components/PurchaseBadges';
 import {
@@ -372,6 +373,7 @@ export default function AchatDetailPage() {
   }
 
   const deliveredPct = p.totals.orderedQty > 0 ? Math.round((p.totals.acceptedQty / p.totals.orderedQty) * 100) : 0;
+  const deliveryLate = Boolean(p.expectedDeliveryDate && p.deliveryStatus !== 'livre' && new Date(p.expectedDeliveryDate) < new Date());
   const paidPct = p.totals.totalTTC > 0 ? Math.round((p.totals.paid / p.totals.totalTTC) * 100) : 0;
   const budget = p.chantier?.budgetAchats;
 
@@ -399,6 +401,9 @@ export default function AchatDetailPage() {
               <PurchaseDeliveryPill status={p.deliveryStatus} />
               {p.invoiced && <span className="mac-chip mac-chip-green">{t('msg.invoicedChip')}</span>}
             </div>
+            {deliveryLate && (
+              <p className="mt-2 text-[12px] font-medium text-gic-coral">{t('siteOps.deliveryLate')} · {formatDate(p.expectedDeliveryDate)}</p>
+            )}
             <div className="purchase-stepper">
               {PURCHASE_STATUSES.map((s, i) => {
                 const idx = statusIndex(p.status);
@@ -689,6 +694,7 @@ export default function AchatDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
+            {id && <EntityDocChecklist entityType="purchase" entityId={id} />}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap gap-1.5">
                 {PURCHASE_DOC_TYPES.filter((dt) => ['bon_commande', 'bon_livraison', 'facture_fournisseur', 'justificatif_paiement'].includes(dt)).map((dt) => (

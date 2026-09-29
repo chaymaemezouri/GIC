@@ -1,4 +1,5 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { printStandardTable } from '../lib/standardPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -12,6 +13,7 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, type EnginFormData } from '../components/EnginFormFields';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import DriverVehiclePanel from '../components/DriverVehiclePanel';
@@ -245,6 +247,17 @@ export default function EnginDetailPage() {
     { label: t('fields.technicalInspection'), date: engin.visitExpiry },
     { label: t('columns.autorisation'), date: engin.authExpiry },
   ];
+  const paperAlerts = papers.filter((p) => p.date && new Date(p.date).getTime() < Date.now() + 30 * 86400000);
+
+  function printSortie() {
+    if (!current) return;
+    printStandardTable(
+      t('siteOps.bonSortie'),
+      enginLabel(engin),
+      [t('fleet.fields.matricule'), t('fleet.fields.status'), t('fields.chantier'), t('fields.tranche')],
+      [[engin.matricule || engin.code || '—', fleetStatusLabel(engin.status, t), current.chantierName || '—', current.tranche || '—']],
+    );
+  }
   const analytics = costs?.analytics;
   const supplierName = engin.rentalSupplierRef?.companyName || engin.rentalSupplier;
 
@@ -265,6 +278,9 @@ export default function EnginDetailPage() {
             </p>
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <FleetStatusPill status={engin.status} />
+              <span className={`mac-chip ${engin.status === 'en_exploitation' || engin.status === 'en_utilisation' ? 'mac-chip-emerald' : 'mac-chip-gray'}`}>
+                {engin.status === 'en_exploitation' || engin.status === 'en_utilisation' ? t('siteOps.countedOnSite') : t('siteOps.notCountedOnSite')}
+              </span>
               {current && (
                 <button type="button" className="mac-chip mac-chip-blue" onClick={() => setTab('affectations')}>
                   <CalendarRange size={11} /> {chantierTrancheLabel(current.chantierName, current.tranche)}
@@ -283,6 +299,7 @@ export default function EnginDetailPage() {
         </div>
         <div className="mac-page-actions">
           {inShop && <Btn variant="secondary" icon={RotateCcw} onClick={release}>{t('fleet.actions.release')}</Btn>}
+          {current && <Btn variant="secondary" icon={Printer} onClick={printSortie}>{t('siteOps.bonSortie')}</Btn>}
           <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
           <Btn variant="secondary" icon={Wrench} onClick={() => setMaintOpen('entretien')}>{t('fleet.actions.newMaintenance')}</Btn>
           <Btn variant="secondary" icon={Hammer} onClick={() => setMaintOpen('reparation')}>{t('fleet.actions.newRepair')}</Btn>
@@ -292,6 +309,14 @@ export default function EnginDetailPage() {
           </div>
         </div>
       </div>
+
+      {paperAlerts.length > 0 && (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-950 space-y-0.5">
+          {paperAlerts.map((p) => (
+            <p key={p.label}>{t('siteOps.paperSoon', { label: p.label, date: formatDate(p.date) })}</p>
+          ))}
+        </div>
+      )}
 
       <div className="mac-kpi-grid mac-kpi-grid-4 mb-4">
         <KpiCard
@@ -721,6 +746,7 @@ export default function EnginDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
+            {id && <EntityDocChecklist entityType="engin" entityId={id} extra={{ enginId: id }} />}
             <label className="mac-upload-btn">
               <Upload size={14} /> {t('msg.uploadDocumentLabel')}
               <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />

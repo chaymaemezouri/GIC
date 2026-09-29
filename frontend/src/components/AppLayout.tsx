@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   LogOut, ChevronDown, User, LayoutDashboard, Menu, Languages,
 } from 'lucide-react';
@@ -20,6 +20,7 @@ import EccBrandFooter from './EccBrandFooter';
 import MobileNavDrawer from './MobileNavDrawer';
 import MobileBottomBar from './MobileBottomBar';
 import { useI18n } from '../i18n/I18nContext';
+import GlobalSearch from './GlobalSearch';
 
 function NavDirectLink({ item, accent = false }: { item: NavItem; accent?: boolean }) {
   const { t } = useI18n();
@@ -230,11 +231,25 @@ export default function AppLayout() {
   const { user, logout, photoBust } = useAuth();
   const { t } = useI18n();
   const location = useLocation();
+  const prevPath = useRef(location.pathname);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const listPaths = ['/clients', '/mandants', '/agents', '/biens', '/ventes', '/locations', '/chantiers', '/main-oeuvre', '/chauffeurs', '/engins', '/achats', '/fournisseurs'];
+  const listRestore = listPaths.includes(location.pathname)
+    && prevPath.current.startsWith(`${location.pathname}/`)
+    && !location.search
+    ? sessionStorage.getItem(`gic-list:${location.pathname}`)
+    : null;
+  if (!listRestore) prevPath.current = location.pathname;
 
   useEffect(() => {
     setMobileNavOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (listPaths.includes(location.pathname) && location.search) {
+      sessionStorage.setItem(`gic-list:${location.pathname}`, location.search);
+    }
+  }, [location.pathname, location.search]);
 
   const rail = useMemo(
     () => (user ? resolveRail(user.role, user.sidebarPrefs) : resolveRail('SUPER_ADMIN', null)),
@@ -342,6 +357,9 @@ export default function AppLayout() {
               <UserMenu onLogout={logout} photoBust={photoBust} />
             </div>
           </div>
+          <div className="shell-search-row">
+            <GlobalSearch />
+          </div>
         </header>
 
         <MobileNavDrawer
@@ -363,7 +381,7 @@ export default function AppLayout() {
         <main className="flex-1 p-3 sm:p-5 lg:p-7 bg-gic-bg min-w-0 flex flex-col">
           <RoleRoute>
             <PageErrorBoundary key={location.pathname}>
-              <Outlet />
+              {listRestore ? <Navigate to={`${location.pathname}${listRestore}`} replace /> : <Outlet />}
             </PageErrorBoundary>
           </RoleRoute>
           <EccBrandFooter variant="app" />

@@ -19,6 +19,35 @@ const router = Router();
 router.use(requireAuth);
 router.use(requirePermission);
 
+router.get('/checklist', async (req, res) => {
+  const entityType = String(req.query.entityType || '').trim();
+  const entityId = String(req.query.entityId || '').trim();
+  if (!entityType || !entityId) return res.status(400).json({ message: 'Fiche requise' });
+  const row = await prisma.documentChecklist.findUnique({
+    where: { entityType_entityId: { entityType, entityId } },
+  });
+  res.json({ config: row?.config || null });
+});
+
+router.put('/checklist', async (req, res) => {
+  const entityType = String(req.body.entityType || '').trim();
+  const entityId = String(req.body.entityId || '').trim();
+  if (!entityType || !entityId) return res.status(400).json({ message: 'Fiche requise' });
+  const config = JSON.stringify({
+    custom: Array.isArray(req.body.custom) ? req.body.custom : [],
+    labels: req.body.labels && typeof req.body.labels === 'object' ? req.body.labels : {},
+    hidden: Array.isArray(req.body.hidden) ? req.body.hidden : [],
+    required: req.body.required && typeof req.body.required === 'object' ? req.body.required : {},
+  });
+  const row = await prisma.documentChecklist.upsert({
+    where: { entityType_entityId: { entityType, entityId } },
+    update: { config },
+    create: { entityType, entityId, config },
+  });
+  await audit(req, 'modification', 'DocumentChecklist', row.id, `${entityType} ${entityId}`);
+  res.json({ config: row.config });
+});
+
 const docInclude = {
   client: { select: { id: true, firstName: true, lastName: true, reference: true } },
   property: { select: { id: true, name: true, reference: true } },

@@ -526,8 +526,8 @@ export default function DocumentsPage() {
                   options={archiveSortOptions}
                   className="w-36 shrink-0"
                 />
-                <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
-                <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0" />
+                <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
+                <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
               </>
             )}
             <Btn

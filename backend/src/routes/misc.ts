@@ -48,7 +48,7 @@ router.get('/search', async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q || q.length < 2) return res.json({ results: [] });
 
-  const [clients, properties, sales, chantiers, engins, documents] = await Promise.all([
+  const [clients, properties, sales, chantiers, engins, documents, workers] = await Promise.all([
     prisma.client.findMany({
       where: {
         OR: [
@@ -85,6 +85,16 @@ router.get('/search', async (req, res) => {
       where: { name: { contains: q } },
       take: 5,
     }),
+    prisma.workforce.findMany({
+      where: {
+        OR: [
+          { firstName: { contains: q } },
+          { lastName: { contains: q } },
+          { cin: { contains: q } },
+        ],
+      },
+      take: 5,
+    }),
   ]);
 
   const results = [
@@ -104,7 +114,7 @@ router.get('/search', async (req, res) => {
       type: 'vente',
       id: s.id,
       label: `${s.reference} — ${s.client.firstName} ${s.client.lastName}`,
-      path: `/ventes`,
+      path: `/ventes/${s.id}`,
     })),
     ...chantiers.map((c) => ({
       type: 'chantier',
@@ -116,13 +126,19 @@ router.get('/search', async (req, res) => {
       type: 'engin',
       id: e.id,
       label: `${e.matricule || ''} ${e.brand || ''}`.trim(),
-      path: `/engins`,
+      path: `/engins/${e.id}`,
+    })),
+    ...workers.map((w) => ({
+      type: 'ouvrier',
+      id: w.id,
+      label: `${w.firstName} ${w.lastName}`,
+      path: w.category === 'Chauffeur' ? `/chauffeurs/${w.id}` : `/main-oeuvre/${w.id}`,
     })),
     ...documents.map((d) => ({
       type: 'document',
       id: d.id,
       label: d.name,
-      path: `/documents`,
+      path: `/documents/${d.id}`,
     })),
   ];
 

@@ -32,6 +32,7 @@ export type PurchaseFormData = {
   advanceAmount: string;
   advanceMode: string;
   advanceDate: string;
+  purchaseType: 'marchandise' | 'outil';
   lines: PurchaseLineForm[];
 };
 
@@ -55,6 +56,7 @@ export function emptyPurchaseForm(): PurchaseFormData {
     advanceAmount: '',
     advanceMode: 'especes',
     advanceDate: today,
+    purchaseType: 'marchandise',
     lines: [emptyPurchaseLine()],
   };
 }
@@ -75,6 +77,7 @@ export function purchaseToForm(p: PurchaseDetail): PurchaseFormData {
     advanceAmount: advanceTotal ? String(advanceTotal) : '',
     advanceMode: firstAdvance?.mode || p.advanceMode || 'especes',
     advanceDate: firstAdvance ? String(firstAdvance.date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    purchaseType: p.purchaseType === 'outil' ? 'outil' : 'marchandise',
     lines: (p.lines || []).length
       ? p.lines.map((l) => ({
           key: l.id,
@@ -149,6 +152,7 @@ export function purchaseFormToBody(form: PurchaseFormData, opts: { trackingOnly?
     advanceAmount: Number(form.advanceAmount) || 0,
     advanceMode: form.advanceMode || null,
     advanceDate: form.advanceDate || null,
+    purchaseType: form.purchaseType === 'outil' ? 'outil' : 'marchandise',
     lines: form.lines
       .filter((l) => l.product.trim())
       .map((l) => ({
@@ -260,6 +264,21 @@ export function PurchaseFormFields({
     <div className="space-y-4">
       <section>
         <p className="purchase-form-section">{t('purchase.form.generalInfo')}</p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {(['marchandise', 'outil'] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              className={`rounded-full px-3 py-1 text-[12px] font-medium border ${form.purchaseType === kind ? 'bg-gic-violet text-white border-gic-violet' : 'bg-white text-gic-ink border-gic-border'}`}
+              onClick={() => set({ purchaseType: kind })}
+            >
+              {t(kind === 'outil' ? 'siteOps.purchaseTools' : 'siteOps.purchaseGoods')}
+            </button>
+          ))}
+        </div>
+        {form.purchaseType === 'outil' && (
+          <p className="text-[11px] text-gic-muted mb-3">{t('siteOps.toolCreatedHint')}</p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <LockedValue label={t('purchase.fields.reference')} value={reference || t('purchase.form.autoReference')} />
           <Input label={t('purchase.fields.createdAt')} type="date" value={form.date} onChange={(e) => set({ date: e.target.value })} />

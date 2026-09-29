@@ -5,11 +5,16 @@ export const ENGIN_STATUSES = [
   'disponible',
   'affecte',
   'en_utilisation',
+  'en_exploitation',
+  'en_instance',
+  'en_panne',
   'en_maintenance',
   'en_reparation',
   'hors_service',
   'restitue',
 ] as const;
+export const COSTING_SITE_STATUSES = ['en_exploitation', 'en_utilisation'] as const;
+export const SITE_TOOL_STATUSES = ['en_exploitation', 'en_instance', 'en_panne', 'en_reparation', 'en_maintenance', 'disponible'] as const;
 export const ASSIGNMENT_STATUSES = ['planifie', 'en_cours', 'a_retourner', 'termine'] as const;
 export const RENTAL_UNITS = ['jour', 'semaine', 'mois', 'projet', 'tranche'] as const;
 export const COST_METHODS = ['journalier', 'horaire', 'forfait'] as const;
@@ -175,6 +180,9 @@ const STATUS_TONES: Record<string, string> = {
   disponible: 'mac-status mac-status-ok',
   affecte: 'mac-status mac-status-info',
   en_utilisation: 'mac-status mac-status-warn',
+  en_exploitation: 'mac-status mac-status-warn',
+  en_instance: 'mac-status mac-status-info',
+  en_panne: 'mac-status mac-status-danger',
   en_maintenance: 'mac-status mac-status-danger',
   en_reparation: 'mac-status mac-status-danger',
   hors_service: 'mac-status',

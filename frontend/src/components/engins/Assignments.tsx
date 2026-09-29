@@ -9,7 +9,9 @@ import {
   COST_METHODS,
   RETURN_CONDITIONS,
   downloadRowsCsv,
+  SITE_TOOL_STATUSES,
   enginLabel,
+  fleetStatusLabel,
   errorMessage,
   formatMad2,
   inclusiveDays,
@@ -41,6 +43,7 @@ type AssignmentForm = {
   flatAmount: string;
   extraCost: string;
   remark: string;
+  siteStatus: string;
 };
 
 type Suggestion = { mode: string; costMethod: string; dailyCost: number; hourlyCost: number | null; flatAmount: number | null; extraCost: number };
@@ -60,6 +63,7 @@ function emptyForm(defaults?: Partial<AssignmentForm>): AssignmentForm {
     flatAmount: '',
     extraCost: '0',
     remark: '',
+    siteStatus: 'en_exploitation',
     ...defaults,
   };
 }
@@ -79,6 +83,7 @@ function formFromAssignment(a: Assignment): AssignmentForm {
     flatAmount: a.flatAmount != null ? String(a.flatAmount) : '',
     extraCost: String(a.extraCost ?? 0),
     remark: a.remark || '',
+    siteStatus: a.engin?.status || 'en_exploitation',
   };
 }
 
@@ -170,6 +175,7 @@ export function AssignmentModal({
       flatAmount: form.flatAmount === '' ? null : Number(form.flatAmount),
       extraCost: form.extraCost === '' ? 0 : Number(form.extraCost),
       remark: form.remark || null,
+      ...(!isEdit ? { siteStatus: form.siteStatus || 'en_exploitation' } : {}),
     };
     try {
       if (isEdit) await api(`/engins/assignments/${assignment!.id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -216,6 +222,14 @@ export function AssignmentModal({
             lockTranche={lock?.tranche}
             onChange={(n) => setForm((f) => ({ ...f, ...n }))}
           />
+          {!isEdit && (
+            <div className="sm:col-span-2">
+              <Select label={t('fields.status')} value={form.siteStatus} onChange={(e) => setForm({ ...form, siteStatus: e.target.value })}>
+                {SITE_TOOL_STATUSES.map((s) => <option key={s} value={s}>{fleetStatusLabel(s, t)}</option>)}
+              </Select>
+              <p className="mt-1 text-[11px] text-gic-muted">{t('siteOps.exploitationHint')}</p>
+            </div>
+          )}
           <Input label={t('fleet.fields.responsible')} value={form.responsible} onChange={(e) => setForm({ ...form, responsible: e.target.value })} />
           <div />
           <Input label={`${t('fleet.fields.startDate')} *`} type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
@@ -377,6 +391,7 @@ export function AssignmentsPanel({
   initialStatus = '',
   toolbar = false,
   showKpis = false,
+  site = false,
   returnFocus = false,
   onChanged,
   defaults,
@@ -387,6 +402,8 @@ export function AssignmentsPanel({
   initialStatus?: string;
   toolbar?: boolean;
   showKpis?: boolean;
+  /** Sur une fiche chantier ou tranche : seulement les engins affectés et l’affectation. */
+  site?: boolean;
   returnFocus?: boolean;
   onChanged?: () => void;
   defaults?: Partial<AssignmentForm>;
@@ -523,11 +540,11 @@ export function AssignmentsPanel({
         </div>
       )}
 
-      <SelectionBar selection={selection} onPrint={printList} />
+      {!site && <SelectionBar selection={selection} onPrint={printList} />}
 
       <Card padding={false} className="overflow-visible">
         <div className="flex flex-wrap items-center gap-2 p-3 border-b border-black/[0.05]">
-          {toolbar && (
+          {toolbar && !site && (
             <>
               <MacSearch value={q} onChange={setQ} placeholder={t('fleet.hints.searchAssignments')} />
               <MacSelect
@@ -561,8 +578,8 @@ export function AssignmentsPanel({
             </>
           )}
           <div className="ml-auto flex items-center gap-2">
-            <Btn variant="secondary" icon={Printer} onClick={printList}>{t('common.print')}</Btn>
-            <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>
+            {!site && <Btn variant="secondary" icon={Printer} onClick={printList}>{t('common.print')}</Btn>}
+            {!site && <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>}
             <Btn icon={Plus} onClick={() => { setEditing(null); setModalOpen(true); }}>{t('fleet.actions.newAssignment')}</Btn>
           </div>
         </div>
@@ -575,38 +592,38 @@ export function AssignmentsPanel({
           <TableWrap mac>
             <thead>
               <tr>
-                <SelectAllTh selection={selection} rows={items} />
+                {!site && <SelectAllTh selection={selection} rows={items} />}
                 {showEngin && <Th mac>{t('fleet.fields.engin')}</Th>}
-                {showChantier && <Th mac>{t('fleet.fields.chantierTranche')}</Th>}
+                {showChantier && !site && <Th mac>{t('fleet.fields.chantierTranche')}</Th>}
                 {!showChantier && <Th mac>{t('fleet.fields.tranche')}</Th>}
-                <Th mac>{t('fleet.fields.period')}</Th>
-                <Th mac>{t('fleet.fields.costMethod')}</Th>
-                <Th mac className="text-right">{t('fleet.fields.plannedCost')}</Th>
-                <Th mac className="text-right">{t('fleet.fields.actualCost')}</Th>
-                <Th mac className="text-right">{t('fleet.fields.expensesShare')}</Th>
-                <Th mac className="text-right">{t('fleet.fields.totalCost')}</Th>
-                <Th mac>{t('fleet.fields.status')}</Th>
+                {!site && <Th mac>{t('fleet.fields.period')}</Th>}
+                {!site && <Th mac>{t('fleet.fields.costMethod')}</Th>}
+                {!site && <Th mac className="text-right">{t('fleet.fields.plannedCost')}</Th>}
+                {!site && <Th mac className="text-right">{t('fleet.fields.actualCost')}</Th>}
+                {!site && <Th mac className="text-right">{t('fleet.fields.expensesShare')}</Th>}
+                {!site && <Th mac className="text-right">{t('fleet.fields.totalCost')}</Th>}
+                <Th mac>{site ? t('fields.status') : t('fleet.fields.status')}</Th>
                 <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
               </tr>
             </thead>
             <tbody>
               {items.map((a) => (
                 <tr key={a.id}>
-                  <SelectTd selection={selection} row={a} />
+                  {!site && <SelectTd selection={selection} row={a} />}
                   {showEngin && (
                     <Td mac>
                       <Link to={`/engins/${a.enginId}`} className="mac-table-ref">{a.enginLabel}</Link>
                       <span className="block text-[10px] mac-table-muted">{t(`fleet.mode.${a.mode}`)}</span>
                     </Td>
                   )}
-                  {showChantier && (
+                  {showChantier && !site && (
                     <Td mac>
                       {a.chantier ? <Link to={`/chantiers/${a.chantier.id}`} className="hover:text-[#007aff]">{a.chantier.name}</Link> : a.project?.name || '—'}
                       {a.tranche && <span className="block text-[10px] mac-table-muted">{a.tranche}</span>}
                     </Td>
                   )}
                   {!showChantier && <Td mac>{a.tranche || <span className="mac-table-muted">{t('fleet.hints.wholeChantier')}</span>}</Td>}
-                  <Td mac className="text-[11px] whitespace-nowrap">
+                  {!site && <Td mac className="text-[11px] whitespace-nowrap">
                     {formatDate(a.startDate)} → {a.endDate ? formatDate(a.endDate) : '…'}
                     <span className="block text-[10px] mac-table-muted">
                       {a.plannedDays != null ? t('fleet.hints.daysPlanned', { days: a.plannedDays }) : t('fleet.hints.openEndedShort')}
@@ -614,18 +631,18 @@ export function AssignmentsPanel({
                       {a.hours ? ` · ${a.hours} h` : ''}
                     </span>
                     {a.responsible && <span className="block text-[10px] mac-table-muted">{a.responsible}</span>}
-                  </Td>
-                  <Td mac className="text-[11px]">
+                  </Td>}
+                  {!site && <Td mac className="text-[11px]">
                     {t(`fleet.costMethod.${a.costMethod}`)}
                     <span className="block text-[10px] mac-table-muted">
                       {a.costMethod === 'forfait' ? formatMad2(a.flatAmount) : a.costMethod === 'horaire' ? `${formatMad2(a.hourlyCost)} / h` : `${formatMad2(a.dailyCost)} / j`}
                     </span>
-                  </Td>
-                  <Td mac className="text-right tabular-nums">{formatMad(a.plannedCost)}</Td>
-                  <Td mac className="text-right tabular-nums">{formatMad(a.actualCost)}</Td>
-                  <Td mac className="text-right tabular-nums mac-table-muted">{formatMad(a.expensesShare)}</Td>
-                  <Td mac className="text-right tabular-nums font-semibold">{formatMad(a.totalCost)}</Td>
-                  <Td mac><FleetStatusPill status={a.status} /></Td>
+                  </Td>}
+                  {!site && <Td mac className="text-right tabular-nums">{formatMad(a.plannedCost)}</Td>}
+                  {!site && <Td mac className="text-right tabular-nums">{formatMad(a.actualCost)}</Td>}
+                  {!site && <Td mac className="text-right tabular-nums mac-table-muted">{formatMad(a.expensesShare)}</Td>}
+                  {!site && <Td mac className="text-right tabular-nums font-semibold">{formatMad(a.totalCost)}</Td>}
+                  <Td mac><FleetStatusPill status={site ? (a.engin?.status || a.status) : a.status} /></Td>
                   <Td mac className="mac-td-actions">
                     <div className="mac-actions">
                       {!a.returnedAt && (
@@ -638,7 +655,7 @@ export function AssignmentsPanel({
                 </tr>
               ))}
             </tbody>
-            {data && items.length > 1 && (
+            {data && items.length > 1 && !site && (
               <tfoot>
                 <tr className="font-semibold">
                   <Td mac colSpan={(showEngin ? 1 : 0) + 4}>{t('fleet.hints.totalRows', { count: items.length })}</Td>

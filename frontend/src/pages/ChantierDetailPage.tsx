@@ -1,4 +1,5 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { printStandardTable, standardTableHtml } from '../lib/standardPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -15,6 +16,7 @@ import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, PageBackLink, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { photoSrc } from '../lib/photoUrl';
 
 import {
@@ -24,6 +26,7 @@ import {
 import ChantierOverviewPanel, { type ChantierOverview } from '../components/ChantierOverview';
 import ChantierDetailNav, { buildChantierNavGroups, type ChantierTab } from '../components/ChantierDetailNav';
 import { ChantierSubcontractorsPanel } from '../components/ChantierExtraPanels';
+import { ChantierWorkersHub } from '../components/ChantierWorkersHub';
 import {
   ChantierTranchesList, ChantierTrancheView, type TrancheListItem,
 } from '../components/ChantierTrancheView';
@@ -45,7 +48,7 @@ export default function ChantierDetailPage() {
   const { t } = useI18n();
   const { id, trancheId: routeTrancheId } = useParams();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selectedTrancheId = routeTrancheId || searchParams.get('tranche') || '';
   const [chantier, setChantier] = useState<any>(null);
   const [tranches, setTranches] = useState<TrancheListItem[]>([]);
@@ -86,6 +89,18 @@ export default function ChantierDetailPage() {
   const [missionOpen, setMissionOpen] = useState(false);
   const [missionPickerQuery, setMissionPickerQuery] = useState('');
   const [missionForm, setMissionForm] = useState({ enginId: '', mission: '', driverName: '', usage: '', tranche: '' });
+
+  function selectTab(next: Tab) {
+    if (next === 'pointage' && id) {
+      navigate(`/pointage?chantierId=${id}&tab=gestion`);
+      return;
+    }
+    setTab(next);
+    const params = new URLSearchParams(searchParams);
+    if (next === 'vue') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  }
 
   function load() {
     if (!id) return;
@@ -170,9 +185,11 @@ export default function ChantierDetailPage() {
     }
   }, [tab, id]);
 
-  function openPurchase() {
+  const [purchaseKind, setPurchaseKind] = useState<'all' | 'marchandise' | 'outil'>('all');
+
+  function openPurchase(kind: 'marchandise' | 'outil' = 'marchandise') {
     if (!id) return;
-    setPurchaseForm({ ...emptyPurchaseForm(), chantierId: id });
+    setPurchaseForm({ ...emptyPurchaseForm(), chantierId: id, purchaseType: kind });
     setPurchaseOpen(true);
   }
 
@@ -438,8 +455,49 @@ export default function ChantierDetailPage() {
     </body></html>`, { grid: true }) });
   }
 
+  async function printSituation() {
+    if (!chantier || !id) return;
+    const syn = overview?.synthèse;
+    const spent = (syn?.depense || 0) + (syn?.costMO || 0);
+    const left = syn && syn.budgetAchats > 0 ? Math.max(0, syn.budgetTotal || syn.budgetAchats) - spent : 0;
+    const rows = (chantier.purchases || []).slice(0, 30).map((p: { reference?: string; status?: string; supplier?: { companyName?: string } }) => [
+      p.reference || '—',
+      p.supplier?.companyName || '—',
+      p.status || '—',
+    ]);
+    printStandardTable(
+      t('siteOps.situation'),
+      `${chantier.name} · ${Math.round(chantier.progressPct || 0)} % · ${t('siteOps.moneySpent')} ${formatMad(spent)} · ${t('siteOps.moneyLeft')} ${formatMad(left)}`,
+      [t('fields.reference'), t('fields.supplier'), t('fields.status')],
+      rows,
+    );
+  }
+
+  function printPointageSheet() {
+    if (!chantier || !id) return;
+    const chantierId = id;
+    const name = chantier.name;
+    printWithCompany({
+      title: t('siteOps.feuillePointage'),
+      bodyHtml: async () => {
+        const data = await api<{ items: Array<{ workforce: { firstName: string; lastName: string }; totalDays: number; validatedLines: number; remaining: number }> }>(`/chantiers/pointage/by-worker?chantierId=${chantierId}`);
+        return standardTableHtml(
+          name,
+          [t('tabs.personnel'), t('siteOps.attendance'), t('fields.status'), t('fields.remaining')],
+          (data.items || []).map((i) => [
+            `${i.workforce.firstName} ${i.workforce.lastName}`,
+            String(i.totalDays),
+            String(i.validatedLines),
+            formatMad(i.remaining),
+          ]),
+        );
+      },
+    }).catch((err) => appAlert(err instanceof Error ? err.message : t('common.error')));
+  }
+
   const navGroups = buildChantierNavGroups(t, {
     tranches: tranches.length,
+    workers: chantier?.assignments?.length ?? 0,
     galerie: (chantier?.images?.length ?? 0) + (chantier?.documents?.length ?? 0),
     engins: chantier?.enginCosts?.byEngin?.length || chantier?.missions?.length || 0,
     achats: chantier?.purchases?.length ?? 0,
@@ -544,7 +602,7 @@ export default function ChantierDetailPage() {
                 <button
                   type="button"
                   className="mac-chip mac-chip-orange cursor-pointer hover:opacity-90"
-                  onClick={() => setTab('vue')}
+                  onClick={() => selectTab('vue')}
                 >
                   {t('msg.alertCount', { count: alertCount })}
                 </button>
@@ -558,6 +616,8 @@ export default function ChantierDetailPage() {
             <Btn variant="secondary" onClick={() => setActionsOpen((o) => !o)}>{t('common.actions')}</Btn>
             {actionsOpen && (
               <div className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-xl bg-white border border-[#d2d2d7] shadow-lg py-1">
+                <ActionItem label={t('siteOps.situation')} onClick={() => { printSituation(); setActionsOpen(false); }} />
+                <ActionItem label={t('siteOps.feuillePointage')} onClick={() => { printPointageSheet(); setActionsOpen(false); }} />
                 <ActionItem label={t('actions.addCamera')} onClick={() => { setCameraOpen(true); setActionsOpen(false); }} />
                 <Link to={`/pointage?chantierId=${id}`} className="block px-3 py-2 text-[12px] hover:bg-black/[0.03]" onClick={() => setActionsOpen(false)}>
                   {t('tabs.attendance')}
@@ -565,7 +625,7 @@ export default function ChantierDetailPage() {
                 <Link to={`/avancement?chantierId=${id}`} className="block px-3 py-2 text-[12px] hover:bg-black/[0.03]" onClick={() => setActionsOpen(false)}>
                   {t('columns.progress')}
                 </Link>
-                <ActionItem label={t('tabs.documents')} onClick={() => { setTab('documents'); setActionsOpen(false); }} />
+                <ActionItem label={t('tabs.documents')} onClick={() => { selectTab('documents'); setActionsOpen(false); }} />
               </div>
             )}
           </div>
@@ -608,7 +668,7 @@ export default function ChantierDetailPage() {
         />
       ) : (
         <div className="chantier-detail-shell">
-          <ChantierDetailNav active={tab} onChange={setTab} groups={navGroups} />
+          <ChantierDetailNav active={tab} onChange={selectTab} groups={navGroups} />
           <div className="chantier-detail-panel">
         {tab === 'tranches' && id && (
           <ChantierTranchesList
@@ -804,6 +864,15 @@ export default function ChantierDetailPage() {
           />
         )}
 
+        {tab === 'ouvriers' && id && (
+          <ChantierWorkersHub
+            chantierId={id}
+            assignments={chantier.assignments || []}
+            tranches={tranches.map((tr) => tr.name)}
+            onChanged={load}
+          />
+        )}
+
         {tab === 'pointage' && (
           <div className="mt-2">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -878,8 +947,8 @@ export default function ChantierDetailPage() {
             chantierName={chantier.name}
             tranchesCount={tranches.length}
             recentPurchases={recentPurchases}
-            onGoTranches={() => setTab('tranches')}
-            onGoAchats={() => setTab('achats')}
+            onGoTranches={() => selectTab('tranches')}
+            onGoAchats={() => selectTab('achats')}
           />
         )}
 
@@ -909,13 +978,26 @@ export default function ChantierDetailPage() {
                 <Btn variant="secondary" icon={TrendingUp} onClick={() => navigate(`/achats?tab=analyse&chantierId=${id}`)}>
                   {t('purchase.list.tabAnalytics')}
                 </Btn>
-                <Btn icon={Plus} onClick={openPurchase}>{t('actions.addPurchase')}</Btn>
+                <Btn icon={Plus} onClick={() => openPurchase('marchandise')}>{t('siteOps.purchaseGoods')}</Btn>
+                <Btn icon={Plus} onClick={() => openPurchase('outil')}>{t('siteOps.purchaseTools')}</Btn>
               </div>
             </div>
-            {purchases.length === 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {(['all', 'marchandise', 'outil'] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={`rounded-full px-3 py-1 text-[12px] font-medium border ${purchaseKind === kind ? 'bg-gic-violet text-white border-gic-violet' : 'bg-white text-gic-ink border-gic-border'}`}
+                  onClick={() => setPurchaseKind(kind)}
+                >
+                  {kind === 'all' ? t('common.all') : t(kind === 'outil' ? 'siteOps.purchaseTools' : 'siteOps.purchaseGoods')}
+                </button>
+              ))}
+            </div>
+            {purchases.filter((p: { purchaseType?: string | null }) => purchaseKind === 'all' || (p.purchaseType || 'marchandise') === purchaseKind).length === 0 ? (
               <div className="py-8 text-center">
                 <p className="text-[12px] text-gic-muted">{t('msg.emptyPurchases')}</p>
-                <Btn icon={Plus} className="mt-3" onClick={openPurchase}>{t('actions.addPurchase')}</Btn>
+                <Btn icon={Plus} className="mt-3" onClick={() => openPurchase('marchandise')}>{t('siteOps.purchaseGoods')}</Btn>
               </div>
             ) : (
               <TableWrap mac>
@@ -923,6 +1005,7 @@ export default function ChantierDetailPage() {
                   <tr>
                     <Th mac>{t('columns.ref')}</Th>
                     <Th mac>{t('columns.date')}</Th>
+                    <Th mac>{t('columns.type')}</Th>
                     <Th mac>{t('columns.designation')}</Th>
                     <Th mac>{t('columns.supplier')}</Th>
                     <Th mac>{t('columns.tranche')}</Th>
@@ -933,10 +1016,11 @@ export default function ChantierDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {purchases.map((p: any) => (
+                  {purchases.filter((p: { purchaseType?: string | null }) => purchaseKind === 'all' || (p.purchaseType || 'marchandise') === purchaseKind).map((p: any) => (
                     <tr key={p.id}>
                       <Td mac><Link to={`/achats/${p.id}`} className="mac-table-ref">{p.reference}</Link></Td>
                       <Td mac className="mac-table-muted">{formatDate(p.date)}</Td>
+                      <Td mac className="mac-table-muted">{p.purchaseType === 'outil' ? t('siteOps.purchaseTools') : t('siteOps.purchaseGoods')}</Td>
                       <Td mac>{p.designation}</Td>
                       <Td mac className="mac-table-muted">
                         {p.supplier ? (
@@ -967,6 +1051,7 @@ export default function ChantierDetailPage() {
 
         {tab === 'documents' && (
           <div className="mt-2 space-y-3">
+            {id && <EntityDocChecklist entityType="chantier" entityId={id} extra={{ chantierId: id }} />}
             <div className="flex flex-wrap items-end justify-between gap-2">
               <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('msg.siteDocumentsTitle')}</p>
               <div className="flex flex-wrap items-end gap-2">

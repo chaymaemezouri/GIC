@@ -76,6 +76,7 @@ export function wrapCompanyPrintHtml(opts: {
   .print-footer{margin-top:20px;padding-top:9px;border-top:1px solid var(--line);display:flex;gap:12px;justify-content:space-between;color:var(--muted);font-size:9px}
   .footer-copy{max-width:72%}.legal{margin-top:3px}.printed-at{white-space:nowrap;text-align:right}
   .sign{margin:26px 0 8px;text-align:right}.sign-box{display:inline-block;width:210px;text-align:center;color:var(--muted)}.sign-line{margin-top:45px;border-top:1px solid var(--ink);padding-top:5px}
+  .sign-slots{display:flex;justify-content:space-between;gap:16px;margin-top:28px}.sign-slot{flex:1;max-width:200px;text-align:center;color:var(--muted);font-size:10px}
   .toolbar{display:flex;gap:8px;margin:0 0 12px}.toolbar button{border:1px solid var(--line);background:white;border-radius:7px;padding:7px 12px;cursor:pointer}
   @media print{.toolbar{display:none}.print-sheet{max-width:none;padding:0}tr{break-inside:avoid}h2{break-after:avoid}}
 </style></head><body><main class="print-sheet">

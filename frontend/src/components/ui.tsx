@@ -285,6 +285,18 @@ export function MacSearch({
   className?: string;
 }) {
   const { t } = useI18n();
+  const submitRef = useRef(onSubmit);
+  submitRef.current = onSubmit;
+  const previous = useRef(value);
+
+  useEffect(() => {
+    if (previous.current === value) return;
+    previous.current = value;
+    if (!submitRef.current) return;
+    const id = window.setTimeout(() => submitRef.current?.(), 250);
+    return () => window.clearTimeout(id);
+  }, [value]);
+
   return (
     <div className={`mac-search ${className}`}>
       <Search size={14} strokeWidth={2} className="mac-search-icon" />
@@ -475,16 +487,28 @@ export function MacDateInput({
   label,
   value,
   onChange,
+  onSubmit,
   className = '',
   placeholder,
 }: {
   label?: string;
   value: string;
   onChange: (value: string) => void;
+  onSubmit?: () => void;
   className?: string;
   placeholder?: string;
 }) {
   const { t, lang } = useI18n();
+  const submitRef = useRef(onSubmit);
+  submitRef.current = onSubmit;
+  const previousValue = useRef(value);
+  useEffect(() => {
+    if (previousValue.current === value) return;
+    previousValue.current = value;
+    if (!submitRef.current) return;
+    const id = window.setTimeout(() => submitRef.current?.(), 200);
+    return () => window.clearTimeout(id);
+  }, [value]);
   const resolvedPlaceholder = placeholder ?? t('fields.chooseDate');
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => parseIsoDate(value) ?? new Date());

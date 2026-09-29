@@ -17,6 +17,7 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentAddButton } from '../components/DocumentAddButton';
 
 
 
@@ -534,17 +535,15 @@ export default function MaintenanceDetailPage() {
 
               <p className="text-[12px] text-gic-muted">{t('msg.maintenanceDocsHint')}</p>
 
-              <label className="cursor-pointer">
-
-                <span className={`inline-flex items-center gap-2 rounded-lg border border-gic-border px-3 py-2 text-[12px] font-medium hover:bg-black/[0.03]${uploading ? ' opacity-60 pointer-events-none' : ''}`}>
-
-                  <Upload size={14} /> {uploading ? t('msg.uploading') : t('actions.addFile')}
-
-                </span>
-
-                <input type="file" className="hidden" onChange={onUpload} />
-
-              </label>
+              {id && (
+                <DocumentAddButton
+                  entityType="Maintenance"
+                  entityId={id}
+                  defaultCategory="maintenance"
+                  uploadPath={`/engins/maintenances/${id}/documents`}
+                  onUploaded={load}
+                />
+              )}
 
             </div>
 

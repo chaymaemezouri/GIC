@@ -11,6 +11,8 @@ type Subcontractor = {
   corpsEtat?: string | null;
   phone?: string | null;
   amount?: number | null;
+  progressPct?: number | null;
+  paidAmount?: number | null;
   status: string;
   remark?: string | null;
 };
@@ -20,7 +22,7 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
   const [items, setItems] = useState<Subcontractor[]>([]);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ companyName: '', corpsEtat: '', phone: '', amount: '', status: 'actif', remark: '' });
+  const [form, setForm] = useState({ companyName: '', corpsEtat: '', phone: '', amount: '', progressPct: '0', paidAmount: '0', status: 'actif', remark: '' });
 
   function load() {
     api<Subcontractor[]>(`/chantiers/${chantierId}/subcontractors`).then(setItems).catch(() => setItems([]));
@@ -30,7 +32,7 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
 
   function openCreate() {
     setEditId(null);
-    setForm({ companyName: '', corpsEtat: '', phone: '', amount: '', status: 'actif', remark: '' });
+    setForm({ companyName: '', corpsEtat: '', phone: '', amount: '', progressPct: '0', paidAmount: '0', status: 'actif', remark: '' });
     setOpen(true);
   }
 
@@ -41,6 +43,8 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
       corpsEtat: item.corpsEtat || '',
       phone: item.phone || '',
       amount: item.amount != null ? String(item.amount) : '',
+      progressPct: item.progressPct != null ? String(item.progressPct) : '0',
+      paidAmount: item.paidAmount != null ? String(item.paidAmount) : '0',
       status: item.status,
       remark: item.remark || '',
     });
@@ -54,6 +58,8 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
       corpsEtat: form.corpsEtat || null,
       phone: form.phone || null,
       amount: form.amount ? Number(form.amount) : null,
+      progressPct: form.progressPct ? Number(form.progressPct) : 0,
+      paidAmount: form.paidAmount ? Number(form.paidAmount) : 0,
       status: form.status,
       remark: form.remark || null,
     };
@@ -86,6 +92,13 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
         <p className="text-[13px] font-medium text-gic-ink">{t('detail.subcontractorsTitle')}</p>
         <Btn icon={Plus} onClick={openCreate}>{t('common.add')}</Btn>
       </div>
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-3 text-[12px]">
+          <span className="mac-chip mac-chip-gray">{t('fields.amount')} {formatMad(items.reduce((s, i) => s + Number(i.amount || 0), 0))}</span>
+          <span className="mac-chip mac-chip-emerald">{t('siteOps.paid')} {formatMad(items.reduce((s, i) => s + Number(i.paidAmount || 0), 0))}</span>
+          <span className="mac-chip mac-chip-blue">{t('siteOps.moneyLeft')} {formatMad(items.reduce((s, i) => s + Math.max(0, Number(i.amount || 0) - Number(i.paidAmount || 0)), 0))}</span>
+        </div>
+      )}
       {items.length === 0 ? (
         <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptySubcontractors')}</p>
       ) : (
@@ -95,6 +108,9 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
               <Th mac>{t('fields.company')}</Th>
               <Th mac>{t('fields.corpsEtat')}</Th>
               <Th mac>{t('fields.amount')}</Th>
+              <Th mac>{t('siteOps.progress')}</Th>
+              <Th mac>{t('siteOps.paid')}</Th>
+              <Th mac>{t('siteOps.moneyLeft')}</Th>
               <Th mac>{t('fields.status')}</Th>
               <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
             </tr>
@@ -108,6 +124,9 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
                 </Td>
                 <Td mac className="mac-table-muted">{item.corpsEtat || '—'}</Td>
                 <Td mac>{item.amount != null ? formatMad(item.amount) : '—'}</Td>
+                <Td mac>{Math.round(Number(item.progressPct || 0))} %</Td>
+                <Td mac>{formatMad(item.paidAmount || 0)}</Td>
+                <Td mac>{formatMad(Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)))}</Td>
                 <Td mac>{item.status}</Td>
                 <Td mac className="mac-td-actions">
                   <div className="mac-actions">
@@ -136,6 +155,8 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
           <Input label={t('fields.corpsEtat')} value={form.corpsEtat} onChange={(e) => setForm({ ...form, corpsEtat: e.target.value })} placeholder={t('fields.corpsEtatPlaceholder')} />
           <Input label={t('fields.phone')} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           <Input label={t('fields.contractAmountMad')} type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+          <Input label={t('siteOps.progress')} type="number" min="0" max="100" value={form.progressPct} onChange={(e) => setForm({ ...form, progressPct: e.target.value })} />
+          <Input label={t('siteOps.paid')} type="number" min="0" value={form.paidAmount} onChange={(e) => setForm({ ...form, paidAmount: e.target.value })} />
           <Select label={t('fields.status')} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
             <option value="actif">{t('status.active')}</option>
             <option value="termine">{t('fields.statusFinishedShort')}</option>
@@ -147,3 +168,4 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
     </div>
   );
 }
+

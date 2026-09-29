@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<title>GIC — Guide d'utilisation</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", Calibri, Arial, sans-serif;
+    color: #1d1d1f;
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .cover {
+    min-height: 250mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    page-break-after: always;
+    padding: 8mm 2mm 0;
+  }
+  .brand { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: #5b21b6; font-weight: 700; }
+  .cover h1 { font-size: 36px; line-height: 1.1; margin: 18px 0 8px; letter-spacing: -.03em; }
+  .cover .sub { font-size: 16px; color: #444; max-width: 140mm; }
+  .rule { height: 4px; width: 72px; background: #6d28d9; border-radius: 4px; margin: 22px 0; }
+  .cover-meta { color: #666; font-size: 12px; }
+  h2 { font-size: 18px; margin: 22px 0 8px; page-break-after: avoid; color: #1d1d1f; border-bottom: 2px solid #ede9fe; padding-bottom: 4px; }
+  h3 { font-size: 13.5px; margin: 16px 0 4px; page-break-after: avoid; color: #5b21b6; }
+  h4 { font-size: 12px; margin: 12px 0 4px; page-break-after: avoid; }
+  p { margin: 6px 0 8px; }
+  ol, ul { margin: 4px 0 10px; padding-left: 18px; }
+  li { margin: 3px 0; }
+  .toc { page-break-after: always; }
+  .toc a { color: inherit; text-decoration: none; }
+  .toc li { margin: 5px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 10.5px; page-break-inside: avoid; }
+  th { text-align: left; background: #f5f3ff; border-bottom: 1.5px solid #6d28d9; padding: 6px 7px; }
+  td { border-bottom: 1px solid #ececec; padding: 5px 7px; vertical-align: top; }
+  .note, .tip, .warn { border-radius: 8px; padding: 8px 10px; margin: 8px 0 12px; page-break-inside: avoid; }
+  .note { background: #f5f3ff; border-left: 3px solid #6d28d9; }
+  .tip { background: #f0fdf4; border-left: 3px solid #16a34a; }
+  .warn { background: #fff7ed; border-left: 3px solid #ea580c; }
+  .steps { counter-reset: step; padding-left: 0; list-style: none; }
+  .steps > li { counter-increment: step; margin: 6px 0 8px; padding-left: 28px; position: relative; page-break-inside: avoid; }
+  .steps > li:before {
+    content: counter(step);
+    position: absolute; left: 0; top: 0;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #6d28d9; color: white; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  code { font-family: Consolas, monospace; font-size: 10.5px; background: #f4f4f5; padding: 0 3px; border-radius: 3px; }
+  .footer-note { margin-top: 18px; color: #777; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div>
+    <div class="brand">GIC</div>
+    <h1>Guide d'utilisation</h1>
+    <p class="sub">Gestion immobilière et chantier — comment créer, suivre et gérer le travail au quotidien, de A à Z.</p>
+    <div class="rule"></div>
+    <p>Ce document explique chaque partie de l'application : qui s'en sert, dans quel ordre créer les fiches, et comment encaisser, décaisser, pointer, acheter et archiver.</p>
+  </div>
+  <div class="cover-meta">
+    <p>À remettre aux utilisateurs de la société.</p>
+    <p>Document interne — usage opérationnel.</p>
+  </div>
+</section>
+
+<section class="toc">
+  <h2>Sommaire</h2>
+  <ol>
+    <li><a href="#prise">Prise en main</a></li>
+    <li><a href="#roles">Qui fait quoi</a></li>
+    <li><a href="#journee">Par quoi commencer</a></li>
+    <li><a href="#ecran">Se repérer dans l'écran</a></li>
+    <li><a href="#fiches">Créer et gérer une fiche</a></li>
+    <li><a href="#intervenants">Les personnes</a></li>
+    <li><a href="#immo">L'immobilier</a></li>
+    <li><a href="#chantier">Le chantier</a></li>
+    <li><a href="#pointage">Le pointage</a></li>
+    <li><a href="#achats">Les achats et les fournisseurs</a></li>
+    <li><a href="#engins">Les engins et les matériels</a></li>
+    <li><a href="#argent">L'argent</a></li>
+    <li><a href="#documents">Les documents</a></li>
+    <li><a href="#imprimer">Imprimer</a></li>
+    <li><a href="#chercher">Chercher, filtrer, retrouver</a></li>
+    <li><a href="#reglages">Réglages, utilisateurs, historique</a></li>
+    <li><a href="#jour">La journée type</a></li>
+  </ol>
+</section>
+
+<h2 id="prise">1. Prise en main</h2>
+<p>GIC est l'outil unique de la société pour l'immobilier et les chantiers. Un même dossier relie le client, le bien, la vente ou la location, le chantier, les ouvriers, les engins, les achats et l'argent.</p>
+<ol class="steps">
+  <li>Ouvrez l'adresse de l'application remise par l'administrateur.</li>
+  <li>Saisissez l'e-mail ou l'identifiant, puis le mot de passe. Cliquez sur <strong>Se connecter</strong>.</li>
+  <li>Si le mot de passe est oublié, utilisez <strong>Mot de passe oublié</strong> et suivez le message reçu.</li>
+  <li>À l'arrivée, le <strong>tableau de bord</strong> résume l'activité et la liste <strong>À traiter aujourd'hui</strong>.</li>
+</ol>
+<div class="note">Chaque personne a son propre compte. Ne partagez pas le mot de passe. L'administrateur crée les comptes dans <strong>Paramètres → Utilisateurs</strong>.</div>
+
+<h2 id="roles">2. Qui fait quoi</h2>
+<p>Le menu n'affiche que ce que votre rôle autorise. Si une partie n'apparaît pas, elle n'est pas dans votre métier : ce n'est pas une panne.</p>
+<table>
+  <thead><tr><th>Rôle</th><th>Travail habituel</th></tr></thead>
+  <tbody>
+    <tr><td>Super administrateur et Administrateur</td><td>Tout : société, utilisateurs, référentiels, historique des actions.</td></tr>
+    <tr><td>Commercial</td><td>Clients, mandants, agents, projets, biens, ventes, locations, documents.</td></tr>
+    <tr><td>Comptable</td><td>Encaissements, décaissements, caisse, balance, comptabilité, salaires, achats, équipe interne.</td></tr>
+    <tr><td>Chef de chantier</td><td>Chantiers, pointage, avancement, achats, engins et matériels, documents de chantier.</td></tr>
+    <tr><td>Utilisateur</td><td>Consultation du tableau de bord et des réglages qui le concernent.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="journee">3. Par quoi commencer</h2>
+<p>L'ordre compte. Une vente a besoin d'un client et d'un bien. Un pointage a besoin d'un chantier et d'ouvriers. Un achat d'outils crée un matériel dans le parc.</p>
+<ol class="steps">
+  <li><strong>Paramètres</strong> — nom de la société, logo, adresse, téléphone, mentions qui apparaissent sur les imprimés.</li>
+  <li><strong>Utilisateurs</strong> — un compte par personne, avec le bon rôle.</li>
+  <li><strong>Référentiels</strong> — listes utilisées partout (types d'identité, sources client, natures de paiement, catégories). On y ajoute une valeur au lieu de la ressaisir à la main.</li>
+  <li><strong>Personnes</strong> — clients, mandants, agents, fournisseurs, ouvriers, équipe interne, chauffeurs.</li>
+  <li><strong>Immobilier</strong> — projet, puis biens du projet, puis vente ou location.</li>
+  <li><strong>Chantier</strong> — fiche, tranches, affectation des ouvriers, engins, achats, pointage chaque jour.</li>
+  <li><strong>Argent</strong> — les encaissements de vente et les paiements d'achat alimentent la caisse et la balance. On n'a pas à recopier le même montant deux fois.</li>
+</ol>
+
+<h2 id="ecran">4. Se repérer dans l'écran</h2>
+<ul>
+  <li><strong>Barre du haut</strong> — les modules : Intervenants, Immobilier, Finance, Opérations, Engins &amp; Matériels, Documents. <strong>Chantiers</strong> et <strong>Pointage</strong> sont aussi accessibles directement. <strong>Nouveau</strong> crée une fiche sans passer par la liste.</li>
+  <li><strong>Recherche</strong> — sous la barre, au centre. À partir de deux lettres, les résultats apparaissent tout seuls. Un clic ouvre la fiche (client, bien, vente, chantier, engin, ouvrier, document).</li>
+  <li><strong>Raccourcis à gauche</strong> (grand écran) — Accueil, Clients, Biens, Ventes, Balance, Documents. On peut les changer dans les préférences du profil.</li>
+  <li><strong>Téléphone</strong> — le menu s'ouvre avec l'icône en haut à gauche. Les actions du bas restent visibles : les boutons ne sont pas cachés derrière la barre.</li>
+  <li><strong>Notifications</strong> (cloche) — alertes et messages. La page Notifications les liste toutes.</li>
+  <li><strong>Retour</strong> — en haut de chaque fiche, ramène à la liste. Les filtres et la page que vous aviez sont conservés.</li>
+</ul>
+<div class="tip">Sur une liste, la recherche de texte filtre au fil de la frappe. Il n'est pas nécessaire de cliquer sur Filtrer pour un nom. Les dates <strong>Du</strong> et <strong>Au</strong> filtrent aussi dès qu'on les choisit.</div>
+
+<h2 id="fiches">5. Créer et gérer une fiche</h2>
+<p>Le geste est le même partout.</p>
+<ol class="steps">
+  <li>Ouvrez la liste, ou le menu <strong>Nouveau</strong>.</li>
+  <li>Cliquez sur <strong>Ajouter</strong>.</li>
+  <li>Remplissez les champs marqués comme obligatoires. Enregistrez.</li>
+  <li>La fiche s'ouvre. Les sections sont à gauche : informations, documents, historique, et le métier de la fiche (paiements, affectations, pointages…).</li>
+  <li>Pour modifier : icône crayon. Pour supprimer : icône corbeille. Une suppression demande souvent un motif. Il reste dans l'historique.</li>
+  <li>Les actions de ligne (voir, valider, remplacer, supprimer) sont des <strong>icônes</strong>. Passez la souris dessus pour lire l'action.</li>
+</ol>
+<p>Chaque fiche qui a des pièces possède une <strong>checklist</strong> standard (comme un projet). Vous pouvez ensuite :</p>
+<ul>
+  <li>ajouter une ligne, la renommer, la rendre obligatoire ou facultative ;</li>
+  <li>déposer le fichier (bouton <strong>Ajouter</strong> : nom affiché, catégorie, échéance, frais du dossier, dates estimées) ;</li>
+  <li>voir le fichier, l'ouvrir, le valider, le refuser, le remplacer, changer l'échéance, ou retirer le fichier en gardant la ligne.</li>
+</ul>
+<p>Les autres fichiers, qui ne correspondent à aucune ligne, restent visibles dans la section des documents hors checklist.</p>
+
+<h2 id="intervenants">6. Les personnes</h2>
+<h3>Clients</h3>
+<ol class="steps">
+  <li>Intervenants → Clients → Ajouter.</li>
+  <li>Identité, téléphones, e-mail, CIN, classification (prospect, acheteur, locataire), source, agent.</li>
+  <li>Sur la fiche : ventes, locations, biens, paiements, mandants, agent, échanges, documents.</li>
+</ol>
+<p>Un client peut être lié à un mandant (celui qui agit pour lui) et à un agent commercial.</p>
+<h3>Mandants, agents, reconnus</h3>
+<ul>
+  <li><strong>Mandant</strong> — personne habilitée. On le rattache au client.</li>
+  <li><strong>Agent</strong> — commercial interne suivi sur les dossiers.</li>
+  <li><strong>Reconnu</strong> — personne de confiance utilisée sur les mouvements de caisse (qui a remis ou reçu l'argent).</li>
+</ul>
+<h3>Équipe interne</h3>
+<p>Le personnel de bureau (pas les ouvriers de chantier). Fiche, salaire mensuel, département, documents. Les virements se préparent dans Salaires.</p>
+<h3>Main-d'œuvre</h3>
+<ol class="steps">
+  <li>Créez l'ouvrier : nom, CIN, catégorie, groupe, contrat, salaire à la journée ou au mois, banque et RIB, déclaration CNSS.</li>
+  <li>Un ouvrier <strong>au mois</strong> n'entre pas dans le pointage journalier. Son salaire se traite à la période.</li>
+  <li>Un ouvrier <strong>à la journée</strong> se pointe sur le chantier.</li>
+  <li>Sur la fiche, les puces montrent le chantier et la tranche où il est affecté. Un clic ouvre l'affectation.</li>
+  <li>On y imprime la fiche, l'attestation, la fiche de paie, le <strong>bon d'affectation</strong> et le <strong>bon de transfert</strong>.</li>
+</ol>
+<h3>Chauffeurs</h3>
+<p>Même fiche que la main-d'œuvre, avec l'onglet véhicules : quel engin il conduit, et depuis quand.</p>
+
+<h2 id="immo">7. L'immobilier</h2>
+<h3>Projet</h3>
+<ol class="steps">
+  <li>Immobilier → Projets → Ajouter : nom, ville, adresse, dates.</li>
+  <li>Sur la fiche : tranches du programme, biens, ventes, locations, chantiers liés, documents.</li>
+  <li>En haut : <strong>Encaissé</strong> et <strong>Reste</strong> des ventes du projet.</li>
+</ol>
+<h3>Bien</h3>
+<ol class="steps">
+  <li>Créez le bien dans le projet : référence, nature, surface, prix, statut (disponible, réservé, vendu, loué).</li>
+  <li>Documents : titre, plan, photos.</li>
+  <li>Un bien vendu ou loué se suit depuis sa fiche et depuis la vente ou la location.</li>
+</ol>
+<h3>Vente</h3>
+<ol class="steps">
+  <li>Nouveau → Vente, ou depuis le bien. Choisissez le client et le bien.</li>
+  <li>Prix, remise, avance, type de contrat (compromis, vente…), dates de signature et numéros de légalisation.</li>
+  <li>La fiche montre le prix net, l'encaissé, le reste et la progression.</li>
+  <li><strong>Échéancier</strong> — créez les dates une par une, ou générez-les. Une échéance dépassée et non payée apparaît en rouge, et dans <strong>À traiter aujourd'hui</strong>.</li>
+  <li><strong>Paiements</strong> — enregistrez chaque encaissement (espèces, chèque, virement, banque). Le reçu s'imprime. Le reste diminue. Le mouvement part en caisse ou en banque selon le mode.</li>
+  <li>Quand tout est payé, la vente peut être soldée. Pour arrêter un dossier : Résilier, avec un motif.</li>
+</ol>
+<h3>Location</h3>
+<p>Même logique que la vente : bail, loyer, échéancier, encaissements mensuels, état des lieux dans les documents. Les loyers en retard sont aussi dans la liste du jour.</p>
+<div class="warn">N'encaissez pas une vente résiliée ou annulée. Le bouton Paiements disparaît dès que le dossier est fermé ou soldé.</div>
+
+<h2 id="chantier">8. Le chantier</h2>
+<h3>Créer le chantier</h3>
+<ol class="steps">
+  <li>Chantiers → Ajouter : nom, adresse, dates, chef, budget achats, photo, lien vers le projet s'il existe.</li>
+  <li>La vue d'ensemble montre l'avancement, les tranches, le personnel, le <strong>décaissé</strong> (achats, main-d'œuvre, engins) et le <strong>reste</strong> du budget.</li>
+  <li>Le menu <strong>Actions</strong> imprime la <strong>situation de travaux</strong> et la <strong>feuille de pointage</strong>.</li>
+</ol>
+<h3>Tranches</h3>
+<ol class="steps">
+  <li>Nouvelle tranche : nom, remarque, dates estimées.</li>
+  <li>Ouvrez une tranche. Son menu ne montre que ce qui la concerne.</li>
+  <li><strong>Ouvriers</strong> — seulement ceux affectés à cette tranche. On en ajoute directement dessus.</li>
+  <li><strong>Documents</strong> — les pièces de la tranche, séparées de celles du chantier entier.</li>
+  <li>Avancement, pointage, engins et achats de la tranche se consultent dans le même menu.</li>
+</ol>
+<h3>Ouvriers du chantier</h3>
+<p>Quatre volets : <strong>Affectation</strong>, <strong>Transfert</strong>, <strong>Pointage</strong>, <strong>Synthèse</strong>.</p>
+<ul>
+  <li><strong>Affecter</strong> — choisir l'ouvrier, la tranche (ou le chantier entier), la fonction. Enregistrez.</li>
+  <li><strong>Transférer</strong> — choisir l'ouvrier, le chantier de destination et la tranche. L'ancienne place est quittée. On ne peut pas le mettre deux fois au même endroit.</li>
+  <li><strong>Pointage</strong> — aperçu des journées du chantier, filtré par tranche et par dates. Le bouton ouvre la page Pointage déjà filtrée.</li>
+  <li><strong>Synthèse</strong> — jours, brut, acomptes, primes et reste par ouvrier.</li>
+</ul>
+<h3>Engins sur le chantier</h3>
+<p>On ne voit ici que les engins et matériels <strong>actuellement affectés</strong>, et le bouton pour une nouvelle affectation. Le calcul détaillé des coûts, les missions et l'historique restent dans le module Engins.</p>
+<p>À l'affectation, choisissez l'état :</p>
+<table>
+  <thead><tr><th>État</th><th>Sens</th><th>Dans le coût du chantier</th></tr></thead>
+  <tbody>
+    <tr><td>En exploitation</td><td>L'outil travaille</td><td>Oui. Le pointage du jour (8 h) est créé automatiquement.</td></tr>
+    <tr><td>En instance</td><td>Sur place, pas encore en service</td><td>Non</td></tr>
+    <tr><td>En panne</td><td>Arrêté pour défaut</td><td>Non</td></tr>
+    <tr><td>En réparation / en entretien</td><td>Au garage</td><td>Non</td></tr>
+    <tr><td>Disponible</td><td>Au parc, pas en production</td><td>Non</td></tr>
+  </tbody>
+</table>
+<p>Sur la fiche engin, une puce indique s'il est compté dans le coût. Le <strong>bon de sortie d'outil</strong> s'imprime depuis la fiche quand il est affecté.</p>
+<h3>Sous-traitants</h3>
+<ol class="steps">
+  <li>Sur le chantier, ouvrez Sous-traitants → Ajouter.</li>
+  <li>Société, corps d'état, téléphone, montant du marché.</li>
+  <li>Mettez à jour l'<strong>avancement</strong> (en %) et le <strong>montant déjà payé</strong>.</li>
+  <li>Le reste à payer se calcule. Les totaux du chantier sont au-dessus du tableau.</li>
+</ol>
+<h3>Galerie et caméras</h3>
+<p>La galerie reçoit les photos du chantier. Les caméras enregistrent un nom, une zone et un lien (image ou flux). Ce n'est pas un GPS : on consulte le lien saisi.</p>
+
+<h2 id="pointage">9. Le pointage</h2>
+<p>Un pointage est la journée d'un ouvrier sur un chantier, ou sur une tranche. Il n'y a qu'une ligne par ouvrier, par jour et par chantier.</p>
+<h3>Ouvrir la bonne feuille</h3>
+<ol class="steps">
+  <li>Pointage → onglet <strong>Gestion du pointage</strong>.</li>
+  <li>Choisissez le chantier, puis <strong>Chantier entier</strong> ou une tranche.</li>
+  <li>La liste des feuilles défile avec les flèches, ou par le menu (Pointage 12 — date — effectif).</li>
+  <li><strong>Du</strong> et <strong>Au</strong> ne gardent que les feuilles de la période. <strong>Date précise</strong> n'en garde qu'une. S'il n'y a rien ce jour-là, le message « Aucun pointage sur cette période » s'affiche.</li>
+  <li><strong>Nouveau pointage</strong> — date et remarque. On peut reprendre les ouvriers de la feuille précédente.</li>
+</ol>
+<div class="warn">On ne mélange pas, le même jour, une feuille « chantier entier » et une feuille de tranche. Choisissez l'un ou l'autre.</div>
+<h3>Saisir</h3>
+<ol class="steps">
+  <li>Les boutons sont <strong>au-dessus de la liste</strong> : Ajouter des ouvriers, Enregistrer tout, Valider le pointage.</li>
+  <li>La ligne « Appliquer à toutes les lignes non validées » est juste sous ces boutons : elle pose le même nombre de jours partout avant l'enregistrement.</li>
+  <li>Sur chaque ligne : jours, taux, avance, prime. Le brut et le net se calculent.</li>
+  <li><strong>Enregistrer tout</strong> garde le brouillon. <strong>Valider</strong> fige les lignes. On peut encore annuler la validation si une correction est nécessaire.</li>
+  <li>Retirer un ouvrier demande une confirmation. Supprimer toute la feuille demande un motif.</li>
+</ol>
+<h3>Les autres vues</h3>
+<ul>
+  <li><strong>Synthèse par ouvrier</strong> — totaux par personne, avec Du, Au ou date précise, et un filtre validé / en attente.</li>
+  <li><strong>Historique</strong> — toutes les lignes, tous chantiers, mêmes filtres de dates, export et impression.</li>
+  <li>Sur le chantier et sur la fiche ouvrier, les mêmes dates limitent ce qu'on voit.</li>
+</ul>
+<p>Imprimez la feuille depuis le bouton Imprimer. Les zones <strong>Établi par</strong>, <strong>Cachet et signature</strong> et <strong>Reçu par</strong> sont en bas de page.</p>
+
+<h2 id="achats">10. Les achats et les fournisseurs</h2>
+<h3>Fournisseur</h3>
+<p>Créez-le avant l'achat : raison sociale, ICE, RC, RIB, contacts, documents. Depuis un achat on peut aussi ouvrir sa fiche.</p>
+<h3>Deux sortes d'achats</h3>
+<table>
+  <thead><tr><th>Type</th><th>Effet</th></tr></thead>
+  <tbody>
+    <tr><td>Marchandises</td><td>Matériaux pour le chantier. On suit la commande, la livraison et le paiement.</td></tr>
+    <tr><td>Achat d'outils</td><td>Chaque ligne crée un matériel dans le parc. S'il est lié à un chantier, il est mis <strong>En exploitation</strong> et affecté. Sinon il reste <strong>Disponible</strong>.</td></tr>
+  </tbody>
+</table>
+<h3>Le circuit</h3>
+<p>Un achat avance étape par étape. On ne saute pas une étape.</p>
+<ol class="steps">
+  <li><strong>Élaboré</strong> — la demande est en préparation.</li>
+  <li><strong>Soumis</strong> — le bon de commande part au fournisseur.</li>
+  <li><strong>Livré</strong> — les quantités reçues et refusées sont saisies. Imprimez le bon de réception.</li>
+  <li><strong>Validé</strong> — la réception est acceptée.</li>
+  <li><strong>Facturé</strong> — une facture fournisseur est déposée dans les documents de l'achat.</li>
+  <li><strong>Payé</strong> — le reste à payer est à zéro. Le décaissement part en caisse ou en banque.</li>
+  <li><strong>Archivé</strong> — le dossier est clos.</li>
+</ol>
+<p>La date de livraison prévue, si elle est dépassée et que l'achat n'est pas livré, s'affiche en alerte sur la fiche et dans <strong>À traiter aujourd'hui</strong>.</p>
+<p>Sur le chantier, les boutons <strong>Achat de marchandises</strong> et <strong>Achat d'outils</strong> ouvrent le bon formulaire, déjà lié au chantier et à la tranche.</p>
+
+<h2 id="engins">11. Les engins et les matériels</h2>
+<p>Le module Engins &amp; Matériels est le parc. Le chantier n'en montre que l'affectation en cours.</p>
+<ul>
+  <li><strong>Tableau de bord</strong> — utilisation, immobilisation, coûts de la période (filtres Du / Au).</li>
+  <li><strong>Engins</strong> et <strong>Matériels</strong> — fiches : identité, immatriculation, mode (propriété ou location), compteur, papiers.</li>
+  <li><strong>Affectations</strong> — où est l'engin, pour quelle tranche, avec quel coût prévu. Transfert vers un autre chantier depuis le parc.</li>
+  <li><strong>Entretien et réparations</strong> — ordre d'entretien ou de réparation, puis remise en service.</li>
+  <li><strong>Coûts</strong> — carburant, dépenses, amortissement ou loyer, taux d'utilisation.</li>
+</ul>
+<p>Papiers suivis : assurance, vignette, contrôle technique, autorisation. S'il reste moins de 30 jours, ou si la date est passée, la fiche et la liste du jour le signalent.</p>
+<div class="tip">Le coût d'affectation n'entre dans le chantier que lorsque l'état est <strong>En exploitation</strong> (ou l'ancien libellé En utilisation).</div>
+
+<h2 id="argent">12. L'argent</h2>
+<table>
+  <thead><tr><th>Écran</th><th>Usage</th></tr></thead>
+  <tbody>
+    <tr><td>Encaissements</td><td>Tout ce qui est entré : ventes et locations. Reçu imprimable. Filtre Du / Au.</td></tr>
+    <tr><td>Décaissements</td><td>Sorties : achats, autres paiements.</td></tr>
+    <tr><td>Caisse</td><td>Mouvements du bureau, liés à un reconnu. Le reçu de caisse s'imprime ligne par ligne.</td></tr>
+    <tr><td>Balance</td><td>Journal banque et caisse : débit, crédit, solde. Pièce imprimable.</td></tr>
+    <tr><td>Comptabilité</td><td>Vue de la période pour le suivi comptable.</td></tr>
+    <tr><td>Salaires</td><td>Paie des ouvriers et de l'équipe interne, virements (RIB), états à valider.</td></tr>
+  </tbody>
+</table>
+<p>Sur un chantier, regardez la vue d'ensemble : <strong>Décaissé</strong> cumule achats, main-d'œuvre et engins en exploitation. <strong>Reste</strong> est ce qui reste du budget achats. Sur un projet, <strong>Encaissé</strong> et <strong>Reste</strong> concernent les ventes.</p>
+<div class="note">Un paiement de vente ou un paiement d'achat crée le mouvement d'argent. Évitez de le ressaisir à la main dans la balance, sauf opération hors dossier (apport, retrait, régularisation).</div>
+
+<h2 id="documents">13. Les documents</h2>
+<ol class="steps">
+  <li>Sur la fiche, ouvrez Documents.</li>
+  <li>La checklist rappelle ce qui est attendu. Une étoile marque l'obligatoire.</li>
+  <li>Ajouter : fichier, nom affiché, catégorie, échéance, frais, dates de début et de fin estimées.</li>
+  <li>Filtres de la liste : tout, manquant, déposé, en attente, refusé, expiré.</li>
+  <li>Icônes : voir, ouvrir la fiche document, valider, refuser, détacher, échéance, remplacer, obligatoire, renommer, supprimer la ligne.</li>
+</ol>
+<p>La page Documents rassemble toute la société : recherche, catégories, pièces qui expirent, dossiers en retard. Un document refusé ou expiré revient dans <strong>À traiter aujourd'hui</strong>, qui ouvre directement la bonne fiche.</p>
+
+<h2 id="imprimer">14. Imprimer</h2>
+<p>Le bouton imprimante ouvre une page avec l'en-tête de la société (logo, nom, coordonnées) puis le contenu. En bas des bons : trois cadres à signer sur place.</p>
+<table>
+  <thead><tr><th>Document</th><th>Où</th></tr></thead>
+  <tbody>
+    <tr><td>Fiche client, bien, chantier, ouvrier, engin, vente</td><td>Icône imprimer de la fiche</td></tr>
+    <tr><td>Bon d'affectation et bon de transfert</td><td>Fiche ouvrier, s'il est affecté</td></tr>
+    <tr><td>Feuille de pointage</td><td>Page Pointage, et menu Actions du chantier</td></tr>
+    <tr><td>Situation de travaux</td><td>Menu Actions du chantier</td></tr>
+    <tr><td>Bon de sortie d'outil</td><td>Fiche engin, s'il est sur un chantier</td></tr>
+    <tr><td>Bon de commande et bon de réception</td><td>Fiche achat</td></tr>
+    <tr><td>Reçu de vente</td><td>Fiche vente</td></tr>
+    <tr><td>Reçu de caisse</td><td>Chaque mouvement de caisse</td></tr>
+    <tr><td>Attestation et fiche de paie</td><td>Fiche ouvrier, documents générés</td></tr>
+  </tbody>
+</table>
+<p>Sur une liste, Imprimer reprend les lignes affichées (et les filtres en cours). CSV et Excel exportent la même sélection.</p>
+
+<h2 id="chercher">15. Chercher, filtrer, retrouver</h2>
+<ul>
+  <li><strong>Recherche du haut</strong> — nom, référence, CIN, immatriculation. Le résultat ouvre la fiche, pas seulement la liste.</li>
+  <li><strong>Recherche de la liste</strong> — filtre pendant que vous tapez (clients, chantiers, ouvriers, achats, ventes, etc.).</li>
+  <li><strong>Du / Au</strong> — période. Une seule des deux dates laisse l'autre côté ouvert. Une <strong>date précise</strong>, sur le pointage, ne garde que ce jour.</li>
+  <li><strong>Puces et menus Filtres</strong> — statut, type, chantier. Ils s'appliquent au choix.</li>
+  <li><strong>Retour depuis une fiche</strong> — la liste retrouve le filtre et la page.</li>
+  <li><strong>À traiter aujourd'hui</strong> — assurances, contrôles techniques, échéances impayées, livraisons en retard, documents refusés, expirés ou obligatoires manquants.</li>
+</ul>
+
+<h2 id="reglages">16. Réglages, utilisateurs, historique</h2>
+<h3>Paramètres</h3>
+<p>Identité de la société, logo, couleurs et pied de page des imprimés, langue (français / arabe). L'activité récente des utilisateurs se filtre par dates.</p>
+<h3>Référentiels</h3>
+<p>Ajoutez une valeur (par exemple une nouvelle source de client). Désactiver une valeur la retire des listes sans effacer l'historique.</p>
+<h3>Utilisateurs</h3>
+<ol class="steps">
+  <li>Paramètres → Utilisateurs → Ajouter.</li>
+  <li>Nom, e-mail, rôle, mot de passe initial.</li>
+  <li>Remettez les identifiants à la personne. Elle pourra changer son mot de passe.</li>
+  <li>Désactivez un compte qui ne doit plus entrer, plutôt que de le supprimer s'il a déjà travaillé.</li>
+</ol>
+<h3>Audit</h3>
+<p>Journal de qui a créé, modifié ou supprimé, avec la date et le motif lorsqu'il a été demandé. Filtrez par utilisateur, action et période. Réservé aux administrateurs.</p>
+
+<h2 id="jour">17. La journée type</h2>
+<h3>Le matin, au bureau</h3>
+<ol class="steps">
+  <li>Ouvrez le tableau de bord. Traitez <strong>À traiter aujourd'hui</strong> du haut vers le bas.</li>
+  <li>Vérifiez les encaissements de la veille et les achats à livrer.</li>
+  <li>Pour un nouveau dossier : client, bien, puis vente ou location, puis échéancier.</li>
+</ol>
+<h3>Sur le chantier</h3>
+<ol class="steps">
+  <li>Ouvrez le pointage du jour (date précise = aujourd'hui).</li>
+  <li>Ajoutez les présents, posez les jours, enregistrez, validez.</li>
+  <li>Affectez ou transférez un ouvrier ou un engin si l'équipe a changé.</li>
+  <li>Réceptionnez les marchandises (étape Livré de l'achat) et faites signer le bon.</li>
+  <li>Mettez à jour l'avancement de la tranche et, s'il y a lieu, le pourcentage du sous-traitant.</li>
+</ol>
+<h3>En fin de période</h3>
+<ol class="steps">
+  <li>Salaires : contrôlez les journées validées, les acomptes et les RIB, puis préparez les virements.</li>
+  <li>Situation de travaux : imprimez-la depuis le chantier et faites-la signer.</li>
+  <li>Archivez les achats soldés et les documents expirés une fois renouvelés.</li>
+</ol>
+
+<div class="note">
+  <strong>En cas de doute</strong>
+  <ul>
+    <li>Un bouton manque : votre rôle ne couvre pas cette action, ou l'étape précédente n'est pas faite (par exemple une facture absente bloque le passage à Facturé).</li>
+    <li>Une recherche ne trouve rien : au moins deux lettres, et le mot tel qu'il est sur la fiche (nom, référence, CIN).</li>
+    <li>Un pointage refuse la date : une feuille existe déjà ce jour-là pour ce chantier, ou vous mélangez chantier entier et tranche.</li>
+    <li>Un outil n'apparaît pas dans le coût : son état n'est pas En exploitation.</li>
+  </ul>
+</div>
+
+<p class="footer-note">GIC — Gestion immobilière et chantier. Guide destiné aux utilisateurs. Les écrans suivent le rôle du compte connecté.</p>
+</body>
+</html>

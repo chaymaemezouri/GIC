@@ -7,6 +7,7 @@ import { api, formatDate, fetchChantierList, uploadForm } from '../lib/api';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th, Select, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentAddButton } from '../components/DocumentAddButton';
 
 
 
@@ -294,12 +295,15 @@ export default function MissionDetailPage() {
           <div className="space-y-4 mt-1">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-[12px] text-gic-muted">{t('msg.missionDocsHint')}</p>
-              <label className="cursor-pointer">
-                <span className={`inline-flex items-center gap-2 rounded-lg border border-gic-border px-3 py-2 text-[12px] font-medium hover:bg-black/[0.03]${uploading ? ' opacity-60 pointer-events-none' : ''}`}>
-                  <Upload size={14} /> {uploading ? t('msg.uploading') : t('actions.addFile')}
-                </span>
-                <input type="file" className="hidden" onChange={onUpload} />
-              </label>
+              {id && (
+                <DocumentAddButton
+                  entityType="Mission"
+                  entityId={id}
+                  defaultCategory="mission"
+                  uploadPath={`/engins/missions/${id}/documents`}
+                  onUploaded={load}
+                />
+              )}
             </div>
             {docs.length === 0 ? (
               <p className="text-[12px] text-gic-muted">{t('msg.emptyAttachments')}</p>

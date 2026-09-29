@@ -2,7 +2,7 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Plus, Users, Truck, HardHat, Layers, ShoppingCart, Pencil, Trash2, Clock, ChevronRight,
+  Plus, Users, Truck, HardHat, Layers, ShoppingCart, Pencil, Trash2, Clock, ChevronRight, FileText,
 } from 'lucide-react';
 import { api, fetchSupplierList, formatDate, formatMad } from '../lib/api';
 import { chantierDateError } from './ChantierFormFields';
@@ -18,6 +18,8 @@ import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from '.
 import { EntityPickerPanel, enginToPickerItem } from './EntityPickerPanel';
 import { SiteEnginsPanel, type SiteEnginCosts } from './engins/SiteEngins';
 import { useI18n } from '../i18n/I18nContext';
+import { ChantierWorkersPanel } from './ChantierWorkersPanel';
+import { EntityDocChecklist } from './EntityDocChecklist';
 
 export type TrancheListItem = {
   id: string;
@@ -81,7 +83,7 @@ export type TrancheDetail = TrancheListItem & {
   }>;
 };
 
-type TrancheTab = 'avancement' | 'engins' | 'achats' | 'pointage';
+type TrancheTab = 'avancement' | 'ouvriers' | 'engins' | 'achats' | 'pointage' | 'documents';
 
 export function ChantierTranchesList({
   chantierId,
@@ -562,7 +564,7 @@ export function ChantierTrancheView({
     return (
       <div className="mt-4">
         <p className="text-[12px] text-gic-coral">{error}</p>
-        <PageBackLink onClick={onBack} className="mt-2" label={t('detail.backToTranches')} />
+        <PageBackLink onClick={onBack} className="mt-2" />
       </div>
     );
   }
@@ -573,9 +575,11 @@ export function ChantierTrancheView({
 
   const tabs: { id: TrancheTab; label: string; icon: typeof HardHat; badge?: number }[] = [
     { id: 'avancement', label: t('tabs.progress'), icon: HardHat, badge: detail.tasksCount },
+    { id: 'ouvriers', label: t('tabs.workers'), icon: Users, badge: detail.assignments.length || undefined },
     { id: 'pointage', label: t('tabs.attendance'), icon: Clock, badge: detail.workersCount },
     { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: detail.enginCosts?.byEngin?.length || detail.missionsCount },
     { id: 'achats', label: t('tabs.purchases'), icon: ShoppingCart, badge: detail.purchasesCount },
+    { id: 'documents', label: t('tabs.documents'), icon: FileText },
   ];
 
   return (
@@ -584,7 +588,6 @@ export function ChantierTrancheView({
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <PageBackLink
             onClick={onBack}
-            label={t('detail.backToTranches')}
             iconOnly={false}
             className="mac-page-back-labeled"
           />
@@ -756,6 +759,24 @@ export function ChantierTrancheView({
             </div>
           )}
         </div>
+      )}
+
+      {tab === 'documents' && (
+        <EntityDocChecklist
+          entityType="chantier-tranche"
+          entityId={detail.id}
+          extra={{ chantierId }}
+        />
+      )}
+
+      {tab === 'ouvriers' && (
+        <ChantierWorkersPanel
+          chantierId={chantierId}
+          assignments={detail.assignments}
+          tranches={[detail.name]}
+          fixedTranche={detail.name}
+          onChanged={load}
+        />
       )}
 
       {tab === 'engins' && (

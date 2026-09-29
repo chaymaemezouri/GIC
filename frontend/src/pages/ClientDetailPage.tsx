@@ -17,6 +17,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 
 import { ClientFormFields, clientToForm, type ClientFormData } from '../components/ClientFormFields';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { MandantLinkPicker } from '../components/MandantLinkPicker';
@@ -921,7 +922,9 @@ export default function ClientDetailPage() {
           </div>
         )}
 
-        {tab === 'documents' && (
+        {tab === 'documents' && id && (
+          <div className="space-y-3">
+          <EntityDocChecklist entityType="client" entityId={id} extra={{ clientId: id }} />
           <div className="space-y-3">
             <label className="mac-upload-btn">
               <Upload size={14} /> {t('actions.uploadIdentityDoc')}
@@ -975,6 +978,7 @@ export default function ClientDetailPage() {
                 <p className="text-[12px] text-gic-muted py-6 text-center">{t('msg.emptyDocuments')}</p>
               )}
             </div>
+          </div>
           </div>
         )}
 

@@ -14,6 +14,7 @@ import {
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { fileUrl } from '../lib/documentDisplay';
 
@@ -558,6 +559,7 @@ export default function BienDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-4 mt-1">
+            {id && <EntityDocChecklist entityType="property" entityId={id} extra={{ propertyId: id }} />}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-[12px] text-gic-muted">Titres fonciers, plans, photos, contrats…</p>
               <label className="cursor-pointer">

@@ -15,6 +15,7 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { AgentFormFields, emptyAgentForm, agentToForm, type AgentFormData } from '../components/AgentFormFields';
 import MacProfilePhoto from '../components/MacProfilePhoto';
@@ -330,6 +331,7 @@ export default function AgentDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
+            {id && <EntityDocChecklist entityType="agent" entityId={id} />}
             <label className="mac-upload-btn">
               <Upload size={14} /> {t('actions.addDocument')}
               <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />

@@ -15,6 +15,7 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { MandantFormFields, emptyMandantForm, mandantToForm, type MandantFormData } from '../components/MandantFormFields';
 import MacProfilePhoto from '../components/MacProfilePhoto';
@@ -322,6 +323,7 @@ export default function MandantDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
+            {id && <EntityDocChecklist entityType="mandant" entityId={id} />}
             <label className="mac-upload-btn">
               <Upload size={14} /> {t('actions.uploadIdentityDoc')}
               <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />

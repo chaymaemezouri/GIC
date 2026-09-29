@@ -6,11 +6,17 @@ export const ENGIN_STATUSES = [
   'disponible',
   'affecte',
   'en_utilisation',
+  'en_exploitation',
+  'en_instance',
+  'en_panne',
   'en_maintenance',
   'en_reparation',
   'hors_service',
   'restitue',
 ] as const;
+
+/** Seuls ces états imputent le coût d'affectation au chantier (pointage d'exploitation). */
+export const COSTING_SITE_STATUSES = ['en_exploitation', 'en_utilisation'] as const;
 export const RENTAL_UNITS = ['jour', 'semaine', 'mois', 'projet', 'tranche'] as const;
 export const COST_METHODS = ['journalier', 'horaire', 'forfait'] as const;
 export const DEPRECIATION_METHODS = ['lineaire', 'degressif'] as const;
@@ -43,7 +49,7 @@ export const COST_CATEGORIES = ['amortissement', 'location', 'entretien', 'repar
 export type CostCategory = (typeof COST_CATEGORIES)[number];
 
 /** Statuts pilotés par l'atelier ou l'utilisateur : jamais écrasés par les affectations. */
-const LOCKED_STATUSES = ['en_maintenance', 'en_reparation', 'hors_service'];
+const LOCKED_STATUSES = ['en_exploitation', 'en_instance', 'en_panne', 'en_maintenance', 'en_reparation', 'hors_service'];
 
 const DAY = 86_400_000;
 
@@ -500,7 +506,9 @@ export function buildCostLines(engins: FullEngin[], filters: CostFilters, refs: 
     const label = enginLabel(e);
     const base = { enginId: e.id, enginLabel: label, enginKind: e.kind, mode: e.ownershipType === 'loue' ? 'location' : 'propriete' };
 
+    const imputesAssignment = (COSTING_SITE_STATUSES as readonly string[]).includes(e.status);
     for (const a of e.assignments) {
+      if (!imputesAssignment) continue;
       const hours = e.usages
         .filter((u) => u.assignmentId === a.id && inWindow(u.date, filters.from, filters.to) && utcDay(u.date) <= asOf)
         .reduce((s, u) => s + Number(u.hours || 0), 0);
@@ -654,6 +662,34 @@ export async function computeEnginCosts(filters: CostFilters) {
   const [engins, refs] = await Promise.all([loadFullEngins(filters), loadCostRefs()]);
   const lines = buildCostLines(engins, filters, refs);
   return { lines, ...summarizeCostLines(lines) };
+}
+
+/** Pointage du jour si l'outil est en exploitation : une journée de 8 h sur l'affectation. */
+export async function ensureExploitationUsage(assignment: {
+  id: string;
+  enginId: string;
+  chantierId: string | null;
+  tranche: string | null;
+}) {
+  const engin = await prisma.engin.findUnique({ where: { id: assignment.enginId }, select: { status: true } });
+  if (engin?.status !== 'en_exploitation' || !assignment.chantierId) return;
+  const date = todayUtc();
+  const existing = await prisma.enginUsage.findFirst({
+    where: { assignmentId: assignment.id, date },
+    select: { id: true },
+  });
+  if (existing) return;
+  await prisma.enginUsage.create({
+    data: {
+      enginId: assignment.enginId,
+      assignmentId: assignment.id,
+      date,
+      chantierId: assignment.chantierId,
+      tranche: assignment.tranche,
+      hours: 8,
+      remark: 'Pointage automatique — en exploitation',
+    },
+  });
 }
 
 /** Total Engins & Matériels imputé à un chantier (et ventilé par tranche). */

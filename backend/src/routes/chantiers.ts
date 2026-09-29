@@ -2441,6 +2441,9 @@ router.post('/:id/assign', async (req, res) => {
   const worker = await prisma.workforce.findUnique({ where: { id: workforceId } });
   if (!worker) return res.status(404).json({ message: 'Ouvrier introuvable' });
 
+  const existing = await prisma.workforceAssignment.findFirst({ where: { workforceId, chantierId } });
+  if (existing) return res.status(400).json({ message: 'Ouvrier déjà affecté à ce chantier' });
+
   const tranche = req.body.tranche ? String(req.body.tranche).trim() : null;
   const assignment = await prisma.workforceAssignment.create({
     data: {
@@ -2453,6 +2456,67 @@ router.post('/:id/assign', async (req, res) => {
   });
   await audit(req, 'affectation', 'Chantier', chantierId, `${worker.firstName} ${worker.lastName}`);
   res.status(201).json(assignment);
+});
+
+router.put('/:id/assign/:assignmentId', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const assignmentId = String(req.params.assignmentId);
+  const assignment = await prisma.workforceAssignment.findFirst({
+    where: { id: assignmentId, chantierId },
+    include: { workforce: { select: { firstName: true, lastName: true } } },
+  });
+  if (!assignment) return res.status(404).json({ message: 'Affectation introuvable' });
+
+  const data: { tranche?: string | null; functionRole?: string | null } = {};
+  if ('tranche' in req.body) data.tranche = req.body.tranche ? String(req.body.tranche).trim() : null;
+  if ('functionRole' in req.body) data.functionRole = req.body.functionRole ? String(req.body.functionRole).trim() : null;
+  const updated = await prisma.workforceAssignment.update({
+    where: { id: assignmentId },
+    data,
+    include: { workforce: true },
+  });
+  await audit(
+    req,
+    'affectation',
+    'Chantier',
+    chantierId,
+    `${assignment.workforce.firstName} ${assignment.workforce.lastName}${data.tranche ? ` — ${data.tranche}` : ''}`
+  );
+  res.json(updated);
+});
+
+router.post('/:id/assign/:assignmentId/transfer', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const assignmentId = String(req.params.assignmentId);
+  const assignment = await prisma.workforceAssignment.findFirst({
+    where: { id: assignmentId, chantierId },
+    include: { workforce: { select: { id: true, firstName: true, lastName: true } } },
+  });
+  if (!assignment) return res.status(404).json({ message: 'Affectation introuvable' });
+
+  const destId = String(req.body.chantierId || chantierId).trim();
+  const dest = await prisma.chantier.findUnique({ where: { id: destId }, select: { id: true, name: true } });
+  if (!dest) return res.status(404).json({ message: 'Chantier de destination introuvable' });
+  const tranche = req.body.tranche ? String(req.body.tranche).trim() : null;
+
+  const duplicate = await prisma.workforceAssignment.findFirst({
+    where: { workforceId: assignment.workforceId, chantierId: destId, NOT: { id: assignmentId } },
+  });
+  if (duplicate) return res.status(400).json({ message: 'Ouvrier déjà affecté au chantier de destination' });
+
+  const updated = await prisma.workforceAssignment.update({
+    where: { id: assignmentId },
+    data: { chantierId: destId, tranche },
+    include: { workforce: true, chantier: { select: { id: true, name: true } } },
+  });
+  await audit(
+    req,
+    'affectation',
+    'Chantier',
+    destId,
+    `${assignment.workforce.firstName} ${assignment.workforce.lastName} → ${dest.name}${tranche ? ` — ${tranche}` : ''}`,
+  );
+  res.json(updated);
 });
 
 router.delete('/:id/assign/:assignmentId', async (req, res) => {
@@ -2681,6 +2745,8 @@ router.post('/:id/subcontractors', async (req, res) => {
       corpsEtat: req.body.corpsEtat ? String(req.body.corpsEtat).trim() : null,
       phone: req.body.phone ? String(req.body.phone).trim() : null,
       amount: req.body.amount != null ? Number(req.body.amount) : null,
+      progressPct: req.body.progressPct != null ? Number(req.body.progressPct) : 0,
+      paidAmount: req.body.paidAmount != null ? Number(req.body.paidAmount) : 0,
       status: req.body.status || 'actif',
       remark: req.body.remark ? String(req.body.remark).trim() : null,
     },
@@ -2700,6 +2766,8 @@ router.put('/:id/subcontractors/:subId', async (req, res) => {
       corpsEtat: req.body.corpsEtat !== undefined ? (req.body.corpsEtat ? String(req.body.corpsEtat).trim() : null) : undefined,
       phone: req.body.phone !== undefined ? (req.body.phone ? String(req.body.phone).trim() : null) : undefined,
       amount: req.body.amount !== undefined ? (req.body.amount ? Number(req.body.amount) : null) : undefined,
+      progressPct: req.body.progressPct !== undefined ? Number(req.body.progressPct) : undefined,
+      paidAmount: req.body.paidAmount !== undefined ? Number(req.body.paidAmount) : undefined,
       status: req.body.status != null ? String(req.body.status) : undefined,
       remark: req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark).trim() : null) : undefined,
     },

@@ -6,7 +6,9 @@ import { removeAutomaticMovement, syncEnginExpenseMovement, syncFuelMovement } f
 import { userDisplayName } from '../lib/purchaseWorkflow.js';
 import {
   COST_METHODS,
+  ENGIN_STATUSES,
   EXPENSE_CATEGORIES,
+  ensureExploitationUsage,
   assignmentCostInWindow,
   assignmentStatus,
   buildCostLines,
@@ -299,7 +301,12 @@ router.post('/assignments', async (req, res) => {
   if (isAssignmentActive(created)) {
     await prisma.engin.update({ where: { id: engin.id }, data: { location: locationLabel(chantier?.name, input.tranche) || engin.location } });
   }
+  const siteStatus = text(req.body.siteStatus);
+  if (siteStatus && (ENGIN_STATUSES as readonly string[]).includes(siteStatus)) {
+    await prisma.engin.update({ where: { id: engin.id }, data: { status: siteStatus } });
+  }
   await refreshEnginStatus(engin.id);
+  await ensureExploitationUsage(created);
   await audit(req, 'affectation', 'EnginAssignment', created.id, `${enginLabel(engin)} → ${locationLabel(chantier?.name, input.tranche) || 'projet'}`);
   res.status(201).json(serializeAssignment(created));
 });
@@ -339,6 +346,56 @@ router.put('/assignments/:id', async (req, res) => {
   const updated = await prisma.enginAssignment.update({ where: { id }, data, include: assignmentInclude });
   await refreshEnginStatus(existing.enginId);
   await audit(req, 'modification', 'EnginAssignment', id, updated.engin ? enginLabel(updated.engin) : id);
+  const shares = await expenseSharesByAssignment([existing.enginId]);
+  res.json(serializeAssignment(updated, shares.get(id) || 0));
+});
+
+/** Déplace une affectation vers un autre chantier ou une autre tranche, et fixe l'état de l'outil. */
+router.post('/assignments/:id/transfer', async (req, res) => {
+  const id = String(req.params.id);
+  const existing = await prisma.enginAssignment.findUnique({ where: { id }, include: { engin: true, chantier: { select: { name: true } } } });
+  if (!existing) return fail(res, 'Affectation introuvable', 404);
+  if (existing.returnedAt) return fail(res, 'Affectation déjà clôturée');
+
+  const chantierId = text(req.body.chantierId) || existing.chantierId;
+  const tranche = req.body.tranche !== undefined ? text(req.body.tranche) : existing.tranche;
+  const siteStatus = text(req.body.siteStatus);
+  const input: AssignmentInput = {
+    enginId: existing.enginId,
+    chantierId,
+    projectId: existing.projectId,
+    tranche,
+    startDate: existing.startDate,
+    endDate: existing.endDate,
+  };
+  const v = await validateAssignment(input, id);
+  if ('error' in v) return fail(res, v.error!);
+
+  const updated = await prisma.enginAssignment.update({
+    where: { id },
+    data: {
+      chantierId: input.chantierId,
+      projectId: v.chantier?.projectId || input.projectId,
+      tranche: input.tranche,
+    },
+    include: assignmentInclude,
+  });
+  if (siteStatus && (ENGIN_STATUSES as readonly string[]).includes(siteStatus)) {
+    await prisma.engin.update({
+      where: { id: existing.enginId },
+      data: { status: siteStatus, location: locationLabel(v.chantier?.name, input.tranche) || existing.engin.location },
+    });
+  } else if (isAssignmentActive(updated)) {
+    await prisma.engin.update({
+      where: { id: existing.enginId },
+      data: { location: locationLabel(v.chantier?.name, input.tranche) || existing.engin.location },
+    });
+  }
+  await refreshEnginStatus(existing.enginId);
+  await ensureExploitationUsage(updated);
+  const from = locationLabel(existing.chantier?.name, existing.tranche) || '—';
+  const to = locationLabel(v.chantier?.name, input.tranche) || '—';
+  await audit(req, 'affectation', 'EnginAssignment', id, `${enginLabel(existing.engin)} : ${from} → ${to}`);
   const shares = await expenseSharesByAssignment([existing.enginId]);
   res.json(serializeAssignment(updated, shares.get(id) || 0));
 });

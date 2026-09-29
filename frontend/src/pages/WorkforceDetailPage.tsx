@@ -1,4 +1,5 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { printStandardTable } from '../lib/standardPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -7,6 +8,7 @@ import { api, formatDate, formatMad, openPrintUrl, uploadDocument, uploadForm } 
 import { Btn, Card, KpiCard, MacActionBtn, MacDateInput, MacSelect, Modal, StatusPill, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
@@ -232,6 +234,37 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
     </body></html>`, { grid: true }) });
   }
 
+  function printAffectation() {
+    if (!worker) return;
+    const rows = (worker.assignments || []).map((a: { tranche?: string | null; functionRole?: string | null; chantier?: { name: string } }) => [
+      a.chantier?.name || '—',
+      a.tranche || t('siteOps.currentPlace'),
+      a.functionRole || worker.category || '—',
+    ]);
+    printStandardTable(
+      t('siteOps.bonAffectation'),
+      `${worker.firstName} ${worker.lastName} · ${worker.cin || worker.reference || ''}`,
+      [t('fields.chantier'), t('fields.tranche'), t('fields.function')],
+      rows,
+    );
+  }
+
+  function printTransfert() {
+    if (!worker) return;
+    const rows = (worker.assignments || []).map((a: { tranche?: string | null; chantier?: { name: string } }) => [
+      a.chantier?.name || '—',
+      a.tranche || '—',
+      '',
+      '',
+    ]);
+    printStandardTable(
+      t('siteOps.bonTransfert'),
+      `${worker.firstName} ${worker.lastName}`,
+      [t('siteOps.currentPlace'), t('fields.tranche'), t('siteOps.destination'), t('fields.date')],
+      rows,
+    );
+  }
+
   if (!worker && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
 
   if (error && !worker) {
@@ -320,6 +353,12 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
               <Btn variant="secondary" icon={Clock}>{t('tabs.attendance')}</Btn>
             </Link>
           )}
+          {(worker.assignments || []).length > 0 && (
+            <>
+              <Btn variant="secondary" icon={Printer} onClick={printAffectation}>{t('siteOps.bonAffectation')}</Btn>
+              <Btn variant="secondary" icon={Printer} onClick={printTransfert}>{t('siteOps.bonTransfert')}</Btn>
+            </>
+          )}
           <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
@@ -395,7 +434,17 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
       >
 
         {tab === 'infos' && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 text-[12px] mt-1">
+          <div className="mt-1">
+          {(worker.assignments || []).length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {worker.assignments.map((a: { id: string; tranche?: string | null; chantier?: { id: string; name: string } }) => (
+                <Link key={a.id} to={a.chantier ? `/chantiers/${a.chantier.id}?tab=ouvriers` : '/main-oeuvre'} className="mac-chip mac-chip-blue">
+                  {a.chantier?.name || '—'}{a.tranche ? ` — ${a.tranche}` : ''}
+                </Link>
+              ))}
+            </div>
+          )}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 text-[12px]">
             <Info icon={Hash} label={t('fields.reference')} value={worker.reference || '—'} />
             <Info icon={Hash} label={t('fields.cin')} value={worker.cin || '—'} />
             <Info icon={Calendar} label={t('fields.birthDate')} value={formatDate(worker.birthDate)} />
@@ -425,6 +474,7 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
               <Info icon={MapPin} label={t('fields.address')} value={worker.address} className="sm:col-span-2 lg:col-span-3" />
             )}
           </div>
+          </div>
         )}
 
         {tab === 'vehicules' && isChauffeur && (
@@ -435,8 +485,14 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
           <div className="mt-1">
             <div className="flex flex-wrap justify-between items-end gap-3 mb-3">
               <div className="flex flex-wrap items-end gap-2">
-                <MacDateInput label={t('fields.from')} value={pointageFrom} onChange={setPointageFrom} />
-                <MacDateInput label={t('fields.to')} value={pointageTo} onChange={setPointageTo} />
+                <MacDateInput label={t('fields.from')} value={pointageFrom} onChange={setPointageFrom}  onSubmit={loadPointages}/>
+                <MacDateInput label={t('fields.to')} value={pointageTo} onChange={setPointageTo}  onSubmit={loadPointages}/>
+                <MacDateInput
+                  label={t('pointageMgmt.preciseDate')}
+                  value={pointageFrom && pointageFrom === pointageTo ? pointageFrom : ''}
+                  onChange={(value) => { setPointageFrom(value); setPointageTo(value); }}
+                  onSubmit={loadPointages}
+                />
                 <Btn variant="secondary" onClick={loadPointages}>{t('common.filter')}</Btn>
               </div>
               <Link to={`/pointage?workforceId=${id}`}>
@@ -446,7 +502,12 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
             {pointageLoading ? (
               <p className="text-[12px] text-gic-muted py-4">{t('common.loading')}</p>
             ) : pointages.length === 0 ? (
-              <p className="text-[12px] text-gic-muted py-4">{t('msg.emptyPointageOnPeriod')}</p>
+              <div className="py-4 text-center">
+                <p className="text-[12px] text-gic-muted">{t('msg.emptyPointageOnPeriod')}</p>
+                <Link to={`/pointage?workforceId=${id}`} className="inline-block mt-3">
+                  <Btn icon={Clock}>{t('actions.goAttendance')}</Btn>
+                </Link>
+              </div>
             ) : (
               <TableWrap mac>
                 <thead>
@@ -547,6 +608,7 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
 
         {tab === 'documents' && (
           <div className="space-y-5 mt-1">
+            {id && <EntityDocChecklist entityType="workforce" entityId={id} />}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-[12px] text-gic-muted">{t('msg.documentsInternalGenerated')}</p>
               <label className="mac-upload-btn">

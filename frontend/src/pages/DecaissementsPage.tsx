@@ -648,8 +648,8 @@ export default function DecaissementsPage() {
               onSubmit={() => { setPage(1); load(1); }}
               placeholder={t('common.searchEllipsis')}
             />
-            <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
-            <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0" />
+            <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
+            <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
             <Btn variant="secondary" onClick={() => { setPage(1); load(1); }}>{t('common.filter')}</Btn>
             {category === 'main_oeuvre' && (
               <Btn variant="secondary" onClick={() => navigate('/salaires?type=main_oeuvre')}>{t('actions.manageWorkforcePayroll')}</Btn>

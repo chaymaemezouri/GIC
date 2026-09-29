@@ -643,8 +643,8 @@ function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
               />
               {tab === 'missions' && (
                 <>
-                  <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('fields.from')} className="w-36 shrink-0" />
-                  <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('fields.to')} className="w-36 shrink-0" />
+                  <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('fields.from')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
+                  <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('fields.to')} className="w-36 shrink-0"  onSubmit={() => { setPage(1); load(1); }}/>
                   <MacSelect
                     value={enginFilter}
                     onChange={setEnginFilter}

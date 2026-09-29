@@ -10,7 +10,7 @@ import {
   api, downloadCsv, downloadExcel, fetchChantierList, fetchWorkforceList, formatDate, formatMad, type PaginatedResponse,
 } from '../lib/api';
 import {
-  Btn, Card, EmptyState, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
+  Btn, Card, EmptyState, KpiCard, MacActionBtn, MacDateInput, MacSelect,
   Modal, PageHeader, Pagination, StatusPill, TableWrap, MacToolbarTabs, Td, Th,
 } from '../components/ui';
 import {
@@ -39,12 +39,10 @@ type Pointage = {
   chantier?: { id: string; name: string } | null;
 };
 
-type MatrixWorker = { id: string; firstName: string; lastName: string; reference?: string; category?: string };
-
 type Stats = { total: number; validated: number; pending: number; totalDays: number; advances: number; bonuses: number; estimatedCost: number };
 
-type Tab = 'gestion' | 'synthese' | 'matrice' | 'historique';
-const TABS: Tab[] = ['gestion', 'synthese', 'matrice', 'historique'];
+type Tab = 'gestion' | 'synthese' | 'historique';
+const TABS: Tab[] = ['gestion', 'synthese', 'historique'];
 type SortOrder = 'asc' | 'desc';
 type PointageRowEdit = { days: string; dayRate: string; advance: string; bonus: string };
 
@@ -55,10 +53,6 @@ const DAY_STEP = 0.125;
 
 function formatDays(n: number) {
   return Number.isFinite(n) ? String(Math.round(n * 1000) / 1000) : '0';
-}
-
-function cellKey(workforceId: string, chantierId: string) {
-  return `${workforceId}:${chantierId}`;
 }
 
 function cellInputClass(locked: boolean, width = 'w-16') {
@@ -96,23 +90,18 @@ export default function PointagePage() {
     const urlTab = searchParams.get('tab') as Tab | null;
     if (urlTab && TABS.includes(urlTab)) return urlTab;
     if (searchParams.get('workforceId')) return 'historique';
-    if (searchParams.get('view') === 'matrice') return 'matrice';
     return 'gestion';
   });
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date] = useState(new Date().toISOString().slice(0, 10));
   const [chantierId, setChantierId] = useState(searchParams.get('chantierId') || '');
   const [trancheFilter, setTrancheFilter] = useState(searchParams.get('tranche') || '');
   const [chantiers, setChantiers] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [workforce, setWorkforce] = useState<any[]>([]);
   const [pointages, setPointages] = useState<Pointage[]>([]);
-  const [workerQ, setWorkerQ] = useState('');
   const [dayStats, setDayStats] = useState<Stats>({ total: 0, validated: 0, pending: 0, totalDays: 0, advances: 0, bonuses: 0, estimatedCost: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
-  /** Chantiers visibles en colonnes (matrice) — vide = tous actifs */
-  const [matrixChantierIds, setMatrixChantierIds] = useState<string[]>([]);
-  const [matrixDrafts, setMatrixDrafts] = useState<Record<string, string>>({});
 
   // Historique
   const [histItems, setHistItems] = useState<Pointage[]>([]);
@@ -141,8 +130,6 @@ export default function PointagePage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteMotif, setDeleteMotif] = useState('');
   const histSelection = useRowSelection<Pointage>();
-  const matrixSelection = useRowSelection<MatrixWorker>();
-
   useEffect(() => {
     fetchChantierList<{ id: string; name: string; status?: string }>().then(setChantiers);
   }, []);
@@ -188,8 +175,8 @@ export default function PointagePage() {
     if (tab === 'historique') return;
     const qs = new URLSearchParams();
     qs.set('tab', tab);
-    if (tab !== 'matrice' && chantierId) qs.set('chantierId', chantierId);
-    if (tab !== 'matrice' && chantierId && trancheFilter) qs.set('tranche', trancheFilter);
+    if (chantierId) qs.set('chantierId', chantierId);
+    if (chantierId && trancheFilter) qs.set('tranche', trancheFilter);
     if (isChauffeur) qs.set('scope', 'chauffeur');
     setSearchParams(qs, { replace: true });
   }, [tab, chantierId, trancheFilter, isChauffeur, setSearchParams]);
@@ -222,7 +209,6 @@ export default function PointagePage() {
       .then(([pts, st]) => {
         setPointages(pts);
         setDayStats(st);
-        setMatrixDrafts({});
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
       .finally(() => setLoading(false));
@@ -246,10 +232,7 @@ export default function PointagePage() {
 
   function buildExportQuery() {
     const qs = new URLSearchParams();
-    if (tab === 'matrice') {
-      qs.set('dateFrom', date);
-      qs.set('dateTo', date);
-    } else if (tab === 'gestion' || tab === 'synthese') {
+    if (tab === 'gestion' || tab === 'synthese') {
       if (chantierId) qs.set('chantierId', chantierId);
       if (chantierId && trancheFilter) qs.set('tranche', trancheFilter);
     } else {
@@ -282,10 +265,6 @@ export default function PointagePage() {
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
       .finally(() => setLoading(false));
   }
-
-  useEffect(() => {
-    if (tab === 'matrice') loadDay();
-  }, [date, tab]);
 
   useEffect(() => {
     if (tab === 'historique') loadHistory(histPage);
@@ -388,68 +367,6 @@ export default function PointagePage() {
     }
   }
 
-  function matrixPointage(workforceId: string, cid: string) {
-    return pointages.find((p) => p.workforceId === workforceId && p.chantier?.id === cid);
-  }
-
-  function matrixCellValue(workforceId: string, cid: string) {
-    const key = cellKey(workforceId, cid);
-    if (matrixDrafts[key] !== undefined) return matrixDrafts[key];
-    const p = matrixPointage(workforceId, cid);
-    return p != null ? formatDays(p.dayValue) : '';
-  }
-
-  function setMatrixCell(workforceId: string, cid: string, value: string) {
-    setMatrixDrafts((prev) => ({ ...prev, [cellKey(workforceId, cid)]: value }));
-  }
-
-  async function saveMatrixCell(workforceId: string, cid: string) {
-    const key = cellKey(workforceId, cid);
-    const raw = matrixDrafts[key];
-    if (raw === undefined) return;
-    const dayValue = Number(raw);
-    if (!Number.isFinite(dayValue) || dayValue < 0) {
-      await appAlert(t('msg.invalidDayValue'));
-      return;
-    }
-    const existing = matrixPointage(workforceId, cid);
-    // Cellule vide / 0 sans pointage existant → rien à créer
-    if (!existing && dayValue === 0 && raw.trim() === '') {
-      setMatrixDrafts((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-      return;
-    }
-    setSaving(key);
-    try {
-      await api('/chantiers/pointage', {
-        method: 'POST',
-        body: JSON.stringify({
-          date,
-          workforceId,
-          chantierId: cid,
-          dayValue,
-          advance: existing?.advance ?? 0,
-          bonus: existing?.bonus ?? 0,
-          validated: existing?.validated ?? false,
-          dayRate: existing?.dayRate ?? null,
-        }),
-      });
-      setMatrixDrafts((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-      loadDay();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSaving(null);
-    }
-  }
-
   function exportCsv() {
     downloadCsv(`/chantiers/pointage/export/csv?${buildExportQuery()}`, 'pointage-gic.csv');
   }
@@ -501,58 +418,9 @@ export default function PointagePage() {
     });
   }
 
-  function printMatrix() {
-    const cellDays = (w: MatrixWorker, cid: string) => {
-      const v = Number(matrixCellValue(w.id, cid));
-      return Number.isFinite(v) ? v : 0;
-    };
-    const rowTotal = (w: MatrixWorker) => matrixColumns.reduce((s, c) => s + cellDays(w, c.id), 0);
-    printRows<MatrixWorker>({
-      title: `${t('pages.attendance')} — ${t('tabs.matrixMultiSite')}`,
-      subtitle: isChauffeur ? t('pages.drivers') : t('pages.workforce'),
-      filters: [
-        [t('common.date'), formatDate(date)],
-        [t('listPrint.search'), workerQ],
-        [t('columns.chantier'), matrixChantierIds.length > 0 ? matrixColumns.map((c) => c.name).join(', ') : t('msg.allSites')],
-      ],
-      columns: [
-        { label: t('columns.worker'), value: (w) => `${workerLabel(w)}${w.category ? ` (${w.category})` : ''}` },
-        ...matrixColumns.map((c) => ({
-          label: c.name,
-          value: (w: MatrixWorker) => matrixCellValue(w.id, c.id),
-          align: 'center' as const,
-          total: (rows: MatrixWorker[]) => formatDays(rows.reduce((s, w) => s + cellDays(w, c.id), 0)),
-        })),
-        { label: t('columns.totalDays'), value: (w) => rowTotal(w).toFixed(3), align: 'right', total: (rows) => rows.reduce((s, w) => s + rowTotal(w), 0).toFixed(3) },
-      ],
-      rows: matrixSelection.count ? matrixSelection.rows : matrixWorkers,
-      selectedCount: matrixSelection.count,
-    });
-  }
-
   function printList() {
-    if (tab === 'historique') printHistory();
-    else printMatrix();
+    printHistory();
   }
-
-
-  const matrixWorkers = workforce.filter((w) => {
-    if (String(w.salaryPeriod || '').toLowerCase() === 'mois') return false;
-    if (!workerQ) return true;
-    const s = workerQ.toLowerCase();
-    return `${w.firstName} ${w.lastName}`.toLowerCase().includes(s)
-      || (w.category || '').toLowerCase().includes(s)
-      || (w.reference || '').toLowerCase().includes(s);
-  });
-
-  const activeChantiers = chantiers.filter(
-    (c) => !c.status || String(c.status).toLowerCase() === 'actif',
-  );
-  const matrixColumns = (
-    matrixChantierIds.length > 0
-      ? activeChantiers.filter((c) => matrixChantierIds.includes(c.id))
-      : activeChantiers
-  );
 
   const stats = tab === 'historique' ? histStats : dayStats;
 
@@ -567,26 +435,13 @@ export default function PointagePage() {
   const activeChantierId = tab === 'historique' ? histChantier : chantierId;
   const activeTranche = tab === 'historique' ? histTranche : trancheFilter;
   const activeChantierName = chantiers.find((c) => c.id === activeChantierId)?.name;
-  const pageSubtitle = tab === 'matrice'
-    ? t('pages.attendanceMatrixSubtitle', { step: DAY_STEP })
-    : isChauffeur
+  const pageSubtitle = isChauffeur
       ? (activeChantierName
         ? `${t('pages.drivers')} · ${activeChantierName}${activeTranche ? ` · ${activeTranche}` : ''}`
         : t('pages.attendanceDriversSubtitle'))
       : (activeChantierName
         ? `${activeChantierName}${activeTranche ? ` · ${activeTranche}` : ` · ${t('msg.allTranches')}`}`
         : t('pages.attendanceSubtitle'));
-
-  function toggleMatrixChantier(id: string) {
-    setMatrixChantierIds((prev) => {
-      // Premier clic depuis « tous » : partir de la liste complète puis retirer
-      const base = prev.length === 0 ? activeChantiers.map((c) => c.id) : prev;
-      const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
-      // Tous sélectionnés → sentinel vide (= tous)
-      if (next.length === activeChantiers.length) return [];
-      return next;
-    });
-  }
 
   return (
     <div className="space-y-0">
@@ -600,7 +455,7 @@ export default function PointagePage() {
             <Link to={isChauffeur ? '/salaires?type=chauffeur' : '/salaires?type=main_oeuvre'}><Btn variant="secondary" icon={Wallet}>{t('pages.salaries')}</Btn></Link>
             <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>
             <Btn variant="secondary" icon={Download} onClick={exportExcel}>{t('common.excel')}</Btn>
-            {(tab === 'matrice' || tab === 'historique') && (
+            {tab === 'historique' && (
               <div className="mac-action-group">
                 <MacActionBtn
                   icon={Printer}
@@ -614,7 +469,7 @@ export default function PointagePage() {
         }
       />
 
-      {(tab === 'matrice' || tab === 'historique') && (
+      {tab === 'historique' && (
       <div className="mac-kpi-grid mac-kpi-grid-4">
         <KpiCard title={t('columns.attendanceCount')} value={stats.total} icon={Clock} tone="violet" />
         <KpiCard title={t('columns.validated')} value={stats.validated} icon={CheckCircle} tone="emerald" delta={t('msg.pendingCount', { count: stats.pending })} deltaTone="muted" />
@@ -651,7 +506,6 @@ export default function PointagePage() {
           viewTabs={[
             { id: 'gestion', label: t('actions.enterAttendance') },
             { id: 'synthese', label: t('pointageMgmt.byWorkerTab') },
-            { id: 'matrice', label: t('tabs.matrixMultiSite') },
             { id: 'historique', label: t('tabs.history') },
           ]}
           view={tab}
@@ -696,135 +550,21 @@ export default function PointagePage() {
         />
       )}
 
-      {tab === 'matrice' && (
-        <>
-          <div className="mac-filters-panel">
-            <div className="mac-filters-row mac-filters-row-between">
-              <div className="mac-filters-toolbar">
-                <MacSearch
-                  value={workerQ}
-                  onChange={setWorkerQ}
-                  placeholder={isChauffeur ? t('msg.searchDriver') : t('msg.searchWorker')}
-                />
-                <MacDateInput value={date} onChange={setDate} placeholder={t('common.date')} className="w-36 shrink-0" />
-                <span className="text-[11px] text-gic-muted shrink-0">
-                  {t('msg.matrixColumnsHint', { count: matrixColumns.length })}
-                </span>
-              </div>
-              <div className="mac-filters-actions">
-                <Btn variant="secondary" onClick={() => setMatrixChantierIds([])}>
-                  {t('msg.allSites')}
-                </Btn>
-              </div>
-            </div>
-            {activeChantiers.length > 0 && (
-              <div className="flex flex-wrap gap-2 px-1 pb-2">
-                {activeChantiers.map((c) => {
-                  const selected = matrixChantierIds.length === 0 || matrixChantierIds.includes(c.id);
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => toggleMatrixChantier(c.id)}
-                      className={`rounded-lg border px-2.5 py-1 text-[11px] transition-colors ${
-                        selected
-                          ? 'border-[#007aff]/50 bg-[#007aff]/10 text-[#007aff]'
-                          : 'border-gic-border bg-white text-gic-muted'
-                      }`}
-                    >
-                      {c.name}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <SelectionBar selection={matrixSelection} onPrint={printMatrix} />
-
-          <Card padding={false}>
-            {loading ? (
-              <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
-            ) : matrixWorkers.length === 0 ? (
-              <EmptyState title={t('msg.emptyWorkersNonMonthly')} />
-            ) : matrixColumns.length === 0 ? (
-              <EmptyState title={t('msg.emptyActiveSites')} />
-            ) : (
-              <div className="overflow-x-auto mac-table-scroll">
-                <table className="mac-table">
-                  <thead>
-                    <tr>
-                      <SelectAllTh selection={matrixSelection} rows={matrixWorkers as MatrixWorker[]} />
-                      <Th mac className="sticky left-0 z-10 bg-[#f5f5f7]">{t('columns.worker')}</Th>
-                      {matrixColumns.map((c) => (
-                        <Th mac key={c.id} className="min-w-[5.5rem] text-center">
-                          <span className="block max-w-[7rem] truncate" title={c.name}>{c.name}</span>
-                        </Th>
-                      ))}
-                      <Th mac className="text-center">{t('columns.totalDays')}</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {matrixWorkers.map((w) => {
-                      const rowTotal = matrixColumns.reduce((sum, c) => {
-                        const v = Number(matrixCellValue(w.id, c.id));
-                        return sum + (Number.isFinite(v) ? v : 0);
-                      }, 0);
-                      return (
-                        <tr key={w.id}>
-                          <SelectTd selection={matrixSelection} row={w as MatrixWorker} />
-                          <Td mac className="sticky left-0 z-10 bg-white">
-                            <Link to={workforceDetailPathForCategory(w.category, w.id)} className="mac-table-ref">
-                              {w.reference ? `${w.reference} — ` : ''}{w.firstName} {w.lastName}
-                            </Link>
-                            {w.category && <span className="block text-[10px] text-gic-muted">{w.category}</span>}
-                          </Td>
-                          {matrixColumns.map((c) => {
-                            const key = cellKey(w.id, c.id);
-                            const existing = matrixPointage(w.id, c.id);
-                            const locked = !!existing?.validated;
-                            const dirty = matrixDrafts[key] !== undefined;
-                            return (
-                              <Td mac key={c.id} className="text-center">
-                                <input
-                                  className={`${cellInputClass(locked, 'w-14')} text-center mx-auto${dirty ? ' ring-1 ring-[#007aff]/50' : ''}`}
-                                  type="number"
-                                  min={0}
-                                  step={DAY_STEP}
-                                  readOnly={locked}
-                                  value={matrixCellValue(w.id, c.id)}
-                                  onChange={(e) => setMatrixCell(w.id, c.id, e.target.value)}
-                                  onBlur={() => { if (!locked) void saveMatrixCell(w.id, c.id); }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !locked) {
-                                      e.currentTarget.blur();
-                                    }
-                                  }}
-                                  disabled={saving === key}
-                                  title={locked ? t('msg.lockedViaHistory') : t('msg.daysStepTitle')}
-                                />
-                              </Td>
-                            );
-                          })}
-                          <Td mac className="mac-table-muted text-center">{rowTotal.toFixed(3)}</Td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-        </>
-      )}
 
       {tab === 'historique' && (
         <>
           <div className={`mac-filters-panel${showFilters ? ' mac-filters-panel-open' : ''}`}>
             <div className="mac-filters-row">
               <div className="mac-filters-toolbar">
-                <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
-                <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0" />
+                <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0"  onSubmit={() => { setHistPage(1); loadHistory(1); }}/>
+                <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0"  onSubmit={() => { setHistPage(1); loadHistory(1); }}/>
+                <MacDateInput
+                  value={dateFrom && dateFrom === dateTo ? dateFrom : ''}
+                  onChange={(value) => { setDateFrom(value); setDateTo(value); }}
+                  onSubmit={() => { setHistPage(1); loadHistory(1); }}
+                  placeholder={t('pointageMgmt.preciseDate')}
+                  className="w-36 shrink-0"
+                />
                 <MacSelect
                   value={histChantier}
                   onChange={(v) => {
