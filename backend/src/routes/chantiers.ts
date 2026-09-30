@@ -598,6 +598,20 @@ async function pointageTrancheClause(chantierId: string, tranche: string) {
   return { tranche: name };
 }
 
+function workforceCategoryClause(category?: string, excludeCategory?: string) {
+  const cat = String(category || '').trim();
+  const exclude = String(excludeCategory || '').trim();
+  if (cat) return { workforce: { category: cat } };
+  if (exclude) {
+    return {
+      workforce: {
+        OR: [{ category: null }, { category: '' }, { category: { not: exclude } }],
+      },
+    };
+  }
+  return null;
+}
+
 async function buildPointageWhere(query: {
   dateFrom?: string | null;
   dateTo?: string | null;
@@ -605,12 +619,15 @@ async function buildPointageWhere(query: {
   workforceId?: string;
   validated?: string;
   tranche?: string;
+  category?: string;
+  excludeCategory?: string;
 }) {
   const { from, to } = parseDateRange(query.dateFrom || undefined, query.dateTo || undefined);
   const chantierId = String(query.chantierId || '');
   const workforceId = String(query.workforceId || '');
   const validated = String(query.validated || '');
   const trancheClause = await pointageTrancheClause(chantierId, String(query.tranche || ''));
+  const categoryClause = workforceCategoryClause(query.category, query.excludeCategory);
 
   const AND: object[] = [
     from || to
@@ -624,6 +641,7 @@ async function buildPointageWhere(query: {
     chantierId ? { chantierId } : {},
     workforceId ? { workforceId } : {},
     ...(trancheClause ? [trancheClause] : []),
+    ...(categoryClause ? [categoryClause] : []),
     validated === 'true' ? { validated: true } : validated === 'false' ? { validated: false } : {},
   ].filter((clause) => Object.keys(clause).length > 0);
 
@@ -654,6 +672,18 @@ function computeSalary(
 }
 
 /** Paie au mois = hors pointage (salaire fixe). */
+function paymentInstant(value: unknown) {
+  const raw = String(value || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return new Date();
+  const [year, month, day] = raw.split('-').map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+}
+
+function pointageTrancheMatch(tranche: string) {
+  if (!tranche) return { OR: [{ tranche: null }, { tranche: '' }] };
+  return { tranche };
+}
+
 function isMonthlyWorkforce(w: { salaryPeriod?: string | null; contractType?: string | null }) {
   return String(w.salaryPeriod || '').toLowerCase() === 'mois';
 }
@@ -741,11 +771,13 @@ async function getSalaryRows(
 
   if (!workers.length) return [];
 
+  const workerIds = workers.map((w) => w.id);
   const [pointages, payrollRecords] = await Promise.all([
     prisma.pointage.findMany({
       where: {
-        workforceId: { in: workers.map((w) => w.id) },
+        workforceId: { in: workerIds },
         validated: true,
+        ...(chantierId ? { chantierId } : {}),
         ...(from || to
           ? {
               date: {
@@ -758,7 +790,7 @@ async function getSalaryRows(
     }),
     prisma.workforcePayrollRecord.findMany({
       where: {
-        workforceId: { in: workers.map((w) => w.id) },
+        workforceId: { in: workerIds },
         periodYear: py,
         periodMonth: pm,
       },
@@ -771,14 +803,24 @@ async function getSalaryRows(
     list.push(p);
     byWorker.set(p.workforceId, list);
   }
-  const payrollByWorker = new Map(payrollRecords.map((r) => [r.workforceId, r]));
+  const payrollByWorker = new Map<string, typeof payrollRecords>();
+  for (const record of payrollRecords) {
+    const list = payrollByWorker.get(record.workforceId) || [];
+    list.push(record);
+    payrollByWorker.set(record.workforceId, list);
+  }
 
   return workers.map((w) => {
     const computed = computeWorkerPeriodSalary(w, byWorker.get(w.id) || []);
-    const payroll = payrollByWorker.get(w.id);
+    const records = payrollByWorker.get(w.id) || [];
+    const siteKey = chantierId && !isMonthlyWorkforce(w) ? chantierId : '';
+    const matched = chantierId
+      ? records.filter((r) => r.chantierId === siteKey)
+      : records;
+    const amountPaid = matched.reduce((s, r) => s + r.amountPaid, 0);
+    const payroll = matched.find((r) => r.chantierId === siteKey) || matched[0];
     const netDue = computed.net;
-    const amountPaid = payroll?.amountPaid ?? 0;
-    const remaining = payroll ? payroll.remaining : Math.max(0, netDue - amountPaid);
+    const remaining = Math.max(0, netDue - amountPaid);
     let status = 'none';
     if (netDue > 0) {
       if (remaining <= 0) status = 'paid';
@@ -916,6 +958,7 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
   const amount = Number(req.body.amount);
   const paymentMode = String(req.body.paymentMode || 'especes');
   const remark = req.body.remark ? String(req.body.remark) : null;
+  const requestedSite = String(req.body.chantierId || '').trim();
 
   if (!Number.isFinite(amount) || amount <= 0) {
     return res.status(400).json({ message: 'Montant invalide' });
@@ -924,11 +967,20 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
   const worker = await prisma.workforce.findUnique({ where: { id: workforceId } });
   if (!worker) return res.status(404).json({ message: 'Ouvrier introuvable' });
 
+  const siteKey = requestedSite && !isMonthlyWorkforce(worker) ? requestedSite : '';
+  const trancheSpecified = Object.prototype.hasOwnProperty.call(req.body, 'tranche');
+  const trancheKey = siteKey && trancheSpecified ? String(req.body.tranche || '').trim() : '';
   const periodStart = new Date(periodYear, periodMonth - 1, 1);
   const periodEnd = new Date(periodYear, periodMonth, 0, 23, 59, 59, 999);
 
   const pointages = await prisma.pointage.findMany({
-    where: { workforceId, validated: true, date: { gte: periodStart, lte: periodEnd } },
+    where: {
+      workforceId,
+      validated: true,
+      date: { gte: periodStart, lte: periodEnd },
+      ...(siteKey ? { chantierId: siteKey } : {}),
+      ...(siteKey && trancheSpecified ? pointageTrancheMatch(trancheKey) : {}),
+    },
   });
   const computed = computeWorkerPeriodSalary(worker, pointages);
   const netDue = computed.net;
@@ -937,26 +989,43 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
     return res.status(400).json({ message: 'Aucun salaire dû pour cette période' });
   }
 
-  const existing = await prisma.workforcePayrollRecord.findUnique({
-    where: { workforceId_periodYear_periodMonth: { workforceId, periodYear, periodMonth } },
+  const periodRecords = await prisma.workforcePayrollRecord.findMany({
+    where: { workforceId, periodYear, periodMonth },
   });
+  const existing = periodRecords.find((r) => r.chantierId === siteKey && String(r.tranche || '') === trancheKey);
+  const paidElsewhere = periodRecords
+    .filter((r) => r.chantierId !== siteKey)
+    .reduce((s, r) => s + r.amountPaid, 0);
   const prevPaid = existing?.amountPaid ?? 0;
   const amountPaid = prevPaid + amount;
-  if (amountPaid > netDue + 0.01) {
+  const cap = siteKey ? netDue : Math.max(0, netDue - paidElsewhere);
+  if (amountPaid > cap + 0.01) {
     return res.status(400).json({
-      message: `Montant supérieur au net dû (${netDue.toLocaleString('fr-MA')} MAD, reste ${Math.max(0, netDue - prevPaid).toLocaleString('fr-MA')} MAD)`,
+      message: `Montant supérieur au net dû (${netDue.toLocaleString('fr-MA')} MAD, reste ${Math.max(0, cap - prevPaid).toLocaleString('fr-MA')} MAD)`,
     });
   }
 
-  const remaining = Math.max(0, netDue - amountPaid);
+  const remaining = siteKey
+    ? Math.max(0, netDue - amountPaid)
+    : Math.max(0, netDue - amountPaid - paidElsewhere);
   const status = remaining <= 0 ? 'paid' : 'partial';
   const reference = existing?.reference || (await nextReference('MO'));
 
   const record = await prisma.workforcePayrollRecord.upsert({
-    where: { workforceId_periodYear_periodMonth: { workforceId, periodYear, periodMonth } },
+    where: {
+      workforceId_periodYear_periodMonth_chantierId_tranche: {
+        workforceId,
+        periodYear,
+        periodMonth,
+        chantierId: siteKey,
+        tranche: trancheKey,
+      },
+    },
     create: {
       reference,
       workforceId,
+      chantierId: siteKey,
+      tranche: trancheKey,
       periodYear,
       periodMonth,
       brut: computed.brut,
@@ -967,7 +1036,7 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
       remaining,
       paymentMode,
       status,
-      paidAt: new Date(),
+      paidAt: paymentInstant(req.body.paidAt),
       remark,
     },
     update: {
@@ -979,7 +1048,7 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
       remaining,
       paymentMode,
       status,
-      paidAt: new Date(),
+      paidAt: paymentInstant(req.body.paidAt),
       ...(remark != null ? { remark } : {}),
     },
     include: { workforce: { select: { firstName: true, lastName: true, reference: true } } },
@@ -995,6 +1064,228 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
   );
 
   res.json(record);
+});
+
+router.get('/:id/payroll-lines', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const dateFrom = String(req.query.dateFrom || '');
+  const dateTo = String(req.query.dateTo || '');
+  const category = String(req.query.category || '').trim();
+  const excludeCategory = String(req.query.excludeCategory || '').trim();
+  const { from, to } = parseDateRange(dateFrom, dateTo);
+  const py = from ? from.getFullYear() : new Date().getFullYear();
+  const pm = from ? from.getMonth() + 1 : new Date().getMonth() + 1;
+
+  const chantier = await prisma.chantier.findUnique({
+    where: { id: chantierId },
+    select: { id: true, name: true },
+  });
+  if (!chantier) return res.status(404).json({ message: 'Chantier introuvable' });
+
+  const categoryWhere = category
+    ? { category }
+    : excludeCategory
+      ? { OR: [{ category: null }, { category: '' }, { category: { not: excludeCategory } }] }
+      : {};
+
+  const [pointages, assignments] = await Promise.all([
+    prisma.pointage.findMany({
+      where: {
+        chantierId,
+        validated: true,
+        ...(from || to
+          ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
+          : {}),
+        workforce: categoryWhere,
+      },
+      include: {
+        session: { select: { remark: true } },
+        workforce: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            category: true,
+            dailySalary: true,
+            monthlySalary: true,
+            salaryPeriod: true,
+            contractType: true,
+          },
+        },
+      },
+    }),
+    prisma.workforceAssignment.findMany({
+      where: { chantierId },
+      select: { workforceId: true, tranche: true, functionRole: true },
+    }),
+  ]);
+
+  function taskFor(workforceId: string, tranche: string, category: string | null) {
+    const rows = assignments.filter((row) => row.workforceId === workforceId);
+    const exact = rows.find((row) => String(row.tranche || '') === tranche && row.functionRole);
+    const any = rows.find((row) => row.functionRole);
+    return exact?.functionRole || any?.functionRole || category || '';
+  }
+
+  type DayLine = {
+    id: string;
+    date: Date;
+    tranche: string;
+    task: string;
+    remark: string;
+    days: number;
+    hours: number;
+    rate: number;
+    brut: number;
+    advance: number;
+    bonus: number;
+    net: number;
+  };
+  type Bucket = {
+    workforceId: string;
+    firstName: string;
+    lastName: string;
+    category: string | null;
+    monthly: boolean;
+    tranche: string;
+    task: string;
+    totalDays: number;
+    advances: number;
+    bonuses: number;
+    brut: number;
+    days: DayLine[];
+  };
+  const buckets = new Map<string, Bucket>();
+  for (const p of pointages) {
+    if (isMonthlyWorkforce(p.workforce)) continue;
+    const tranche = String(p.tranche || '');
+    const key = `${p.workforceId}::${tranche}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        workforceId: p.workforce.id,
+        firstName: p.workforce.firstName,
+        lastName: p.workforce.lastName,
+        category: p.workforce.category,
+        monthly: false,
+        tranche,
+        task: taskFor(p.workforce.id, tranche, p.workforce.category),
+        totalDays: 0,
+        advances: 0,
+        bonuses: 0,
+        brut: 0,
+        days: [],
+      };
+      buckets.set(key, bucket);
+    }
+    const rate = pointageRate(p, p.workforce.dailySalary || 0);
+    const brut = pointageBrut(p, p.workforce.dailySalary || 0);
+    bucket.totalDays += p.totalDay;
+    bucket.advances += p.advance;
+    bucket.bonuses += p.bonus;
+    bucket.brut += brut;
+    bucket.days.push({
+      id: p.id,
+      date: p.date,
+      tranche,
+      task: bucket.task,
+      remark: p.session?.remark || '',
+      days: p.totalDay,
+      hours: p.hours,
+      rate,
+      brut,
+      advance: p.advance,
+      bonus: p.bonus,
+      net: brut + p.bonus - p.advance,
+    });
+  }
+
+  const monthlyWorkers = await prisma.workforce.findMany({
+    where: {
+      salaryPeriod: 'mois',
+      assignments: { some: { chantierId } },
+      ...categoryWhere,
+    },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      category: true,
+      monthlySalary: true,
+    },
+  });
+  for (const w of monthlyWorkers) {
+    const key = `${w.id}::`;
+    if (buckets.has(key)) continue;
+    buckets.set(key, {
+      workforceId: w.id,
+      firstName: w.firstName,
+      lastName: w.lastName,
+      category: w.category,
+      monthly: true,
+      tranche: '',
+      task: taskFor(w.id, '', w.category),
+      totalDays: 0,
+      advances: 0,
+      bonuses: 0,
+      brut: Number(w.monthlySalary) || 0,
+      days: [],
+    });
+  }
+
+  const ids = [...new Set([...buckets.values()].map((b) => b.workforceId))];
+  const records = ids.length
+    ? await prisma.workforcePayrollRecord.findMany({
+        where: { workforceId: { in: ids }, periodYear: py, periodMonth: pm },
+      })
+    : [];
+
+  const lines = [...buckets.values()]
+    .map((b) => {
+      const netDue = b.brut + b.bonuses - b.advances;
+      const record = records.find((r) => (
+        r.workforceId === b.workforceId
+        && r.chantierId === (b.monthly ? '' : chantierId)
+        && String(r.tranche || '') === (b.monthly ? '' : b.tranche)
+      ));
+      const paid = record?.amountPaid ?? 0;
+      const remaining = Math.max(0, netDue - paid);
+      const status = netDue <= 0 ? 'none' : remaining <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
+      return {
+        id: `${b.workforceId}::${b.tranche}`,
+        workforceId: b.workforceId,
+        firstName: b.firstName,
+        lastName: b.lastName,
+        category: b.category,
+        monthly: b.monthly,
+        chantierName: chantier.name,
+        tranche: b.tranche,
+        task: b.task,
+        totalDays: b.totalDays,
+        advances: b.advances,
+        netDue,
+        amountPaid: paid,
+        remaining,
+        status,
+        paymentMode: record?.paymentMode || null,
+        paidAt: record?.paidAt || null,
+        days: b.days
+          .slice()
+          .sort((a, c) => c.date.getTime() - a.date.getTime()),
+      };
+    })
+    .sort((a, b) => a.lastName.localeCompare(b.lastName, 'fr') || a.tranche.localeCompare(b.tranche, 'fr'));
+
+  const totals = lines.reduce(
+    (s, line) => ({
+      totalDays: s.totalDays + line.totalDays,
+      advances: s.advances + line.advances,
+      remaining: s.remaining + line.remaining,
+    }),
+    { totalDays: 0, advances: 0, remaining: 0 },
+  );
+
+  res.json({ periodYear: py, periodMonth: pm, lines, totals });
 });
 
 router.get('/salaries/:workforceId', async (req, res) => {
@@ -1243,6 +1534,114 @@ router.get('/pointage/sessions', async (req, res) => {
   );
 });
 
+function coversPointageDay(
+  assignment: { startDate: Date; endDate: Date | null; suspendedFrom: Date | null; suspendedUntil: Date | null },
+  day: Date,
+) {
+  const start = new Date(assignment.startDate);
+  start.setHours(0, 0, 0, 0);
+  if (start > day) return false;
+  if (assignment.endDate) {
+    const end = new Date(assignment.endDate);
+    end.setHours(23, 59, 59, 999);
+    if (end < day) return false;
+  }
+  if (assignment.suspendedFrom) {
+    const from = new Date(assignment.suspendedFrom);
+    from.setHours(0, 0, 0, 0);
+    const until = assignment.suspendedUntil ? new Date(assignment.suspendedUntil) : null;
+    if (until) until.setHours(23, 59, 59, 999);
+    if (day >= from && (!until || day <= until)) return false;
+  }
+  return true;
+}
+
+/** Crée le pointage du jour, s'il manque, et y ajoute les ouvriers affectés à cette date. */
+router.post('/pointage/sessions/ensure', async (req, res) => {
+  const chantierId = String(req.body.chantierId || '').trim();
+  if (!chantierId || !req.body.date) return res.status(400).json({ message: 'Chantier et date requis' });
+  let date: Date;
+  try {
+    date = parsePointageDate(String(req.body.date));
+  } catch {
+    return res.status(400).json({ message: 'Date invalide' });
+  }
+  const category = String(req.body.category || '').trim();
+  const excludeCategory = String(req.body.excludeCategory || '').trim();
+  const trancheSpecified = Object.prototype.hasOwnProperty.call(req.body, 'tranche');
+  const onlyTranche = trancheSpecified ? normalizeTranche(req.body.tranche) : null;
+
+  const assignments = await prisma.workforceAssignment.findMany({
+    where: {
+      chantierId,
+      workforce: {
+        isActive: true,
+        ...(category ? { category } : {}),
+        ...(excludeCategory
+          ? { OR: [{ category: null }, { category: '' }, { category: { not: excludeCategory } }] }
+          : {}),
+      },
+    },
+    include: { workforce: { select: { id: true, dailySalary: true, salaryPeriod: true, contractType: true } } },
+  });
+  const active = assignments.filter((row) => coversPointageDay(row, date) && !isMonthlyWorkforce(row.workforce));
+  const byTranche = new Map<string, typeof active>();
+  for (const row of active) {
+    const name = String(row.tranche || '').trim();
+    const list = byTranche.get(name) || [];
+    list.push(row);
+    byTranche.set(name, list);
+  }
+
+  const targets = onlyTranche != null
+    ? [onlyTranche]
+    : [...byTranche.keys()].filter((name) => name || ![...byTranche.keys()].some(Boolean));
+
+  let primaryId: string | null = null;
+  for (const tranche of targets) {
+    const workers = byTranche.get(tranche) || [];
+    let session = await prisma.pointageSession.findFirst({ where: { chantierId, tranche, date } });
+    if (!session) {
+      const conflict = await findSessionConflict(chantierId, tranche, date);
+      if (conflict) {
+        if (!primaryId) primaryId = conflict.existingId;
+        continue;
+      }
+      if (!workers.length && trancheSpecified) continue;
+      if (!workers.length) continue;
+      session = await prisma.pointageSession.create({
+        data: { chantierId, tranche, date },
+      });
+    }
+    const already = new Set(
+      (await prisma.pointage.findMany({
+        where: { chantierId, date },
+        select: { workforceId: true },
+      })).map((row) => row.workforceId),
+    );
+    for (const row of workers) {
+      if (already.has(row.workforceId)) continue;
+      await prisma.pointage.create({
+        data: {
+          date,
+          workforceId: row.workforceId,
+          chantierId,
+          sessionId: session.id,
+          tranche: tranche || null,
+          dayValue: 1,
+          hours: 8,
+          totalDay: 1,
+          dayRate: row.workforce.dailySalary > 0 ? row.workforce.dailySalary : null,
+        },
+      });
+      already.add(row.workforceId);
+    }
+    primaryId = session.id;
+  }
+
+  res.json({ id: primaryId });
+});
+
 router.get('/pointage/sessions/:id', async (req, res) => {
   const detail = await sessionDetail(String(req.params.id));
   if (!detail) return res.status(404).json({ message: 'Pointage introuvable' });
@@ -1447,6 +1846,8 @@ router.get('/pointage/by-worker', async (req, res) => {
     chantierId: String(req.query.chantierId || ''),
     validated: String(req.query.validated || ''),
     tranche: String(req.query.tranche || ''),
+    category: String(req.query.category || ''),
+    excludeCategory: String(req.query.excludeCategory || ''),
   });
   const rows = await prisma.pointage.findMany({
     where,
@@ -1561,6 +1962,8 @@ router.get('/pointage', async (req, res) => {
     workforceId: String(req.query.workforceId || ''),
     validated: String(req.query.validated || ''),
     tranche: String(req.query.tranche || ''),
+    category: String(req.query.category || ''),
+    excludeCategory: String(req.query.excludeCategory || ''),
   });
 
   const orderBy =

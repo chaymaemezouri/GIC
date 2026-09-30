@@ -157,7 +157,7 @@ async function seedWorkforcePayrollBatch(
 
     const record = await prisma.workforcePayrollRecord.upsert({
       where: {
-        workforceId_periodYear_periodMonth: { workforceId: w.id, periodYear: opts.periodYear, periodMonth: opts.periodMonth },
+        workforceId_periodYear_periodMonth_chantierId_tranche: { workforceId: w.id, periodYear: opts.periodYear, periodMonth: opts.periodMonth, chantierId: '', tranche: '' },
       },
       update: {
         reference: ref,
@@ -288,7 +288,7 @@ async function seedFinanceLedger() {
 
     const record = await prisma.workforcePayrollRecord.upsert({
       where: {
-        workforceId_periodYear_periodMonth: { workforceId: w.id, periodYear: prevYear, periodMonth: prevMonth },
+        workforceId_periodYear_periodMonth_chantierId_tranche: { workforceId: w.id, periodYear: prevYear, periodMonth: prevMonth, chantierId: '', tranche: '' },
       },
       update: {
         reference: `MO-${prevYear}${pad(prevMonth, 2)}-${payrollRefSuffix(w.id)}`,
@@ -1289,10 +1289,12 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     const brut = worker.monthlySalary || 5000;
     await prisma.workforcePayrollRecord.upsert({
       where: {
-        workforceId_periodYear_periodMonth: {
+        workforceId_periodYear_periodMonth_chantierId_tranche: {
           workforceId: wid,
           periodYear,
           periodMonth,
+          chantierId: '',
+          tranche: '',
         },
       },
       update: {
@@ -1392,7 +1394,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     const brut = worker.monthlySalary || 6500;
     await prisma.workforcePayrollRecord.upsert({
       where: {
-        workforceId_periodYear_periodMonth: { workforceId: wid, periodYear, periodMonth },
+        workforceId_periodYear_periodMonth_chantierId_tranche: { workforceId: wid, periodYear, periodMonth, chantierId: '', tranche: '' },
       },
       update: {
         brut,

@@ -513,10 +513,14 @@ model WorkforcePayrollRecord {
   status      String    @default("pending")
   paidAt      DateTime?
   remark      String?
+  /// "" = paie globale (mensuel ou écran salaires). Sinon paie de ce chantier.
+  chantierId  String    @default("")
+  /// "" = chantier entier. Sinon le nom de la tranche.
+  tranche     String    @default("")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@unique([workforceId, periodYear, periodMonth])
+  @@unique([workforceId, periodYear, periodMonth, chantierId, tranche])
 }
 
 model Supplier {

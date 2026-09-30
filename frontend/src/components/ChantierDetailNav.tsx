@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  LayoutDashboard, Info, Layers, Clock, ShoppingCart, Briefcase,
+  LayoutDashboard, Info, Layers, ShoppingCart, Briefcase,
   Images, FileText, Video, History, Truck, Users, Car,
 } from 'lucide-react';
 import DetailSectionNav, { type DetailNavGroup } from './DetailSectionNav';
@@ -53,7 +53,6 @@ export function buildChantierNavGroups(
         { id: 'tranches', label: t('tabs.tranches'), icon: Layers, badge: counts.tranches || undefined },
         { id: 'ouvriers', label: t('tabs.workers'), icon: Users, badge: counts.workers || undefined },
         { id: 'chauffeurs', label: t('pages.drivers'), icon: Car, badge: counts.drivers || undefined },
-        { id: 'pointage', label: t('tabs.attendance'), icon: Clock },
         { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: counts.engins || undefined },
       ],
     },

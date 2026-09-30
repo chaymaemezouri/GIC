@@ -25,7 +25,7 @@ import {
 import ChantierOverviewPanel, { type ChantierOverview } from '../components/ChantierOverview';
 import ChantierDetailNav, { buildChantierNavGroups, type ChantierTab } from '../components/ChantierDetailNav';
 import { ChantierSubcontractorsPanel } from '../components/ChantierExtraPanels';
-import { ChantierPointagePanel, ChantierWorkersHub } from '../components/ChantierWorkersHub';
+import { ChantierWorkersHub } from '../components/ChantierWorkersHub';
 import { CHAUFFEUR_CATEGORY } from '../lib/workforceScope';
 import {
   ChantierTranchesList, ChantierTrancheView, type TrancheListItem,
@@ -164,7 +164,7 @@ export default function ChantierDetailPage() {
   useEffect(() => {
     if (selectedTrancheId) return;
     const rawTab = searchParams.get('tab');
-    const urlTab = (rawTab === 'stock' ? 'vue' : rawTab) as Tab | null;
+    const urlTab = (rawTab === 'stock' ? 'vue' : rawTab === 'pointage' ? 'ouvriers' : rawTab) as Tab | null;
     if (urlTab && urlTab !== tab) setTab(urlTab);
   }, [searchParams, selectedTrancheId]);
 
@@ -841,12 +841,6 @@ export default function ChantierDetailPage() {
             tranches={tranches.map((tr) => tr.name)}
             onChanged={load}
           />
-        )}
-
-        {tab === 'pointage' && id && (
-          <div className="mt-2">
-            <ChantierPointagePanel chantierId={id} />
-          </div>
         )}
 
         {tab === 'vue' && overview && (

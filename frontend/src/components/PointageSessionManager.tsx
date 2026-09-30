@@ -135,7 +135,7 @@ export default function PointageSessionManager({
   const [lineQuery, setLineQuery] = useState('');
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, RowEdit>>({});
   const [pendingIds, setPendingIds] = useState<string[]>([]);
@@ -201,8 +201,36 @@ export default function PointageSessionManager({
   }
 
   useEffect(() => {
-    loadSessions(null);
-  }, [chantierId, tranche]);
+    if (!chantierId) {
+      setSessions([]);
+      setCurrentId(null);
+      setDetail(null);
+      return;
+    }
+    if (!hideSiteSelect) {
+      loadSessions(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const body: Record<string, unknown> = { chantierId, date: todayIso() };
+        if (tranche === '__whole') body.tranche = '';
+        else if (tranche) body.tranche = tranche;
+        if (category) body.category = category;
+        if (excludeCategory) body.excludeCategory = excludeCategory;
+        const result = await api<{ id: string | null }>('/chantiers/pointage/sessions/ensure', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        if (!cancelled) loadSessions(result.id);
+      } catch {
+        if (!cancelled) loadSessions(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [chantierId, tranche, hideSiteSelect, category, excludeCategory]);
 
   function loadDetail(id: string) {
     api<SessionDetail>(`/chantiers/pointage/sessions/${id}`)
@@ -255,6 +283,29 @@ export default function PointageSessionManager({
     }
     const matches = sessionsOnDay(value);
     if (!matches.length) {
+      if (hideSiteSelect && chantierId) {
+        try {
+          const body: Record<string, unknown> = { chantierId, date: value };
+          if (tranche === '__whole') body.tranche = '';
+          else if (tranche) body.tranche = tranche;
+          if (category) body.category = category;
+          if (excludeCategory) body.excludeCategory = excludeCategory;
+          const result = await api<{ id: string | null }>('/chantiers/pointage/sessions/ensure', {
+            method: 'POST',
+            body: JSON.stringify(body),
+          });
+          if (!result.id) {
+            setGotoMiss(true);
+            return;
+          }
+          setGotoMiss(false);
+          setGotoDate('');
+          loadSessions(result.id);
+          return;
+        } catch (err) {
+          await appAlert(err instanceof Error ? err.message : t('common.error'));
+        }
+      }
       setGotoMiss(true);
       return;
     }
@@ -677,7 +728,7 @@ export default function PointageSessionManager({
           className="w-40 shrink-0"
         />
       )}
-      {gotoMiss && <span className="text-[12px] text-gic-coral">{t('pointageMgmt.noPointageThatDay')}</span>}
+      {gotoMiss && <span className="text-[12px] text-gic-coral">{t(hideSiteSelect ? 'pointageMgmt.noWorkersThatDay' : 'pointageMgmt.noPointageThatDay')}</span>}
     </>
   );
 
@@ -735,7 +786,7 @@ export default function PointageSessionManager({
 
   return (
     <div className="space-y-3">
-      {!detail && (
+      {!detail && !hideSiteSelect && (
         <div className="mac-filters-panel">
           <div className="mac-filters-row mac-filters-row-between">
             <div className="mac-filters-toolbar">{filterControls}</div>
@@ -759,9 +810,9 @@ export default function PointageSessionManager({
       ) : sessions.length === 0 ? (
         <Card>
           <div className="py-10 text-center">
-            <p className="text-[13px] font-medium text-gic-ink">{t('pointageMgmt.emptySessions')}</p>
-            <p className="text-[12px] text-gic-muted mt-1 mb-4">{t('pointageMgmt.emptySessionsHint')}</p>
-            <Btn icon={CalendarPlus} onClick={openNew}>{t('pointageMgmt.newPointage')}</Btn>
+            <p className="text-[13px] font-medium text-gic-ink">{hideSiteSelect ? t('pointageMgmt.noWorkersThatDay') : t('pointageMgmt.emptySessions')}</p>
+            {!hideSiteSelect && <p className="text-[12px] text-gic-muted mt-1 mb-4">{t('pointageMgmt.emptySessionsHint')}</p>}
+            {!hideSiteSelect && <Btn icon={CalendarPlus} onClick={openNew}>{t('pointageMgmt.newPointage')}</Btn>}
           </div>
         </Card>
       ) : visibleSessions.length === 0 ? (
@@ -847,9 +898,11 @@ export default function PointageSessionManager({
                   placeholder={t('pointageMgmt.findWorker')}
                   className="w-52"
                 />
-                <Btn className="ml-auto" icon={CalendarPlus} onClick={openNew} disabled={!chantierId || busy}>
-                  {t('pointageMgmt.newPointage')}
-                </Btn>
+                {!hideSiteSelect && (
+                  <Btn className="ml-auto" icon={CalendarPlus} onClick={openNew} disabled={!chantierId || busy}>
+                    {t('pointageMgmt.newPointage')}
+                  </Btn>
+                )}
               </div>
               {listActions}
             </div>

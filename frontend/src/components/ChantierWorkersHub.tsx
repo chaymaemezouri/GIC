@@ -7,9 +7,11 @@ import { CHAUFFEUR_CATEGORY, workforceDetailPathForCategory } from '../lib/workf
 import { Btn, KpiCard, MacDateInput, MacSearch, Modal, Select, TableWrap, Tabs, Td, Th } from './ui';
 import { ChantierWorkersPanel, suspensionState, type SiteAssignment } from './ChantierWorkersPanel';
 import PointageSessionManager from './PointageSessionManager';
+import PointageWorkerSummary from './PointageWorkerSummary';
+import { ChantierPaymentPanel } from './ChantierPaymentPanel';
 import { useI18n } from '../i18n/I18nContext';
 
-type Section = 'affectation' | 'transfer' | 'pointage' | 'synthese';
+type Section = 'affectation' | 'transfer' | 'pointage' | 'synthese' | 'syntheseWorker' | 'paiement';
 
 type ChantierOption = { id: string; name: string };
 type TrancheOption = { id: string; name: string };
@@ -112,6 +114,7 @@ export function ChantierWorkersHub({
   const [selectedRight, setSelectedRight] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [filterTranche, setFilterTranche] = useState('');
+  const [workerTranche, setWorkerTranche] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sessions, setSessions] = useState<SessionSynthesis[]>([]);
@@ -255,7 +258,9 @@ export function ChantierWorkersHub({
     { id: 'affectation', label: t('siteOps.affectation') },
     { id: 'transfer', label: t('siteOps.transfer') },
     { id: 'pointage', label: t('siteOps.attendance') },
-    { id: 'synthese', label: t('siteOps.synthesis') },
+    { id: 'synthese', label: t('siteOps.synthesisByDate') },
+    { id: 'syntheseWorker', label: scope === 'drivers' ? t('siteOps.synthesisByDriver') : t('pointageMgmt.byWorkerTab') },
+    { id: 'paiement', label: t('actions.payment') },
   ];
 
   return (
@@ -463,6 +468,21 @@ export function ChantierWorkersHub({
           </Modal>
         </div>
       )}
+
+      {section === 'syntheseWorker' && (
+        <PointageWorkerSummary
+          hideSiteSelect
+          chantiers={chantiers}
+          chantierId={chantierId}
+          onChantierChange={() => {}}
+          tranche={workerTranche}
+          onTrancheChange={setWorkerTranche}
+          category={scope === 'drivers' ? CHAUFFEUR_CATEGORY : undefined}
+          excludeCategory={scope === 'drivers' ? undefined : CHAUFFEUR_CATEGORY}
+        />
+      )}
+
+      {section === 'paiement' && <ChantierPaymentPanel chantierId={chantierId} scope={scope} />}
     </div>
   );
 }

@@ -83,7 +83,15 @@ function formatMadCompact(n: number | null | undefined) {
   return formatMad(v);
 }
 
-export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }: { embedded?: boolean; mode?: WorkforceScope }) {
+export default function SalairesPage({
+  embedded = false,
+  mode = 'main_oeuvre',
+  lockChantierId = '',
+}: {
+  embedded?: boolean;
+  mode?: WorkforceScope;
+  lockChantierId?: string;
+}) {
   const { t } = useI18n();
   const PAY_TABS: { id: PayFilter; label: string }[] = [
     { id: '', label: t('common.all') },
@@ -111,7 +119,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
   const [activeFilter, setActiveFilter] = useState('true');
   const [sort, setSort] = useState('lastName');
   const [order, setOrder] = useState<SortOrder>('asc');
-  const [chantierFilter, setChantierFilter] = useState('');
+  const [chantierFilter, setChantierFilter] = useState(lockChantierId);
   const [chantiers, setChantiers] = useState<{ id: string; name: string }[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
@@ -246,6 +254,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
           periodMonth: d.getMonth() + 1,
           amount,
           paymentMode: payMode,
+          ...(lockChantierId ? { chantierId: lockChantierId } : {}),
         }),
       });
       setPayOpen(null);
@@ -347,7 +356,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
     { id: '', label: t('common.all') },
   ];
 
-  const hasActiveFilters = activeFilter !== 'true' || (!isChauffeur && !!categoryFilter) || !!chantierFilter;
+  const hasActiveFilters = activeFilter !== 'true' || (!isChauffeur && !!categoryFilter) || (!lockChantierId && !!chantierFilter);
   const exportName = isChauffeur ? 'salaires-chauffeurs-gic.csv' : 'salaires-gic.csv';
 
   function switchPayFilter(next: PayFilter) {
@@ -385,7 +394,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
 
       {embedded && (
         <div className="flex flex-wrap gap-2 mb-2">
-          <Link to="/pointage"><Btn variant="secondary" icon={Clock}>{t('pages.attendance')}</Btn></Link>
+          {!lockChantierId && <Link to="/pointage"><Btn variant="secondary" icon={Clock}>{t('pages.attendance')}</Btn></Link>}
           <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.export')}</Btn>
           <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
         </div>
@@ -516,7 +525,7 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
                       ))}
                     </>
                   )}
-                  {chantiers.length > 0 && (
+                  {!lockChantierId && chantiers.length > 0 && (
                     <>
                       <div className="mac-filter-menu-sep" />
                       <p className="mac-filter-menu-section">{t('fields.chantier')}</p>
@@ -560,9 +569,9 @@ export default function SalairesPage({ embedded = false, mode = 'main_oeuvre' }:
                         onClick={() => {
                           setActiveFilter('true');
                           setCategoryFilter('');
-                          setChantierFilter('');
+                          setChantierFilter(lockChantierId);
                           setPage(1);
-                          load(1, { active: 'true', category: '', chantierId: '' });
+                          load(1, { active: 'true', category: '', chantierId: lockChantierId });
                           setShowFilters(false);
                         }}
                       >

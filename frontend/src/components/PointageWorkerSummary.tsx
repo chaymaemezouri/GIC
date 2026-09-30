@@ -83,12 +83,18 @@ export default function PointageWorkerSummary({
   onChantierChange,
   tranche,
   onTrancheChange,
+  hideSiteSelect = false,
+  category,
+  excludeCategory,
 }: {
   chantiers: { id: string; name: string }[];
   chantierId: string;
   onChantierChange: (id: string) => void;
   tranche: string;
   onTrancheChange: (name: string) => void;
+  hideSiteSelect?: boolean;
+  category?: string;
+  excludeCategory?: string;
 }) {
   const { t } = useI18n();
   const [tranches, setTranches] = useState<{ id: string; name: string }[]>([]);
@@ -126,6 +132,8 @@ export default function PointageWorkerSummary({
     if (chantierId && tranche) qs.set('tranche', tranche);
     if (dateFrom) qs.set('dateFrom', dateFrom);
     if (dateTo) qs.set('dateTo', dateTo);
+    if (category) qs.set('category', category);
+    if (excludeCategory) qs.set('excludeCategory', excludeCategory);
     return qs;
   }
 
@@ -148,7 +156,7 @@ export default function PointageWorkerSummary({
 
   useEffect(() => {
     load();
-  }, [chantierId, tranche, dateFrom, dateTo, validated]);
+  }, [chantierId, tranche, dateFrom, dateTo, validated, category, excludeCategory]);
 
   async function loadLines(workforceId: string) {
     setLinesLoading(true);
@@ -395,15 +403,17 @@ export default function PointageWorkerSummary({
         <div className="mac-filters-row mac-filters-row-between">
           <div className="mac-filters-toolbar">
             <MacSearch value={q} onChange={setQ} placeholder={t('msg.searchWorker')} />
-            <MacSelect
-              value={chantierId}
-              onChange={onChantierChange}
-              options={[
-                { value: '', label: t('msg.allSitesShort') },
-                ...chantiers.map((c) => ({ value: c.id, label: c.name })),
-              ]}
-              className="w-48 shrink-0"
-            />
+            {!hideSiteSelect && (
+              <MacSelect
+                value={chantierId}
+                onChange={onChantierChange}
+                options={[
+                  { value: '', label: t('msg.allSitesShort') },
+                  ...chantiers.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+                className="w-48 shrink-0"
+              />
+            )}
             {chantierId && (
               <MacSelect
                 value={tranche}
