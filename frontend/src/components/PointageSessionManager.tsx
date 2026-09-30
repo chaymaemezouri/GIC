@@ -10,7 +10,7 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { printRows } from '../lib/listPrint';
 import { workforceDetailPathForCategory } from '../lib/workforceScope';
 import {
-  Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSelect, Modal, StatusPill, TableWrap, Td, Th,
+  Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect, Modal, StatusPill, TableWrap, Td, Th,
 } from './ui';
 import { EntityPickerPanel, workforceToPickerItem } from './EntityPickerPanel';
 import { SelectAllTh, SelectTd, SelectionBar } from './RowSelection';
@@ -113,6 +113,9 @@ export default function PointageSessionManager({
   tranche,
   onTrancheChange,
   workforce,
+  hideSiteSelect = false,
+  category,
+  excludeCategory,
 }: {
   chantiers: { id: string; name: string }[];
   chantierId: string;
@@ -120,12 +123,16 @@ export default function PointageSessionManager({
   tranche: string;
   onTrancheChange: (name: string) => void;
   workforce: Worker[];
+  hideSiteSelect?: boolean;
+  category?: string;
+  excludeCategory?: string;
 }) {
   const { t } = useI18n();
   const [tranches, setTranches] = useState<{ id: string; name: string }[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [gotoDate, setGotoDate] = useState('');
+  const [gotoMiss, setGotoMiss] = useState(false);
+  const [lineQuery, setLineQuery] = useState('');
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -149,8 +156,13 @@ export default function PointageSessionManager({
   const selection = useRowSelection<SessionRow>();
 
   const workerPool = useMemo(
-    () => workforce.filter((w) => w.isActive !== false && String(w.salaryPeriod || '').toLowerCase() !== 'mois'),
-    [workforce],
+    () => workforce.filter((w) => {
+      if (w.isActive === false || String(w.salaryPeriod || '').toLowerCase() === 'mois') return false;
+      if (category && w.category !== category) return false;
+      if (excludeCategory && w.category === excludeCategory) return false;
+      return true;
+    }),
+    [workforce, category, excludeCategory],
   );
 
   useEffect(() => {
@@ -172,7 +184,7 @@ export default function PointageSessionManager({
     }
     setLoading(true);
     const qs = new URLSearchParams({ chantierId });
-    if (tranche) qs.set('tranche', tranche);
+    if (tranche && tranche !== '__whole') qs.set('tranche', tranche);
     api<SessionSummary[]>(`/chantiers/pointage/sessions?${qs}`)
       .then((list) => {
         setSessions(list);
@@ -205,25 +217,17 @@ export default function PointageSessionManager({
 
   useEffect(() => {
     selection.clear();
+    setLineQuery('');
     if (currentId) loadDetail(currentId);
     else setDetail(null);
   }, [currentId]);
 
+  const scopeTranche = tranche === '__whole' ? '' : tranche;
   const visibleSessions = useMemo(() => sessions.filter((s) => {
-    const day = isoDay(s.date);
-    if (dateFrom && day < dateFrom) return false;
-    if (dateTo && day > dateTo) return false;
+    if (tranche === '__whole' && s.tranche) return false;
+    if (tranche && tranche !== '__whole' && s.tranche !== tranche) return false;
     return true;
-  }), [sessions, dateFrom, dateTo]);
-  const preciseDate = dateFrom && dateFrom === dateTo ? dateFrom : '';
-
-  useEffect(() => {
-    if (!dateFrom && !dateTo) return;
-    const nextId = visibleSessions.some((s) => s.id === currentId)
-      ? currentId
-      : visibleSessions[visibleSessions.length - 1]?.id ?? null;
-    if (nextId !== currentId) setCurrentId(nextId);
-  }, [dateFrom, dateTo, visibleSessions, currentId]);
+  }), [sessions, tranche]);
 
   const currentIndex = visibleSessions.findIndex((s) => s.id === currentId);
   const hasUnsaved = pendingIds.length > 0 || Object.keys(drafts).length > 0;
@@ -232,6 +236,32 @@ export default function PointageSessionManager({
     if (!id || id === currentId) return;
     if (hasUnsaved && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) return;
     setCurrentId(id);
+  }
+
+  function sessionsOnDay(value: string) {
+    return sessions.filter((s) => {
+      if (isoDay(s.date) !== value) return false;
+      if (tranche === '__whole' && s.tranche) return false;
+      if (tranche && tranche !== '__whole' && s.tranche !== tranche) return false;
+      return true;
+    });
+  }
+
+  async function jumpToDate(value: string) {
+    setGotoDate(value);
+    if (!value) {
+      setGotoMiss(false);
+      return;
+    }
+    const matches = sessionsOnDay(value);
+    if (!matches.length) {
+      setGotoMiss(true);
+      return;
+    }
+    setGotoMiss(false);
+    const target = matches[matches.length - 1];
+    if (target.id !== currentId) await goTo(target.id);
+    setGotoDate('');
   }
 
   function lineDefaults(line: SessionLine): RowEdit {
@@ -259,7 +289,14 @@ export default function PointageSessionManager({
   }
 
   const rows = useMemo<SessionRow[]>(() => {
-    const saved = (detail?.lines || []).map((l) => ({
+    const saved = (detail?.lines || [])
+      .filter((l) => {
+        const cat = l.workforce?.category || '';
+        if (category) return cat === category;
+        if (excludeCategory) return cat !== excludeCategory;
+        return true;
+      })
+      .map((l) => ({
       id: l.workforceId,
       workforceId: l.workforceId,
       worker: l.workforce as Worker,
@@ -275,7 +312,17 @@ export default function PointageSessionManager({
       }))
       .filter((r) => !!r.worker);
     return [...saved, ...pending];
-  }, [detail, pendingIds, workerPool, workforce]);
+  }, [detail, pendingIds, workerPool, workforce, category, excludeCategory]);
+
+  const visibleRows = useMemo(() => {
+    const needle = lineQuery.trim().toLowerCase();
+    if (!needle) return rows;
+    return rows.filter((r) =>
+      `${r.worker.reference || ''} ${r.worker.firstName} ${r.worker.lastName} ${r.worker.category || ''}`
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [rows, lineQuery]);
 
   const totals = useMemo(() => {
     let days = 0;
@@ -305,7 +352,7 @@ export default function PointageSessionManager({
         method: 'POST',
         body: JSON.stringify({
           chantierId,
-          tranche,
+          tranche: scopeTranche,
           date: newForm.date,
           remark: newForm.remark || null,
           copyPrevious: newForm.copyPrevious,
@@ -341,7 +388,7 @@ export default function PointageSessionManager({
   }
 
   const duplicateInList = newOpen
-    ? sessions.find((s) => isoDay(s.date) === newForm.date && s.tranche === tranche)
+    ? sessions.find((s) => isoDay(s.date) === newForm.date && s.tranche === scopeTranche)
     : undefined;
 
   async function saveAll(validate: boolean) {
@@ -553,98 +600,153 @@ export default function PointageSessionManager({
     });
   }
 
+  const sessionNav = chantierId && visibleSessions.length > 0 ? (
+    <div className="pointage-nav">
+      <button
+        type="button"
+        className="pointage-nav-btn"
+        disabled={currentIndex <= 0}
+        onClick={() => goTo(visibleSessions[currentIndex - 1]?.id ?? null)}
+        aria-label={t('pointageMgmt.previous')}
+      >
+        <ChevronLeft size={15} />
+      </button>
+      <select
+        className="pointage-nav-select"
+        value={currentId || ''}
+        onChange={(e) => goTo(e.target.value)}
+        aria-label={t('pointageMgmt.selectPointage')}
+      >
+        {visibleSessions.map((s) => (
+          <option key={s.id} value={s.id}>
+            {formatDate(s.date)}{!tranche ? ` · ${trancheLabel(s)}` : ''} · {s.linesCount}
+          </option>
+        ))}
+      </select>
+      <span className="pointage-nav-count">
+        {currentIndex + 1} / {visibleSessions.length}
+      </span>
+      <button
+        type="button"
+        className="pointage-nav-btn"
+        disabled={currentIndex < 0 || currentIndex >= visibleSessions.length - 1}
+        onClick={() => goTo(visibleSessions[currentIndex + 1]?.id ?? null)}
+        aria-label={t('pointageMgmt.next')}
+      >
+        <ChevronRight size={15} />
+      </button>
+    </div>
+  ) : null;
+
+  const filterControls = (
+    <>
+      {!hideSiteSelect && (
+        <MacSelect
+          value={chantierId}
+          onChange={async (v) => {
+            if (hasUnsaved && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) return;
+            onChantierChange(v);
+          }}
+          options={[
+            { value: '', label: t('msg.chooseSite') },
+            ...chantiers.map((c) => ({ value: c.id, label: c.name })),
+          ]}
+          className="w-48 shrink-0"
+        />
+      )}
+      {chantierId && (
+        <MacSelect
+          value={tranche}
+          onChange={async (v) => {
+            if (hasUnsaved && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) return;
+            onTrancheChange(v);
+          }}
+          options={[
+            { value: '', label: t('msg.allTranches') },
+            { value: '__whole', label: t('pointageMgmt.wholeSite') },
+            ...tranches.map((tr) => ({ value: tr.name, label: tr.name })),
+          ]}
+          className="w-44 shrink-0"
+        />
+      )}
+      {chantierId && (
+        <MacDateInput
+          value={gotoDate}
+          onChange={(value) => { void jumpToDate(value); }}
+          placeholder={t('pointageMgmt.goToDate')}
+          className="w-40 shrink-0"
+        />
+      )}
+      {gotoMiss && <span className="text-[12px] text-gic-coral">{t('pointageMgmt.noPointageThatDay')}</span>}
+    </>
+  );
+
+  const listActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Btn icon={CheckCircle} onClick={() => saveAll(true)} disabled={busy || rows.length === 0 || (allValidated && !hasUnsaved)}>
+        {t('pointageMgmt.validatePointage')}
+      </Btn>
+      <Btn variant="secondary" icon={UserPlus} onClick={() => setAddOpen(true)} disabled={busy || !detail}>
+        {t('pointageMgmt.addWorkers')}
+      </Btn>
+      {anyValidated && (
+        <Btn variant="secondary" icon={RotateCcw} onClick={unvalidateSession} disabled={busy}>
+          {t('actions.unvalidateAll')}
+        </Btn>
+      )}
+      <Btn
+        variant="secondary"
+        icon={Save}
+        title={busy ? t('auth.saving') : t('actions.saveAll')}
+        aria-label={busy ? t('auth.saving') : t('actions.saveAll')}
+        className="!px-2"
+        onClick={() => saveAll(false)}
+        disabled={busy || rows.length === 0}
+      />
+      <Btn
+        variant="secondary"
+        icon={Printer}
+        title={t('common.print')}
+        aria-label={t('common.print')}
+        className="!px-2"
+        onClick={printList}
+        disabled={!detail || rows.length === 0}
+      />
+      <div className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-gic-muted">
+        <span>{t('pointageMgmt.bulkApply')}</span>
+        <input
+          className="w-16 rounded-lg border border-gic-border bg-white px-2 py-1 text-[11px]"
+          type="number"
+          min={0}
+          step={DAY_STEP}
+          value={bulkDays}
+          onChange={(e) => setBulkDays(e.target.value)}
+        />
+        <span>{t('columns.days')}</span>
+        <Btn variant="secondary" className="!py-1" onClick={applyBulkDays} disabled={!detail}>{t('pointageMgmt.apply')}</Btn>
+        {detail && (
+          <Btn variant="danger" icon={Trash2} onClick={() => { setDeleteMotif(''); setDeleteOpen(true); }} disabled={busy}>
+            {t('pointageMgmt.deletePointage')}
+          </Btn>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-3">
-      <div className="mac-filters-panel">
-        <div className="mac-filters-row mac-filters-row-between">
-          <div className="mac-filters-toolbar">
-            <MacSelect
-              value={chantierId}
-              onChange={async (v) => {
-                if (hasUnsaved && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) return;
-                onChantierChange(v);
-              }}
-              options={[
-                { value: '', label: t('msg.chooseSite') },
-                ...chantiers.map((c) => ({ value: c.id, label: c.name })),
-              ]}
-              className="w-48 shrink-0"
-            />
-            {chantierId && (
-              <MacSelect
-                value={tranche}
-                onChange={async (v) => {
-                  if (hasUnsaved && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) return;
-                  onTrancheChange(v);
-                }}
-                options={[
-                  { value: '', label: t('pointageMgmt.wholeSite') },
-                  ...tranches.map((tr) => ({ value: tr.name, label: tr.name })),
-                ]}
-                className="w-44 shrink-0"
-              />
-            )}
-            {chantierId && (
-              <>
-                <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
-                <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0" />
-                <MacDateInput
-                  value={preciseDate}
-                  onChange={(value) => { setDateFrom(value); setDateTo(value); }}
-                  placeholder={t('pointageMgmt.preciseDate')}
-                  className="w-36 shrink-0"
-                />
-              </>
-            )}
-            {chantierId && visibleSessions.length > 0 && (
-              <div className="pointage-nav">
-                <button
-                  type="button"
-                  className="pointage-nav-btn"
-                  disabled={currentIndex <= 0}
-                  onClick={() => goTo(visibleSessions[currentIndex - 1]?.id ?? null)}
-                  aria-label={t('pointageMgmt.previous')}
-                >
-                  <ChevronLeft size={15} />
-                </button>
-                <select
-                  className="pointage-nav-select"
-                  value={currentId || ''}
-                  onChange={(e) => goTo(e.target.value)}
-                  aria-label={t('pointageMgmt.selectPointage')}
-                >
-                  {visibleSessions.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {t('pointageMgmt.pointageN', { n: s.index })} — {formatDate(s.date)}
-                      {!tranche ? ` · ${trancheLabel(s)}` : ''} ({s.linesCount})
-                    </option>
-                  ))}
-                </select>
-                <span className="pointage-nav-count">
-                  {currentIndex + 1} / {visibleSessions.length}
-                </span>
-                <button
-                  type="button"
-                  className="pointage-nav-btn"
-                  disabled={currentIndex < 0 || currentIndex >= visibleSessions.length - 1}
-                  onClick={() => goTo(visibleSessions[currentIndex + 1]?.id ?? null)}
-                  aria-label={t('pointageMgmt.next')}
-                >
-                  <ChevronRight size={15} />
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="mac-filters-actions">
-            <Btn variant="secondary" icon={Printer} onClick={printList} disabled={!detail || rows.length === 0}>
-              {t('common.print')}
-            </Btn>
-            <Btn icon={CalendarPlus} onClick={openNew} disabled={!chantierId || busy}>
-              {t('pointageMgmt.newPointage')}
-            </Btn>
+      {!detail && (
+        <div className="mac-filters-panel">
+          <div className="mac-filters-row mac-filters-row-between">
+            <div className="mac-filters-toolbar">{filterControls}</div>
+            <div className="mac-filters-actions">
+              <Btn icon={CalendarPlus} onClick={openNew} disabled={!chantierId || busy}>
+                {t('pointageMgmt.newPointage')}
+              </Btn>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {!chantierId ? (
         <Card>
@@ -675,11 +777,9 @@ export default function PointageSessionManager({
           <Card className="!p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[10px] uppercase tracking-wide text-gic-muted">
-                  {t('pointageMgmt.pointageN', { n: visibleSessions[currentIndex]?.index ?? 1 })} · {detail.chantier.name} · {trancheLabel(detail)}
-                </p>
-                <h2 className="text-[17px] font-semibold text-gic-ink mt-0.5">{formatDate(detail.date)}</h2>
+                <h2 className="text-[17px] font-semibold text-gic-ink">{formatDate(detail.date)}</h2>
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                  <span className="mac-chip">{trancheLabel(detail)}</span>
                   {allValidated ? (
                     <span className="mac-chip mac-chip-green">{t('pointageMgmt.validated')}</span>
                   ) : anyValidated ? (
@@ -716,6 +816,7 @@ export default function PointageSessionManager({
                   </div>
                 )}
               </div>
+              {sessionNav}
             </div>
           </Card>
 
@@ -737,49 +838,32 @@ export default function PointageSessionManager({
           <SelectionBar selection={selection} onPrint={printList} />
 
           <Card padding={false}>
+            <div className="space-y-3 border-b border-gic-border/70 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {filterControls}
+                <MacSearch
+                  value={lineQuery}
+                  onChange={setLineQuery}
+                  placeholder={t('pointageMgmt.findWorker')}
+                  className="w-52"
+                />
+                <Btn className="ml-auto" icon={CalendarPlus} onClick={openNew} disabled={!chantierId || busy}>
+                  {t('pointageMgmt.newPointage')}
+                </Btn>
+              </div>
+              {listActions}
+            </div>
             {rows.length === 0 ? (
               <div className="py-10 text-center">
                 <p className="text-[12px] text-gic-muted">{t('pointageMgmt.emptyLines')}</p>
-                <Btn icon={UserPlus} className="mt-3" onClick={() => setAddOpen(true)}>{t('pointageMgmt.addWorkers')}</Btn>
               </div>
+            ) : visibleRows.length === 0 ? (
+              <p className="py-8 text-center text-[12px] text-gic-muted">{t('pointageMgmt.noWorkerMatch')}</p>
             ) : (
-              <>
-                <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-gic-border/70">
-                  <Btn variant="secondary" icon={UserPlus} onClick={() => setAddOpen(true)} disabled={busy}>
-                    {t('pointageMgmt.addWorkers')}
-                  </Btn>
-                  <Btn variant="secondary" icon={Save} onClick={() => saveAll(false)} disabled={busy || rows.length === 0}>
-                    {busy ? t('auth.saving') : t('actions.saveAll')}
-                  </Btn>
-                  <Btn icon={CheckCircle} onClick={() => saveAll(true)} disabled={busy || rows.length === 0 || (allValidated && !hasUnsaved)}>
-                    {t('pointageMgmt.validatePointage')}
-                  </Btn>
-                  {anyValidated && (
-                    <Btn variant="secondary" icon={RotateCcw} onClick={unvalidateSession} disabled={busy}>
-                      {t('actions.unvalidateAll')}
-                    </Btn>
-                  )}
-                  <Btn variant="danger" icon={Trash2} onClick={() => { setDeleteMotif(''); setDeleteOpen(true); }} disabled={busy}>
-                    {t('pointageMgmt.deletePointage')}
-                  </Btn>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-gic-border/70 bg-[#fafafa] text-[11px] text-gic-muted">
-                  <span>{t('pointageMgmt.bulkApply')}</span>
-                  <input
-                    className="w-16 rounded-lg border border-gic-border bg-white px-2 py-1 text-[11px]"
-                    type="number"
-                    min={0}
-                    step={DAY_STEP}
-                    value={bulkDays}
-                    onChange={(e) => setBulkDays(e.target.value)}
-                  />
-                  <span>{t('columns.days')}</span>
-                  <Btn variant="secondary" className="!py-1" onClick={applyBulkDays}>{t('pointageMgmt.apply')}</Btn>
-                </div>
-                <TableWrap mac>
+              <TableWrap mac>
                   <thead>
                     <tr>
-                      <SelectAllTh selection={selection} rows={rows} />
+                      <SelectAllTh selection={selection} rows={visibleRows} />
                       <Th mac>{t('columns.worker')}</Th>
                       <Th mac>{t('columns.days')}</Th>
                       <Th mac>{t('columns.hours')}</Th>
@@ -792,7 +876,7 @@ export default function PointageSessionManager({
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => {
+                    {visibleRows.map((r) => {
                       const e = rowFor(r.workforceId);
                       const locked = !!r.line?.validated;
                       const d = num(e.days);
@@ -891,7 +975,6 @@ export default function PointageSessionManager({
                     })}
                   </tbody>
                 </TableWrap>
-              </>
             )}
           </Card>
         </>
@@ -912,7 +995,7 @@ export default function PointageSessionManager({
       >
         <form id="new-pointage-form" onSubmit={createSession} className="grid gap-3">
           <p className="text-[12px] text-gic-muted">
-            {chantiers.find((c) => c.id === chantierId)?.name} · {tranche || t('pointageMgmt.wholeSite')}
+            {chantiers.find((c) => c.id === chantierId)?.name || detail?.chantier.name} · {scopeTranche || t('pointageMgmt.wholeSite')}
           </p>
           <Input
             label={`${t('common.date')} *`}

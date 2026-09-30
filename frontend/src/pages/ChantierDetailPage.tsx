@@ -6,12 +6,11 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Pencil, Trash2, Printer, Plus, Users, ShoppingCart,
   HardHat, FileText, ExternalLink, Upload, Camera, Video,
-  Clock, Layers, Building2, Image,
+  Layers, Building2, Image,
   MapPin, Images, TrendingUp, Truck, Wallet,
 } from 'lucide-react';
 import { api, fetchSupplierList, formatDate, formatMad, uploadDocument, uploadForm, type PaginatedResponse } from '../lib/api';
 import { googleMapsSearchUrl } from '../lib/googleMaps';
-import { workforceDetailPathForCategory } from '../lib/workforceScope';
 import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, PageBackLink, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
@@ -26,7 +25,8 @@ import {
 import ChantierOverviewPanel, { type ChantierOverview } from '../components/ChantierOverview';
 import ChantierDetailNav, { buildChantierNavGroups, type ChantierTab } from '../components/ChantierDetailNav';
 import { ChantierSubcontractorsPanel } from '../components/ChantierExtraPanels';
-import { ChantierWorkersHub } from '../components/ChantierWorkersHub';
+import { ChantierPointagePanel, ChantierWorkersHub } from '../components/ChantierWorkersHub';
+import { CHAUFFEUR_CATEGORY } from '../lib/workforceScope';
 import {
   ChantierTranchesList, ChantierTrancheView, type TrancheListItem,
 } from '../components/ChantierTrancheView';
@@ -62,7 +62,6 @@ export default function ChantierDetailPage() {
   });
   const [history, setHistory] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('vue');
-  const [actionsOpen, setActionsOpen] = useState(false);
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -77,9 +76,6 @@ export default function ChantierDetailPage() {
   const [chefs, setChefs] = useState<ChefOption[]>([]);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [galleryUploading, setGalleryUploading] = useState(false);
-  const [pointages, setPointages] = useState<any[]>([]);
-  const [pointageStats, setPointageStats] = useState<{ total: number; validated: number } | null>(null);
-  const [pointageLoading, setPointageLoading] = useState(false);
   const [editCamera, setEditCamera] = useState<any>(null);
   const [docExpiresAt, setDocExpiresAt] = useState('');
   const [purchaseOpen, setPurchaseOpen] = useState(false);
@@ -91,10 +87,6 @@ export default function ChantierDetailPage() {
   const [missionForm, setMissionForm] = useState({ enginId: '', mission: '', driverName: '', usage: '', tranche: '' });
 
   function selectTab(next: Tab) {
-    if (next === 'pointage' && id) {
-      navigate(`/pointage?chantierId=${id}&tab=gestion`);
-      return;
-    }
     setTab(next);
     const params = new URLSearchParams(searchParams);
     if (next === 'vue') params.delete('tab');
@@ -178,7 +170,6 @@ export default function ChantierDetailPage() {
 
   useEffect(() => {
     if (tab === 'historique') loadHistory();
-    if (tab === 'pointage' && id) loadPointages();
     if (tab === 'achats') {
       fetchSupplierList().then(setSuppliers).catch(() => {});
       api('/achats/families').then(setFamilies).catch(() => {});
@@ -241,27 +232,6 @@ export default function ChantierDetailPage() {
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
-  }
-
-  function loadPointages() {
-    if (!id) return;
-    setPointageLoading(true);
-    const today = new Date().toISOString().slice(0, 10);
-    const qs = new URLSearchParams({ chantierId: id, limit: '30', sort: 'date', order: 'desc' });
-    const statsQs = new URLSearchParams({ chantierId: id, dateFrom: today, dateTo: today });
-    Promise.all([
-      api<PaginatedResponse<any>>(`/chantiers/pointage?${qs}`),
-      api<{ total: number; validated: number }>(`/chantiers/pointage/stats?${statsQs}`),
-    ])
-      .then(([r, st]) => {
-        setPointages(r.items);
-        setPointageStats({ total: st.total, validated: st.validated });
-      })
-      .catch(() => {
-        setPointages([]);
-        setPointageStats(null);
-      })
-      .finally(() => setPointageLoading(false));
   }
 
   async function onGalleryUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -495,9 +465,14 @@ export default function ChantierDetailPage() {
     }).catch((err) => appAlert(err instanceof Error ? err.message : t('common.error')));
   }
 
+  const siteAssignments = chantier?.assignments || [];
+  const driverAssignments = siteAssignments.filter((a: { workforce?: { category?: string | null } }) => a.workforce?.category === CHAUFFEUR_CATEGORY);
+  const workerAssignments = siteAssignments.filter((a: { workforce?: { category?: string | null } }) => a.workforce?.category !== CHAUFFEUR_CATEGORY);
+
   const navGroups = buildChantierNavGroups(t, {
     tranches: tranches.length,
-    workers: chantier?.assignments?.length ?? 0,
+    workers: workerAssignments.length,
+    drivers: driverAssignments.length,
     galerie: (chantier?.images?.length ?? 0) + (chantier?.documents?.length ?? 0),
     engins: chantier?.enginCosts?.byEngin?.length || chantier?.missions?.length || 0,
     achats: chantier?.purchases?.length ?? 0,
@@ -611,24 +586,9 @@ export default function ChantierDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
-          <Btn icon={Plus} onClick={() => { setTrancheForm({ name: '', remark: '', estimatedStartDate: '', estimatedEndDate: '' }); setTrancheOpen(true); }}>{t('actions.newTranche')}</Btn>
-          <div className="relative">
-            <Btn variant="secondary" onClick={() => setActionsOpen((o) => !o)}>{t('common.actions')}</Btn>
-            {actionsOpen && (
-              <div className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-xl bg-white border border-[#d2d2d7] shadow-lg py-1">
-                <ActionItem label={t('siteOps.situation')} onClick={() => { printSituation(); setActionsOpen(false); }} />
-                <ActionItem label={t('siteOps.feuillePointage')} onClick={() => { printPointageSheet(); setActionsOpen(false); }} />
-                <ActionItem label={t('actions.addCamera')} onClick={() => { setCameraOpen(true); setActionsOpen(false); }} />
-                <Link to={`/pointage?chantierId=${id}`} className="block px-3 py-2 text-[12px] hover:bg-black/[0.03]" onClick={() => setActionsOpen(false)}>
-                  {t('tabs.attendance')}
-                </Link>
-                <Link to={`/avancement?chantierId=${id}`} className="block px-3 py-2 text-[12px] hover:bg-black/[0.03]" onClick={() => setActionsOpen(false)}>
-                  {t('columns.progress')}
-                </Link>
-                <ActionItem label={t('tabs.documents')} onClick={() => { selectTab('documents'); setActionsOpen(false); }} />
-              </div>
-            )}
-          </div>
+          <Link to={`/avancement?chantierId=${id}`}>
+            <Btn variant="secondary" icon={TrendingUp}>{t('columns.progress')}</Btn>
+          </Link>
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printFiche} />
             <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
@@ -867,76 +827,25 @@ export default function ChantierDetailPage() {
         {tab === 'ouvriers' && id && (
           <ChantierWorkersHub
             chantierId={id}
-            assignments={chantier.assignments || []}
+            assignments={workerAssignments}
             tranches={tranches.map((tr) => tr.name)}
             onChanged={load}
           />
         )}
 
-        {tab === 'pointage' && (
+        {tab === 'chauffeurs' && id && (
+          <ChantierWorkersHub
+            scope="drivers"
+            chantierId={id}
+            assignments={driverAssignments}
+            tranches={tranches.map((tr) => tr.name)}
+            onChanged={load}
+          />
+        )}
+
+        {tab === 'pointage' && id && (
           <div className="mt-2">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <div>
-                <p className="text-[13px] font-medium text-gic-ink tracking-tight inline-flex items-center gap-1.5">
-                  <Clock size={15} /> {t('msg.recentAttendances')}
-                </p>
-                {pointageStats && (
-                  <p className="text-[11px] text-gic-muted mt-0.5">
-                    {t('msg.todayAttendanceStats', { total: pointageStats.total, validated: pointageStats.validated })}
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link to={`/pointage?chantierId=${id}&tab=synthese`}>
-                  <Btn variant="secondary" icon={Users}>{t('pointageMgmt.byWorkerTab')}</Btn>
-                </Link>
-                <Link to={`/pointage?chantierId=${id}&tab=gestion`}>
-                  <Btn icon={Clock}>{t('actions.enterAttendance')}</Btn>
-                </Link>
-              </div>
-            </div>
-            {pointageLoading ? (
-              <p className="py-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
-            ) : pointages.length === 0 ? (
-              <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptyAttendanceOnSite')}</p>
-            ) : (
-              <TableWrap mac>
-                <thead>
-                  <tr>
-                    <Th mac>{t('columns.date')}</Th>
-                    <Th mac>{t('columns.worker')}</Th>
-                    <Th mac>{t('columns.workDays')}</Th>
-                    <Th mac>{t('columns.advance')}</Th>
-                    <Th mac>{t('columns.bonus')}</Th>
-                    <Th mac>{t('columns.validated')}</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pointages.map((p: any) => (
-                    <tr key={p.id}>
-                      <Td mac className="text-[11px]">{formatDate(p.date)}</Td>
-                      <Td mac>
-                        {p.workforce ? (
-                          <Link to={workforceDetailPathForCategory(p.workforce.category, p.workforce.id)} className="mac-table-ref">
-                            {p.workforce.firstName} {p.workforce.lastName}
-                          </Link>
-                        ) : '—'}
-                      </Td>
-                      <Td mac>{Number(p.totalDay || 0).toFixed(2)}</Td>
-                      <Td mac className="text-gic-coral">{formatMad(p.advance)}</Td>
-                      <Td mac>{formatMad(p.bonus)}</Td>
-                      <Td mac>
-                        {p.validated ? (
-                          <span className="mac-chip mac-chip-emerald">{t('common.yes')}</span>
-                        ) : (
-                          <span className="mac-chip">{t('status.pending')}</span>
-                        )}
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </TableWrap>
-            )}
+            <ChantierPointagePanel chantierId={id} />
           </div>
         )}
 
@@ -948,6 +857,7 @@ export default function ChantierDetailPage() {
             tranchesCount={tranches.length}
             recentPurchases={recentPurchases}
             onGoTranches={() => selectTab('tranches')}
+            onAddTranche={() => { setTrancheForm({ name: '', remark: '', estimatedStartDate: '', estimatedEndDate: '' }); setTrancheOpen(true); }}
             onGoAchats={() => selectTab('achats')}
           />
         )}
@@ -1347,10 +1257,3 @@ function ProgressRing({ percent }: { percent: number }) {
   );
 }
 
-function ActionItem({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button type="button" className="w-full text-left px-3 py-2 text-[12px] hover:bg-black/[0.03]" onClick={onClick}>
-      {label}
-    </button>
-  );
-}

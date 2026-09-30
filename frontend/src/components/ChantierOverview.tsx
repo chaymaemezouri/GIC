@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ChevronRight, HardHat, Layers, ShoppingCart, Truck, Users, Wallet,
+  AlertTriangle, ChevronRight, HardHat, Layers, Plus, ShoppingCart, Truck, Users, Wallet,
 } from 'lucide-react';
 import { formatMad } from '../lib/api';
 import { Btn } from './ui';
@@ -49,6 +49,7 @@ type Props = {
   tranchesCount: number;
   recentPurchases: PurchaseRow[];
   onGoTranches: () => void;
+  onAddTranche: () => void;
   onGoAchats: () => void;
 };
 
@@ -78,6 +79,7 @@ function TranchesStructureSection({
   structure,
   taskSummary,
   onGoTranches,
+  onAddTranche,
   tranchesCount,
   chantierName,
   t,
@@ -85,6 +87,7 @@ function TranchesStructureSection({
   structure: ChantierOverview['structure'];
   taskSummary: ChantierOverview['taskSummary'];
   onGoTranches: () => void;
+  onAddTranche: () => void;
   tranchesCount: number;
   chantierName?: string;
   t: TranslateFn;
@@ -104,10 +107,13 @@ function TranchesStructureSection({
             )}
           </div>
         </div>
-        <button type="button" className="overview-card-link" onClick={onGoTranches}>
-          {tranchesCount > 0 ? t('common.manage') : t('actions.createTranche')}
-          <ChevronRight size={14} />
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Btn icon={Plus} onClick={onAddTranche}>{t('actions.newTranche')}</Btn>
+          <button type="button" className="overview-card-link" onClick={onGoTranches}>
+            {tranchesCount > 0 ? t('common.manage') : t('actions.createTranche')}
+            <ChevronRight size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="tranche-tree">
@@ -143,6 +149,7 @@ export default function ChantierOverviewPanel({
   tranchesCount,
   recentPurchases,
   onGoTranches,
+  onAddTranche,
   onGoAchats,
 }: Props) {
   const { t } = useI18n();
@@ -197,6 +204,7 @@ export default function ChantierOverviewPanel({
             structure={structure}
             taskSummary={taskSummary}
             onGoTranches={onGoTranches}
+            onAddTranche={onAddTranche}
             tranchesCount={tranchesCount}
             chantierName={chantierName}
             t={t}
@@ -206,9 +214,12 @@ export default function ChantierOverviewPanel({
             <HardHat size={28} className="text-gic-muted opacity-35 mb-2" />
             <p className="text-[13px] font-medium text-gic-ink">{t('detail.noProgressTracked')}</p>
             <p className="text-[12px] text-gic-muted mt-1 mb-4">{t('detail.createTrancheHint')}</p>
-            <Btn variant="secondary" icon={Layers} onClick={onGoTranches}>
-              {t('actions.openTranches')}
-            </Btn>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Btn icon={Plus} onClick={onAddTranche}>{t('actions.newTranche')}</Btn>
+              <Btn variant="secondary" icon={Layers} onClick={onGoTranches}>
+                {t('actions.openTranches')}
+              </Btn>
+            </div>
           </section>
         )}
 

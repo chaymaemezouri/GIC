@@ -847,6 +847,8 @@ model WorkforceAssignment {
   tranche      String?
   startDate    DateTime  @default(now())
   endDate      DateTime?
+  suspendedFrom DateTime?
+  suspendedUntil DateTime?
 }
 
 /// Un pointage (opération) = une journée pour un chantier ou une tranche.
@@ -999,6 +1001,8 @@ model EnginAssignment {
   extraCost     Float     @default(0)
   plannedCost   Float     @default(0)
   remark        String?
+  suspendedFrom DateTime?
+  suspendedUntil DateTime?
   returnedAt    DateTime?
   returnCondition String?
   returnCounter Float?

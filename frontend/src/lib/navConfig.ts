@@ -38,6 +38,7 @@ export const navbarGroups: NavGroup[] = [
       { to: '/mandants', label: 'nav.mandants', icon: UserCircle },
       { to: '/agents', label: 'nav.agents', icon: UserCog },
       { to: '/reconnus', label: 'nav.reconnus', icon: Contact },
+      { to: '/fournisseurs', label: 'nav.suppliers', icon: Truck },
       { to: '/equipe-interne', label: 'nav.internalTeam', icon: Shield },
       { to: '/main-oeuvre', label: 'nav.workforce', icon: HardHat },
       { to: '/chauffeurs', label: 'nav.drivers', icon: Car },
@@ -50,6 +51,7 @@ export const navbarGroups: NavGroup[] = [
     icon: Building2,
     items: [
       { to: '/projets', label: 'nav.projects', icon: MapPin },
+      { to: '/chantiers', label: 'nav.sites', icon: HardHat },
       { to: '/biens', label: 'nav.properties', icon: Building2 },
       { to: '/ventes', label: 'nav.sales', icon: Handshake },
       { to: '/locations', label: 'nav.rentals', icon: Home },
@@ -76,7 +78,6 @@ export const navbarGroups: NavGroup[] = [
     icon: ShoppingCart,
     items: [
       { to: '/achats', label: 'nav.purchases', icon: ShoppingCart },
-      { to: '/fournisseurs', label: 'nav.suppliers', icon: Truck },
       { to: '/avancement', label: 'nav.progress', icon: TrendingUp },
     ],
   },

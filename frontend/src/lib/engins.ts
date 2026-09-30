@@ -91,6 +91,8 @@ export type Assignment = {
   extraCost: number;
   plannedCost: number;
   remark: string | null;
+  suspendedFrom?: string | null;
+  suspendedUntil?: string | null;
   returnedAt: string | null;
   returnCondition: string | null;
   returnCounter: number | null;

@@ -1,7 +1,7 @@
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, Users } from 'lucide-react';
+import { PauseCircle, Plus, Trash2, Users } from 'lucide-react';
 import { api, formatDate } from '../lib/api';
 import { CHAUFFEUR_CATEGORY, workforceDetailPathForCategory } from '../lib/workforceScope';
 import { Btn, Input, MacActionBtn, MacSearch, Modal, Select, TableWrap, Td, Th } from './ui';
@@ -13,6 +13,9 @@ export type SiteAssignment = {
   functionRole?: string | null;
   tranche?: string | null;
   startDate?: string | null;
+  endDate?: string | null;
+  suspendedFrom?: string | null;
+  suspendedUntil?: string | null;
   workforce: {
     id: string;
     firstName: string;
@@ -35,16 +38,38 @@ type WorkerOption = {
   assignments?: Array<{ chantier?: { id?: string; name?: string } | null }>;
 };
 
+function isoDay(value?: string | null) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function todayIso() {
+  return isoDay(new Date().toISOString());
+}
+
+export function suspensionState(assignment: { suspendedFrom?: string | null; suspendedUntil?: string | null }) {
+  if (!assignment.suspendedFrom) return 'none' as const;
+  const today = todayIso();
+  const from = isoDay(assignment.suspendedFrom);
+  const until = isoDay(assignment.suspendedUntil);
+  if (until && until < today) return 'none' as const;
+  if (from > today) return 'planned' as const;
+  return 'active' as const;
+}
+
 type Props = {
   chantierId: string;
   assignments: SiteAssignment[];
   tranches: string[];
   /** Quand on est sur une tranche : liste déjà filtrée, et les nouveaux ouvriers y sont affectés. */
   fixedTranche?: string;
+  scope?: 'workers' | 'drivers';
   onChanged: () => void;
 };
 
-export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedTranche, onChanged }: Props) {
+export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedTranche, scope = 'workers', onChanged }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -55,6 +80,9 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
   const [tranche, setTranche] = useState('');
   const [functionRole, setFunctionRole] = useState('');
   const [saving, setSaving] = useState(false);
+  const [suspendTarget, setSuspendTarget] = useState<SiteAssignment | null>(null);
+  const [suspendFrom, setSuspendFrom] = useState(todayIso());
+  const [suspendUntil, setSuspendUntil] = useState('');
   const [missionFilter, setMissionFilter] = useState<'all' | 'mission' | 'free'>('all');
 
   const assignedIds = useMemo(() => {
@@ -96,7 +124,10 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
     setOpen(true);
     setWorkersLoading(true);
     try {
-      const rows = await api<WorkerOption[]>(`/chantiers/workforce/list?excludeCategory=${encodeURIComponent(CHAUFFEUR_CATEGORY)}`);
+      const listQs = scope === 'drivers'
+        ? `category=${encodeURIComponent(CHAUFFEUR_CATEGORY)}`
+        : `excludeCategory=${encodeURIComponent(CHAUFFEUR_CATEGORY)}`;
+      const rows = await api<WorkerOption[]>(`/chantiers/workforce/list?${listQs}`);
       setWorkers(rows);
     } catch {
       setWorkers([]);
@@ -152,6 +183,56 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
     }
   }
 
+  function openSuspend(assignment: SiteAssignment) {
+    const state = suspensionState(assignment);
+    setSuspendTarget(assignment);
+    setSuspendFrom(state === 'none' ? todayIso() : isoDay(assignment.suspendedFrom));
+    setSuspendUntil(state === 'none' ? '' : isoDay(assignment.suspendedUntil));
+  }
+
+  async function saveSuspension(e: React.FormEvent) {
+    e.preventDefault();
+    if (!suspendTarget || !suspendFrom) return;
+    try {
+      await api(`/chantiers/${chantierId}/assign/${suspendTarget.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ suspendedFrom: suspendFrom, suspendedUntil: suspendUntil || null }),
+      });
+      setSuspendTarget(null);
+      onChanged();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function liftSuspension() {
+    if (!suspendTarget) return;
+    try {
+      await api(`/chantiers/${chantierId}/assign/${suspendTarget.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ suspendedFrom: null, suspendedUntil: null }),
+      });
+      setSuspendTarget(null);
+      onChanged();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  function suspensionTitle(assignment: SiteAssignment) {
+    const state = suspensionState(assignment);
+    const from = formatDate(assignment.suspendedFrom);
+    const until = formatDate(assignment.suspendedUntil);
+    if (state === 'planned') {
+      return assignment.suspendedUntil
+        ? t('siteOps.suspendedRange', { from, until })
+        : t('siteOps.suspendedPlanned', { from });
+    }
+    return assignment.suspendedUntil
+      ? t('siteOps.suspendedRange', { from, until })
+      : t('siteOps.suspendedFrom', { from });
+  }
+
   async function remove(assignment: SiteAssignment) {
     if (!await appConfirm(t('msg.confirmRemoveWorkerFromSite'))) return;
     try {
@@ -167,11 +248,15 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-[13px] font-medium text-gic-ink tracking-tight inline-flex items-center gap-1.5">
-            <Users size={15} /> {t('msg.workersAssignedTitle')}
+            <Users size={15} /> {scope === 'drivers' ? t('msg.driversAssignedTitle') : t('msg.workersAssignedTitle')}
           </p>
-          <p className="text-[11px] text-gic-muted mt-0.5">{t('msg.workersOnSiteCount', { count: assignments.length })}</p>
+          <p className="text-[11px] text-gic-muted mt-0.5">
+            {scope === 'drivers'
+              ? t('msg.driversOnSiteCount', { count: assignments.length })
+              : t('msg.workersOnSiteCount', { count: assignments.length })}
+          </p>
         </div>
-        <Btn icon={Plus} onClick={openAssign}>{t('actions.assignWorkers')}</Btn>
+        <Btn icon={Plus} onClick={openAssign}>{scope === 'drivers' ? t('actions.assignDrivers') : t('actions.assignWorkers')}</Btn>
       </div>
 
       {assignments.length > 0 && (
@@ -179,7 +264,7 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
       )}
 
       {visible.length === 0 ? (
-        <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptyWorkerOnSite')}</p>
+        <p className="py-6 text-[12px] text-gic-muted text-center">{scope === 'drivers' ? t('msg.emptyDriversOnSite') : t('msg.emptyWorkerOnSite')}</p>
       ) : (
         <TableWrap mac>
           <thead>
@@ -189,6 +274,7 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
               <Th mac>{t('columns.function')}</Th>
               <Th mac>{t('columns.tranche')}</Th>
               <Th mac>{t('columns.start')}</Th>
+              <Th mac>{t('siteOps.suspend')}</Th>
               <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
             </tr>
           </thead>
@@ -196,9 +282,14 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
             {visible.map((a) => (
               <tr key={a.id}>
                 <Td mac>
-                  <Link to={workforceDetailPathForCategory(a.workforce.category, a.workforce.id)} className="mac-table-ref">
-                    {a.workforce.firstName} {a.workforce.lastName}
-                  </Link>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Link to={workforceDetailPathForCategory(a.workforce.category, a.workforce.id)} className="mac-table-ref">
+                      {a.workforce.firstName} {a.workforce.lastName}
+                    </Link>
+                    {suspensionState(a) !== 'none' && (
+                      <PauseCircle size={15} className="text-[#ff9500] shrink-0" title={suspensionTitle(a)} aria-label={suspensionTitle(a)} />
+                    )}
+                  </span>
                   {a.workforce.phone1 && <span className="block text-[10px] text-gic-muted">{a.workforce.phone1}</span>}
                 </Td>
                 <Td mac className="mac-table-muted">{a.workforce.category || '—'}</Td>
@@ -220,8 +311,17 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
                   )}
                 </Td>
                 <Td mac className="mac-table-muted">{a.startDate ? formatDate(a.startDate) : '—'}</Td>
+                <Td mac className="mac-table-muted">
+                  {suspensionState(a) === 'none' ? '—' : suspensionTitle(a)}
+                </Td>
                 <Td mac className="mac-td-actions">
                   <div className="mac-actions">
+                    <MacActionBtn
+                      icon={PauseCircle}
+                      tone="orange"
+                      title={suspensionState(a) === 'none' ? t('siteOps.suspend') : t('siteOps.editSuspension')}
+                      onClick={() => openSuspend(a)}
+                    />
                     <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => remove(a)} />
                   </div>
                 </Td>
@@ -246,7 +346,7 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
         }
       >
         <form id="assign-workers-form" onSubmit={assign} className="grid gap-3">
-          <p className="text-[12px] text-gic-muted">{t('msg.assignWorkersHint')}</p>
+          <p className="text-[12px] text-gic-muted">{scope === 'drivers' ? t('msg.assignDriversHint') : t('msg.assignWorkersHint')}</p>
           <EntityPickerPanel
             items={pickerItems}
             excludeIds={assignedIds}
@@ -278,6 +378,31 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
             onChange={(e) => setFunctionRole(e.target.value)}
             placeholder={t('columns.function')}
           />
+        </form>
+      </Modal>
+
+      <Modal
+        open={!!suspendTarget}
+        title={suspendTarget && suspensionState(suspendTarget) !== 'none' ? t('siteOps.editSuspension') : t('siteOps.suspend')}
+        onClose={() => setSuspendTarget(null)}
+        footer={
+          <>
+            {suspendTarget && suspensionState(suspendTarget) !== 'none' && (
+              <Btn variant="secondary" onClick={liftSuspension}>{t('siteOps.liftSuspension')}</Btn>
+            )}
+            <Btn variant="secondary" onClick={() => setSuspendTarget(null)}>{t('common.cancel')}</Btn>
+            <Btn form="suspend-worker-form" type="submit" disabled={!suspendFrom}>{t('common.save')}</Btn>
+          </>
+        }
+      >
+        <form id="suspend-worker-form" onSubmit={saveSuspension} className="grid gap-3">
+          {suspendTarget && (
+            <p className="text-[13px] font-medium text-gic-ink">
+              {suspendTarget.workforce.firstName} {suspendTarget.workforce.lastName}
+            </p>
+          )}
+          <Input label={t('siteOps.suspendFrom')} type="date" required value={suspendFrom} onChange={(e) => setSuspendFrom(e.target.value)} />
+          <Input label={t('siteOps.suspendUntil')} type="date" value={suspendUntil} onChange={(e) => setSuspendUntil(e.target.value)} />
         </form>
       </Modal>
     </div>

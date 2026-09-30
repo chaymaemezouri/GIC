@@ -342,6 +342,16 @@ router.put('/assignments/:id', async (req, res) => {
     plannedCost: req.body.plannedCost !== undefined ? num(req.body.plannedCost) ?? 0 : existing.plannedCost,
     remark: req.body.remark !== undefined ? text(req.body.remark) : existing.remark,
   };
+  const suspendedFrom = req.body.suspendedFrom !== undefined ? date(req.body.suspendedFrom) : existing.suspendedFrom;
+  const suspendedUntil = req.body.suspendedUntil !== undefined ? date(req.body.suspendedUntil) : existing.suspendedUntil;
+  if (suspendedUntil && !suspendedFrom) return fail(res, 'Le début de travail est requis');
+  if (suspendedFrom && suspendedUntil && suspendedUntil < suspendedFrom) {
+    return fail(res, 'La fin est avant le début de travail');
+  }
+  Object.assign(data, {
+    ...(req.body.suspendedFrom !== undefined ? { suspendedFrom } : {}),
+    ...(req.body.suspendedUntil !== undefined ? { suspendedUntil } : {}),
+  });
   data.plannedCost = plannedCostOf(data, num(req.body.plannedHours));
   const updated = await prisma.enginAssignment.update({ where: { id }, data, include: assignmentInclude });
   await refreshEnginStatus(existing.enginId);

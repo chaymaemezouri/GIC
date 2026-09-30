@@ -1201,7 +1201,7 @@ async function sessionScopeList(chantierId: string, tranche: string) {
   return prisma.pointageSession.findMany({
     where: { chantierId, ...(tranche ? { tranche } : {}) },
     orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-    include: { lines: { include: { workforce: { select: { dailySalary: true } } } } },
+    include: { lines: { include: { workforce: { select: { dailySalary: true, category: true } } } } },
   });
 }
 
@@ -1221,9 +1221,22 @@ router.get('/pointage/sessions', async (req, res) => {
   const chantierId = String(req.query.chantierId || '').trim();
   if (!chantierId) return res.status(400).json({ message: 'chantierId requis' });
   const tranche = normalizeTranche(req.query.tranche);
+  const category = String(req.query.category || '').trim();
+  const excludeCategory = String(req.query.excludeCategory || '').trim();
   const sessions = await sessionScopeList(chantierId, tranche);
+  const scoped = sessions
+    .map((s) => ({
+      ...s,
+      lines: s.lines.filter((line) => {
+        const cat = line.workforce?.category || '';
+        if (category) return cat === category;
+        if (excludeCategory) return cat !== excludeCategory;
+        return true;
+      }),
+    }))
+    .filter((s) => !category && !excludeCategory || s.lines.length > 0);
   res.json(
-    sessions.map((s, i) => {
+    scoped.map((s, i) => {
       const { lines, ...rest } = s;
       return { ...rest, index: i + 1, ...summarizeSessionLines(lines) };
     }),
@@ -2433,6 +2446,50 @@ router.delete('/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+router.get('/:id/assign', async (req, res) => {
+  const items = await prisma.workforceAssignment.findMany({
+    where: { chantierId: String(req.params.id) },
+    include: {
+      workforce: { select: { id: true, firstName: true, lastName: true, category: true, groupe: true, phone1: true } },
+    },
+    orderBy: [{ workforce: { lastName: 'asc' } }, { workforce: { firstName: 'asc' } }],
+  });
+  res.json(items);
+});
+
+function assignmentDates(body: Record<string, unknown>, partial = false) {
+  const keys = ['startDate', 'endDate', 'suspendedFrom', 'suspendedUntil'] as const;
+  const data: Partial<Record<(typeof keys)[number], Date | null>> = {};
+  for (const key of keys) {
+    if (partial && !(key in body)) continue;
+    const raw = body[key];
+    if (raw == null || raw === '') {
+      if (key !== 'startDate' && (partial ? key in body : key === 'endDate' || key.startsWith('suspended'))) data[key] = null;
+      continue;
+    }
+    try {
+      data[key] = parsePointageDate(String(raw));
+    } catch {
+      return { error: 'Date invalide', data };
+    }
+  }
+  return { error: '', data };
+}
+
+function assignmentSpanError(
+  data: Partial<Record<'startDate' | 'endDate' | 'suspendedFrom' | 'suspendedUntil', Date | null>>,
+  existing?: { startDate: Date; endDate: Date | null; suspendedFrom: Date | null; suspendedUntil: Date | null },
+) {
+  const start = data.startDate ?? existing?.startDate;
+  const end = 'endDate' in data ? data.endDate : existing?.endDate;
+  if (start && end && end < start) return 'La date de fin est avant la date d’affectation';
+  const from = 'suspendedFrom' in data ? data.suspendedFrom : existing?.suspendedFrom;
+  const until = 'suspendedUntil' in data ? data.suspendedUntil : existing?.suspendedUntil;
+  if (until && !from) return 'Le début de la suspension est requis';
+  if (from && until && until < from) return 'La fin de la suspension est avant le début';
+  return '';
+}
+
 router.post('/:id/assign', async (req, res) => {
   const chantierId = String(req.params.id);
   const workforceId = String(req.body.workforceId || '').trim();
@@ -2445,12 +2502,17 @@ router.post('/:id/assign', async (req, res) => {
   if (existing) return res.status(400).json({ message: 'Ouvrier déjà affecté à ce chantier' });
 
   const tranche = req.body.tranche ? String(req.body.tranche).trim() : null;
+  const dates = assignmentDates(req.body);
+  if (dates.error) return res.status(400).json({ message: dates.error });
+  const spanError = assignmentSpanError(dates.data);
+  if (spanError) return res.status(400).json({ message: spanError });
   const assignment = await prisma.workforceAssignment.create({
     data: {
       chantierId,
       workforceId,
       functionRole: req.body.functionRole ? String(req.body.functionRole).trim() : null,
       tranche,
+      ...dates.data,
     },
     include: { workforce: true },
   });
@@ -2467,9 +2529,21 @@ router.put('/:id/assign/:assignmentId', async (req, res) => {
   });
   if (!assignment) return res.status(404).json({ message: 'Affectation introuvable' });
 
-  const data: { tranche?: string | null; functionRole?: string | null } = {};
+  const data: {
+    tranche?: string | null;
+    functionRole?: string | null;
+    startDate?: Date;
+    endDate?: Date | null;
+    suspendedFrom?: Date | null;
+    suspendedUntil?: Date | null;
+  } = {};
   if ('tranche' in req.body) data.tranche = req.body.tranche ? String(req.body.tranche).trim() : null;
   if ('functionRole' in req.body) data.functionRole = req.body.functionRole ? String(req.body.functionRole).trim() : null;
+  const dates = assignmentDates(req.body, true);
+  if (dates.error) return res.status(400).json({ message: dates.error });
+  const spanError = assignmentSpanError(dates.data, assignment);
+  if (spanError) return res.status(400).json({ message: spanError });
+  Object.assign(data, dates.data);
   const updated = await prisma.workforceAssignment.update({
     where: { id: assignmentId },
     data,

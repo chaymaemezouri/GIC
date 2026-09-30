@@ -216,7 +216,7 @@
 <ol class="steps">
   <li>Chantiers → Ajouter : nom, adresse, dates, chef, budget achats, photo, lien vers le projet s'il existe.</li>
   <li>La vue d'ensemble montre l'avancement, les tranches, le personnel, le <strong>décaissé</strong> (achats, main-d'œuvre, engins) et le <strong>reste</strong> du budget.</li>
-  <li>Le menu <strong>Actions</strong> imprime la <strong>situation de travaux</strong> et la <strong>feuille de pointage</strong>.</li>
+  <li>L'icône imprimante imprime la fiche du chantier. La feuille de pointage s'imprime depuis le pointage du jour.</li>
 </ol>
 <h3>Tranches</h3>
 <ol class="steps">
@@ -231,7 +231,7 @@
 <ul>
   <li><strong>Affecter</strong> — choisir l'ouvrier, la tranche (ou le chantier entier), la fonction. Enregistrez.</li>
   <li><strong>Transférer</strong> — choisir l'ouvrier, le chantier de destination et la tranche. L'ancienne place est quittée. On ne peut pas le mettre deux fois au même endroit.</li>
-  <li><strong>Pointage</strong> — aperçu des journées du chantier, filtré par tranche et par dates. Le bouton ouvre la page Pointage déjà filtrée.</li>
+  <li><strong>Pointage</strong> — la saisie se fait ici, sans quitter la fiche. On choisit la tranche, on ouvre le jour, on saisit, on valide.</li>
   <li><strong>Synthèse</strong> — jours, brut, acomptes, primes et reste par ouvrier.</li>
 </ul>
 <h3>Engins sur le chantier</h3>
@@ -262,28 +262,29 @@
 <p>Un pointage est la journée d'un ouvrier sur un chantier, ou sur une tranche. Il n'y a qu'une ligne par ouvrier, par jour et par chantier.</p>
 <h3>Ouvrir la bonne feuille</h3>
 <ol class="steps">
-  <li>Pointage → onglet <strong>Gestion du pointage</strong>.</li>
-  <li>Choisissez le chantier, puis <strong>Chantier entier</strong> ou une tranche.</li>
-  <li>La liste des feuilles défile avec les flèches, ou par le menu (Pointage 12 — date — effectif).</li>
-  <li><strong>Du</strong> et <strong>Au</strong> ne gardent que les feuilles de la période. <strong>Date précise</strong> n'en garde qu'une. S'il n'y a rien ce jour-là, le message « Aucun pointage sur cette période » s'affiche.</li>
-  <li><strong>Nouveau pointage</strong> — date et remarque. On peut reprendre les ouvriers de la feuille précédente.</li>
+  <li>Sur le chantier, ouvrez <strong>Pointage</strong> (ou Ouvriers → Pointage). Tout se fait sur la fiche.</li>
+  <li>Choisissez <strong>Toutes les tranches</strong>, <strong>Chantier entier</strong>, ou une tranche.</li>
+  <li>Les flèches passent au jour précédent ou suivant. Le menu au milieu liste les feuilles (date, tranche, effectif).</li>
+  <li><strong>Aller à une date</strong> ouvre directement ce jour, sans faire défiler la liste. S'il n'y a pas de feuille, le message « Aucun pointage ce jour » s'affiche.</li>
+  <li><strong>Nouveau pointage</strong> est à droite des filtres. On indique la date, une remarque, et on peut reprendre les ouvriers de la feuille précédente.</li>
 </ol>
 <div class="warn">On ne mélange pas, le même jour, une feuille « chantier entier » et une feuille de tranche. Choisissez l'un ou l'autre.</div>
 <h3>Saisir</h3>
 <ol class="steps">
-  <li>Les boutons sont <strong>au-dessus de la liste</strong> : Ajouter des ouvriers, Enregistrer tout, Valider le pointage.</li>
-  <li>La ligne « Appliquer à toutes les lignes non validées » est juste sous ces boutons : elle pose le même nombre de jours partout avant l'enregistrement.</li>
+  <li>Les chiffres du jour (ouvriers, journées, brut, net) sont au-dessus. Les filtres et les boutons sont juste sous ces chiffres, au-dessus de la liste.</li>
+  <li><strong>Rechercher un ouvrier</strong> filtre la liste par nom ou référence.</li>
+  <li><strong>Valider le pointage</strong> et <strong>Ajouter des ouvriers</strong> sont des boutons avec texte. <strong>Enregistrer</strong> et <strong>Imprimer</strong> sont des icônes, à droite de ces boutons.</li>
+  <li>« Appliquer à toutes les lignes non validées » pose le même nombre de jours partout avant l'enregistrement.</li>
   <li>Sur chaque ligne : jours, taux, avance, prime. Le brut et le net se calculent.</li>
-  <li><strong>Enregistrer tout</strong> garde le brouillon. <strong>Valider</strong> fige les lignes. On peut encore annuler la validation si une correction est nécessaire.</li>
+  <li>Enregistrer garde le brouillon. Valider fige les lignes. On peut encore annuler la validation si une correction est nécessaire.</li>
   <li>Retirer un ouvrier demande une confirmation. Supprimer toute la feuille demande un motif.</li>
 </ol>
 <h3>Les autres vues</h3>
 <ul>
-  <li><strong>Synthèse par ouvrier</strong> — totaux par personne, avec Du, Au ou date précise, et un filtre validé / en attente.</li>
-  <li><strong>Historique</strong> — toutes les lignes, tous chantiers, mêmes filtres de dates, export et impression.</li>
-  <li>Sur le chantier et sur la fiche ouvrier, les mêmes dates limitent ce qu'on voit.</li>
+  <li><strong>Synthèse</strong> — sur le chantier, l'onglet à côté du pointage : totaux par ouvrier, avec Du, Au ou date précise.</li>
+  <li><strong>Historique</strong> — page Pointage, toutes les lignes et tous les chantiers, avec les dates, l'export et l'impression.</li>
 </ul>
-<p>Imprimez la feuille depuis le bouton Imprimer. Les zones <strong>Établi par</strong>, <strong>Cachet et signature</strong> et <strong>Reçu par</strong> sont en bas de page.</p>
+<p>L'icône Imprimer reprend la feuille ouverte. Les zones <strong>Établi par</strong>, <strong>Cachet et signature</strong> et <strong>Reçu par</strong> sont en bas de page.</p>
 
 <h2 id="achats">10. Les achats et les fournisseurs</h2>
 <h3>Fournisseur</h3>
@@ -354,8 +355,8 @@
   <tbody>
     <tr><td>Fiche client, bien, chantier, ouvrier, engin, vente</td><td>Icône imprimer de la fiche</td></tr>
     <tr><td>Bon d'affectation et bon de transfert</td><td>Fiche ouvrier, s'il est affecté</td></tr>
-    <tr><td>Feuille de pointage</td><td>Page Pointage, et menu Actions du chantier</td></tr>
-    <tr><td>Situation de travaux</td><td>Menu Actions du chantier</td></tr>
+    <tr><td>Feuille de pointage</td><td>Icône Imprimer sur le pointage du chantier</td></tr>
+    <tr><td>Situation de travaux</td><td>Les chiffres sont sur la vue d'ensemble du chantier (décaissé, reste, avancement)</td></tr>
     <tr><td>Bon de sortie d'outil</td><td>Fiche engin, s'il est sur un chantier</td></tr>
     <tr><td>Bon de commande et bon de réception</td><td>Fiche achat</td></tr>
     <tr><td>Reçu de vente</td><td>Fiche vente</td></tr>
@@ -369,7 +370,7 @@
 <ul>
   <li><strong>Recherche du haut</strong> — nom, référence, CIN, immatriculation. Le résultat ouvre la fiche, pas seulement la liste.</li>
   <li><strong>Recherche de la liste</strong> — filtre pendant que vous tapez (clients, chantiers, ouvriers, achats, ventes, etc.).</li>
-  <li><strong>Du / Au</strong> — période. Une seule des deux dates laisse l'autre côté ouvert. Une <strong>date précise</strong>, sur le pointage, ne garde que ce jour.</li>
+  <li><strong>Du / Au</strong> — période, sur les listes qui les proposent. Une seule des deux dates laisse l'autre côté ouvert. Sur le pointage, <strong>Aller à une date</strong> ouvre ce jour.</li>
   <li><strong>Puces et menus Filtres</strong> — statut, type, chantier. Ils s'appliquent au choix.</li>
   <li><strong>Retour depuis une fiche</strong> — la liste retrouve le filtre et la page.</li>
   <li><strong>À traiter aujourd'hui</strong> — assurances, contrôles techniques, échéances impayées, livraisons en retard, documents refusés, expirés ou obligatoires manquants.</li>
@@ -399,7 +400,7 @@
 </ol>
 <h3>Sur le chantier</h3>
 <ol class="steps">
-  <li>Ouvrez le pointage du jour (date précise = aujourd'hui).</li>
+  <li>Ouvrez le pointage du chantier, puis <strong>Aller à une date</strong> pour aujourd'hui. Cherchez un ouvrier dans la liste s'il y en a beaucoup.</li>
   <li>Ajoutez les présents, posez les jours, enregistrez, validez.</li>
   <li>Affectez ou transférez un ouvrier ou un engin si l'équipe a changé.</li>
   <li>Réceptionnez les marchandises (étape Livré de l'achat) et faites signer le bon.</li>
@@ -408,7 +409,7 @@
 <h3>En fin de période</h3>
 <ol class="steps">
   <li>Salaires : contrôlez les journées validées, les acomptes et les RIB, puis préparez les virements.</li>
-  <li>Situation de travaux : imprimez-la depuis le chantier et faites-la signer.</li>
+  <li>Vue d'ensemble du chantier : contrôlez le décaissé, le reste et l'avancement avant de clôturer la période.</li>
   <li>Archivez les achats soldés et les documents expirés une fois renouvelés.</li>
 </ol>
 

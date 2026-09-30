@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, Download, Pencil, Plus, Printer, Trash2, Truck, Undo, Undo2, Wallet } from 'lucide-react';
+import { CalendarClock, Check, Download, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Truck, Undo, Undo2, Wallet } from 'lucide-react';
 import { api, formatDate, formatMad } from '../../lib/api';
 import { appAlert } from '../../lib/dialog';
 import { printRows, type PrintColumn } from '../../lib/listPrint';
@@ -424,6 +424,14 @@ export function AssignmentsPanel({
   const [editing, setEditing] = useState<Assignment | null>(null);
   const [returning, setReturning] = useState<Assignment | null>(null);
   const [deleting, setDeleting] = useState<Assignment | null>(null);
+  const [siteQuery, setSiteQuery] = useState('');
+  const [siteKind, setSiteKind] = useState('');
+  const [siteMode, setSiteMode] = useState('');
+  const [siteStatus, setSiteStatus] = useState('');
+  const [siteTranche, setSiteTranche] = useState('');
+  const [siteTranches, setSiteTranches] = useState<string[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
   const selection = useRowSelection<Assignment>();
 
   const query = useMemo(
@@ -454,6 +462,22 @@ export function AssignmentsPanel({
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, reloadKey]);
+
+  useEffect(() => {
+    if (!site || !fixed.chantierId) return;
+    api<{ name: string }[]>(`/chantiers/${fixed.chantierId}/tranches`)
+      .then((rows) => setSiteTranches(rows.map((row) => row.name)))
+      .catch(() => setSiteTranches([]));
+  }, [site, fixed.chantierId]);
+
+  useEffect(() => {
+    if (!filtersOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFiltersOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [filtersOpen]);
 
   function changed() {
     invalidateFleetRefs();
@@ -486,6 +510,20 @@ export function AssignmentsPanel({
   }
 
   const items = data?.items || [];
+  const siteFiltersOn = !!(siteKind || siteMode || siteStatus || siteTranche);
+  const shownItems = useMemo(() => {
+    if (!site) return items;
+    const needle = siteQuery.trim().toLowerCase();
+    return items.filter((a) => {
+      if (needle && !`${a.enginLabel} ${a.responsible || ''} ${a.tranche || ''}`.toLowerCase().includes(needle)) return false;
+      if (siteKind && a.engin?.kind !== siteKind) return false;
+      if (siteMode && a.mode !== siteMode) return false;
+      if (siteStatus && (a.engin?.status || a.status) !== siteStatus) return false;
+      if (siteTranche === '__whole' && a.tranche) return false;
+      if (siteTranche && siteTranche !== '__whole' && a.tranche !== siteTranche) return false;
+      return true;
+    });
+  }, [site, items, siteQuery, siteKind, siteMode, siteStatus, siteTranche]);
   const showEngin = !fixed.enginId;
   const showChantier = !fixed.chantierId;
 
@@ -543,7 +581,73 @@ export function AssignmentsPanel({
       {!site && <SelectionBar selection={selection} onPrint={printList} />}
 
       <Card padding={false} className="overflow-visible">
-        <div className="flex flex-wrap items-center gap-2 p-3 border-b border-black/[0.05]">
+        <div className="flex w-full flex-wrap items-center gap-2 border-b border-black/[0.05] p-3">
+          {site && (
+            <>
+              <MacSearch value={siteQuery} onChange={setSiteQuery} placeholder={t('fleet.filters.searchEngin')} className="w-full max-w-sm" />
+              <div ref={filterRef} className="relative">
+                <Btn
+                  variant="secondary"
+                  icon={SlidersHorizontal}
+                  title={t('common.filters')}
+                  aria-label={t('common.filters')}
+                  className={`relative${siteFiltersOn ? ' ring-1 ring-[#007aff]/40' : ''}`}
+                  onClick={() => setFiltersOpen((open) => !open)}
+                >
+                  {t('common.filters')}
+                  {siteFiltersOn && <span className="mac-filter-dot" aria-hidden />}
+                </Btn>
+                {filtersOpen && (
+                  <div className="mac-filter-menu" role="menu">
+                    <p className="mac-filter-menu-section">{t('fleet.fields.kind')}</p>
+                    {[
+                      { id: '', label: t('fleet.filters.allKinds') },
+                      { id: 'engin', label: t('fleet.kind.engin') },
+                      { id: 'materiel', label: t('fleet.kind.materiel') },
+                    ].map((option) => (
+                      <button key={option.id || 'all-kind'} type="button" className={`mac-filter-menu-item${siteKind === option.id ? ' mac-filter-menu-item-active' : ''}`} onClick={() => setSiteKind(option.id)}>
+                        <span>{option.label}</span>
+                        {siteKind === option.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
+                      </button>
+                    ))}
+                    <p className="mac-filter-menu-section">{t('fleet.fields.mode')}</p>
+                    {[
+                      { id: '', label: t('common.all') },
+                      { id: 'propriete', label: t('fleet.mode.propriete') },
+                      { id: 'location', label: t('fleet.mode.location') },
+                    ].map((option) => (
+                      <button key={`mode-${option.id || 'all'}`} type="button" className={`mac-filter-menu-item${siteMode === option.id ? ' mac-filter-menu-item-active' : ''}`} onClick={() => setSiteMode(option.id)}>
+                        <span>{option.label}</span>
+                        {siteMode === option.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
+                      </button>
+                    ))}
+                    <p className="mac-filter-menu-section">{t('fields.status')}</p>
+                    <button type="button" className={`mac-filter-menu-item${siteStatus === '' ? ' mac-filter-menu-item-active' : ''}`} onClick={() => setSiteStatus('')}>
+                      <span>{t('fleet.filters.allStatuses')}</span>
+                      {siteStatus === '' && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
+                    </button>
+                    {SITE_TOOL_STATUSES.map((statusId) => (
+                      <button key={statusId} type="button" className={`mac-filter-menu-item${siteStatus === statusId ? ' mac-filter-menu-item-active' : ''}`} onClick={() => setSiteStatus(statusId)}>
+                        <span>{t(`fleet.status.${statusId}`)}</span>
+                        {siteStatus === statusId && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
+                      </button>
+                    ))}
+                    <p className="mac-filter-menu-section">{t('columns.tranche')}</p>
+                    {[
+                      { id: '', label: t('fleet.filters.allTranches') },
+                      { id: '__whole', label: t('msg.wholeSite') },
+                      ...siteTranches.map((name) => ({ id: name, label: name })),
+                    ].map((option) => (
+                      <button key={`tr-${option.id || 'all'}`} type="button" className={`mac-filter-menu-item${siteTranche === option.id ? ' mac-filter-menu-item-active' : ''}`} onClick={() => { setSiteTranche(option.id); setFiltersOpen(false); }}>
+                        <span>{option.label}</span>
+                        {siteTranche === option.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
           {toolbar && !site && (
             <>
               <MacSearch value={q} onChange={setQ} placeholder={t('fleet.hints.searchAssignments')} />
@@ -595,19 +699,20 @@ export function AssignmentsPanel({
                 {!site && <SelectAllTh selection={selection} rows={items} />}
                 {showEngin && <Th mac>{t('fleet.fields.engin')}</Th>}
                 {showChantier && !site && <Th mac>{t('fleet.fields.chantierTranche')}</Th>}
+                {site && <Th mac>{t('fleet.fields.kind')}</Th>}
                 {!showChantier && <Th mac>{t('fleet.fields.tranche')}</Th>}
-                {!site && <Th mac>{t('fleet.fields.period')}</Th>}
-                {!site && <Th mac>{t('fleet.fields.costMethod')}</Th>}
-                {!site && <Th mac className="text-right">{t('fleet.fields.plannedCost')}</Th>}
-                {!site && <Th mac className="text-right">{t('fleet.fields.actualCost')}</Th>}
-                {!site && <Th mac className="text-right">{t('fleet.fields.expensesShare')}</Th>}
-                {!site && <Th mac className="text-right">{t('fleet.fields.totalCost')}</Th>}
+                <Th mac>{t('fleet.fields.period')}</Th>
+                <Th mac>{t('fleet.fields.costMethod')}</Th>
+                <Th mac className="text-right">{t('fleet.fields.plannedCost')}</Th>
+                <Th mac className="text-right">{t('fleet.fields.actualCost')}</Th>
+                <Th mac className="text-right">{t('fleet.fields.expensesShare')}</Th>
+                <Th mac className="text-right">{t('fleet.fields.totalCost')}</Th>
                 <Th mac>{site ? t('fields.status') : t('fleet.fields.status')}</Th>
                 <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
               </tr>
             </thead>
             <tbody>
-              {items.map((a) => (
+              {shownItems.map((a) => (
                 <tr key={a.id}>
                   {!site && <SelectTd selection={selection} row={a} />}
                   {showEngin && (
@@ -622,8 +727,9 @@ export function AssignmentsPanel({
                       {a.tranche && <span className="block text-[10px] mac-table-muted">{a.tranche}</span>}
                     </Td>
                   )}
+                  {site && <Td mac className="mac-table-muted">{a.engin?.kind ? t(`fleet.kind.${a.engin.kind}`) : '—'}</Td>}
                   {!showChantier && <Td mac>{a.tranche || <span className="mac-table-muted">{t('fleet.hints.wholeChantier')}</span>}</Td>}
-                  {!site && <Td mac className="text-[11px] whitespace-nowrap">
+                  <Td mac className="text-[11px] whitespace-nowrap">
                     {formatDate(a.startDate)} → {a.endDate ? formatDate(a.endDate) : '…'}
                     <span className="block text-[10px] mac-table-muted">
                       {a.plannedDays != null ? t('fleet.hints.daysPlanned', { days: a.plannedDays }) : t('fleet.hints.openEndedShort')}
@@ -631,17 +737,17 @@ export function AssignmentsPanel({
                       {a.hours ? ` · ${a.hours} h` : ''}
                     </span>
                     {a.responsible && <span className="block text-[10px] mac-table-muted">{a.responsible}</span>}
-                  </Td>}
-                  {!site && <Td mac className="text-[11px]">
-                    {t(`fleet.costMethod.${a.costMethod}`)}
+                  </Td>
+                  <Td mac className="whitespace-nowrap text-[11px]">
+                    <span className="block">{t(`fleet.costMethod.${a.costMethod}`)}</span>
                     <span className="block text-[10px] mac-table-muted">
                       {a.costMethod === 'forfait' ? formatMad2(a.flatAmount) : a.costMethod === 'horaire' ? `${formatMad2(a.hourlyCost)} / h` : `${formatMad2(a.dailyCost)} / j`}
                     </span>
-                  </Td>}
-                  {!site && <Td mac className="text-right tabular-nums">{formatMad(a.plannedCost)}</Td>}
-                  {!site && <Td mac className="text-right tabular-nums">{formatMad(a.actualCost)}</Td>}
-                  {!site && <Td mac className="text-right tabular-nums mac-table-muted">{formatMad(a.expensesShare)}</Td>}
-                  {!site && <Td mac className="text-right tabular-nums font-semibold">{formatMad(a.totalCost)}</Td>}
+                  </Td>
+                  <Td mac className="text-right tabular-nums">{formatMad(a.plannedCost)}</Td>
+                  <Td mac className="text-right tabular-nums">{formatMad(a.actualCost)}</Td>
+                  <Td mac className="text-right tabular-nums mac-table-muted">{formatMad(a.expensesShare)}</Td>
+                  <Td mac className="text-right tabular-nums font-semibold">{formatMad(a.totalCost)}</Td>
                   <Td mac><FleetStatusPill status={site ? (a.engin?.status || a.status) : a.status} /></Td>
                   <Td mac className="mac-td-actions">
                     <div className="mac-actions">
@@ -655,15 +761,22 @@ export function AssignmentsPanel({
                 </tr>
               ))}
             </tbody>
-            {data && items.length > 1 && !site && (
+            {data && !site && shownItems.length > 1 && (
               <tfoot>
                 <tr className="font-semibold">
-                  <Td mac colSpan={(showEngin ? 1 : 0) + 4}>{t('fleet.hints.totalRows', { count: items.length })}</Td>
-                  <Td mac className="text-right tabular-nums">{formatMad(data.totals.planned)}</Td>
-                  <Td mac className="text-right tabular-nums">{formatMad(data.totals.actual)}</Td>
-                  <Td mac className="text-right tabular-nums">{formatMad(round2(data.totals.total - data.totals.actual))}</Td>
-                  <Td mac className="text-right tabular-nums">{formatMad(data.totals.total)}</Td>
-                  <Td mac colSpan={2}>{''}</Td>
+                  {!site && <Td mac />}
+                  {showEngin && <Td mac>{t('fleet.hints.totalRows', { count: shownItems.length })}</Td>}
+                  {showChantier && !site && <Td mac />}
+                  {site && <Td mac />}
+                  {!showChantier && <Td mac />}
+                  <Td mac />
+                  <Td mac />
+                  <Td mac className="text-right tabular-nums whitespace-nowrap">{formatMad(shownItems.reduce((s, row) => s + (row.plannedCost || 0), 0))}</Td>
+                  <Td mac className="text-right tabular-nums whitespace-nowrap">{formatMad(shownItems.reduce((s, row) => s + (row.actualCost || 0), 0))}</Td>
+                  <Td mac className="text-right tabular-nums whitespace-nowrap">{formatMad(shownItems.reduce((s, row) => s + (row.expensesShare || 0), 0))}</Td>
+                  <Td mac className="text-right tabular-nums whitespace-nowrap">{formatMad(shownItems.reduce((s, row) => s + (row.totalCost || 0), 0))}</Td>
+                  <Td mac />
+                  <Td mac />
                 </tr>
               </tfoot>
             )}

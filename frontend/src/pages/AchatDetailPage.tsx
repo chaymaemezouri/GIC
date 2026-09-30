@@ -2,7 +2,7 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  Pencil, Trash2, Printer, History, FileText, CheckCircle, RotateCcw, ShoppingCart, Hash, Calendar, Truck,
+  Pencil, Trash2, Printer, History, FileText, CheckCircle, RotateCcw, ShoppingCart, Hash, Calendar, Truck, GitBranch,
   HardHat, Layers, Wallet, Info as InfoIcon, Package, Upload, Plus, User, UserCheck, Building2, Receipt, ClipboardCheck,
 } from 'lucide-react';
 import { api, fetchSupplierList, fetchChantierList, formatDate, formatMad, openPrintUrl, uploadForm } from '../lib/api';
@@ -14,10 +14,10 @@ import { PurchaseFormFields, purchaseFormToBody, purchaseToForm, validatePurchas
 import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from '../components/PurchaseBadges';
 import {
   PURCHASE_DOC_TYPES, PURCHASE_PAYMENT_KINDS, PURCHASE_PAYMENT_MODES, PURCHASE_STATUSES,
-  formatAmount, nextPurchaseStatus, previousPurchaseStatus, round2, statusIndex, type PurchaseDetail,
+  formatAmount, nextPurchaseStatus, previousPurchaseStatus, round2, statusIndex, type PurchaseDetail, type PurchaseStatus,
 } from '../lib/purchases';
 
-type Tab = 'infos' | 'lignes' | 'livraisons' | 'documents' | 'paiements' | 'historique';
+type Tab = 'infos' | 'lignes' | 'livraisons' | 'workflow' | 'documents' | 'paiements' | 'historique';
 
 type DeliveryRow = { lineId: string; quantity: string; rejectedQuantity: string; remark: string };
 
@@ -34,6 +34,7 @@ export default function AchatDetailPage() {
   const [chantierTranches, setChantierTranches] = useState<{ id: string; name: string }[]>([]);
   const [families, setFamilies] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
+  const [stepFocus, setStepFocus] = useState<PurchaseStatus | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -408,11 +409,18 @@ export default function AchatDetailPage() {
               {PURCHASE_STATUSES.map((s, i) => {
                 const idx = statusIndex(p.status);
                 const cls = i < idx ? 'purchase-step-done' : i === idx ? 'purchase-step-current' : '';
+                const selected = (stepFocus || p.status) === s;
                 return (
-                  <span key={s} className={`purchase-step ${cls}`} title={t(`purchase.statusHint.${s}`)}>
+                  <button
+                    key={s}
+                    type="button"
+                    className={`purchase-step ${cls}${selected ? ' purchase-step-selected' : ''}`}
+                    title={t(`purchase.statusHint.${s}`)}
+                    onClick={() => { setStepFocus(s); setTab('workflow'); }}
+                  >
                     <span className="purchase-step-num">{i < idx ? '✓' : i + 1}</span>
                     {t(`purchase.status.${s}`)}
-                  </span>
+                  </button>
                 );
               })}
             </div>
@@ -489,6 +497,7 @@ export default function AchatDetailPage() {
               { id: 'infos', label: t('tabs.informations'), icon: InfoIcon },
               { id: 'lignes', label: t('purchase.tabs.lines'), icon: Package, badge: p.lines.length },
               { id: 'livraisons', label: t('purchase.tabs.deliveries'), icon: Truck, badge: p.deliveries.length },
+              { id: 'workflow', label: t('purchase.tabs.workflow'), icon: GitBranch },
               { id: 'documents', label: t('tabs.documents'), icon: FileText, badge: p.documents.length },
               { id: 'paiements', label: t('purchase.tabs.payments'), icon: Wallet, badge: p.payments.length },
               { id: 'historique', label: t('tabs.history'), icon: History },
@@ -691,6 +700,118 @@ export default function AchatDetailPage() {
             )}
           </div>
         )}
+
+        {tab === 'workflow' && (() => {
+          const focus = stepFocus || p.status;
+          const reached = statusIndex(focus) <= statusIndex(p.status);
+          const entry = [...p.history].reverse().find((h) => h.newStatus === focus);
+          return (
+          <div className="space-y-3 mt-1">
+            <Card className={`!p-4 ${reached ? '!border-[#007aff]/30 !bg-[#e8f2ff]' : '!border-[#ff9500]/35 !bg-[#fff6e8]'}`}>
+              <p className={`text-[11px] font-semibold uppercase tracking-wide ${reached ? 'text-[#007aff]' : 'text-[#c93400]'}`}>{t('purchase.workflow.current')}</p>
+              <p className="mt-1 text-[15px] font-semibold text-gic-ink">{t(`purchase.status.${focus}`)}</p>
+              <p className="mt-1 text-[12px] text-gic-muted">{reached ? t(`purchase.statusHint.${focus}`) : t('purchase.workflow.notYet')}</p>
+              {reached && entry && (
+                <p className="mt-2 text-[12px] text-gic-ink">{formatDate(entry.createdAt)}{entry.userName ? ` · ${entry.userName}` : ''}{entry.comment ? ` · ${entry.comment}` : ''}</p>
+              )}
+              {reached && focus === 'livre' && (
+                <p className="mt-2 text-[12px] text-[#007aff]">{t('purchase.detail.qtySummary', { accepted: p.totals.acceptedQty, ordered: p.totals.orderedQty })}</p>
+              )}
+              {reached && focus === 'paye' && (
+                <p className="mt-2 text-[12px] text-[#248a3d]">{formatAmount(p.totals.paid)} · {t(`purchase.payment.${p.paymentStatus}`)}</p>
+              )}
+              {reached && focus === 'facture' && (
+                <p className="mt-2 text-[12px]">{p.invoiced ? t('msg.invoicedChip') : t('purchase.workflow.notYet')}</p>
+              )}
+            </Card>
+            <Card className={`!p-4 ${p.status === 'archive' ? '!border-[#248a3d]/30 !bg-[#e9f8ee]' : '!border-[#ff9500]/35 !bg-[#fff6e8]'}`}>
+              <p className={`text-[11px] font-semibold uppercase tracking-wide ${p.status === 'archive' ? 'text-[#248a3d]' : 'text-[#c93400]'}`}>{t('purchase.workflow.final')}</p>
+              <p className="mt-1 text-[13px] font-medium text-gic-ink">
+                {p.status === 'archive' && p.checks.fullyDelivered && p.checks.fullyPaid
+                  ? t('purchase.workflow.finalClosed')
+                  : t('purchase.workflow.finalOpen', { status: t(`purchase.status.${p.status}`) })}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="mac-chip mac-chip-green">{t('purchase.workflow.keptNote', { accepted: p.totals.acceptedQty, ordered: p.totals.orderedQty })}</span>
+                {p.totals.rejectedQty > 0 && <span className="mac-chip mac-chip-orange">{t('purchase.workflow.returnedNote', { qty: p.totals.rejectedQty })}</span>}
+                {p.totals.remainingQty > 0 && <span className="mac-chip mac-chip-orange">{t('purchase.workflow.stillWaiting', { qty: p.totals.remainingQty })}</span>}
+              </div>
+            </Card>
+            <TableWrap mac>
+              <thead>
+                <tr>
+                  <Th mac>{t('purchase.fields.product')}</Th>
+                  <Th mac>{t('purchase.delivery.ordered')}</Th>
+                  <Th mac>{t('purchase.delivery.delivered')}</Th>
+                  <Th mac>{t('purchase.workflow.returned')}</Th>
+                  <Th mac>{t('purchase.workflow.kept')}</Th>
+                  <Th mac>{t('purchase.delivery.remaining')}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.lines.map((l) => (
+                  <tr key={l.id}>
+                    <Td mac className="font-medium">{l.product}</Td>
+                    <Td mac>{l.quantity}</Td>
+                    <Td mac className="text-[#007aff] font-medium">{l.delivered}</Td>
+                    <Td mac className={l.rejected > 0 ? 'text-gic-coral font-medium' : 'text-gic-muted'}>{l.rejected}</Td>
+                    <Td mac className="text-[#248a3d] font-medium">{l.accepted}</Td>
+                    <Td mac className={l.remaining > 0 ? 'text-[#c93400] font-medium' : 'text-gic-muted'}>{l.remaining}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </TableWrap>
+            <div>
+              <p className="mb-2 text-[13px] font-semibold text-gic-coral">{t('purchase.workflow.returnsTitle')}</p>
+              {p.deliveries.every((d) => d.items.every((it) => it.rejectedQuantity <= 0)) ? (
+                <Card className="!p-3 !border-[#248a3d]/25 !bg-[#e9f8ee]">
+                  <p className="text-[12px] text-[#248a3d]">{t('purchase.workflow.returnsEmpty')}</p>
+                </Card>
+              ) : (
+                <div className="space-y-2">
+                  {p.deliveries.flatMap((d) => d.items.filter((it) => it.rejectedQuantity > 0).map((it) => (
+                    <Card key={it.id} className="!p-3 !border-gic-coral/30 !bg-[#fff1f0]">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-[13px] font-medium text-gic-ink">{it.line.product}</p>
+                          <p className="text-[11px] text-gic-muted">{formatDate(d.date)}{d.number ? ` · ${d.number}` : ''}</p>
+                        </div>
+                        <span className="mac-chip mac-chip-orange">{t('purchase.delivery.rejectedShort', { qty: it.rejectedQuantity })}</span>
+                      </div>
+                      <p className="mt-2 text-[12px] text-gic-ink">
+                        <span className="font-medium text-gic-coral">{t('purchase.workflow.why')} : </span>
+                        {it.remark || d.remark || t('purchase.workflow.noReason')}
+                      </p>
+                    </Card>
+                  )))}
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-[13px] font-semibold text-gic-ink">{t('purchase.workflow.steps')}</p>
+              {p.history.length === 0 ? (
+                <p className="text-[12px] text-gic-muted">{t(`purchase.statusHint.${p.status}`)}</p>
+              ) : (
+                <div className="space-y-2">
+                  {[...p.history].reverse().map((h, i, list) => {
+                    const idx = statusIndex(h.newStatus);
+                    const current = i === list.length - 1;
+                    return (
+                      <div key={h.id} className={`flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 text-[12px] ${current ? 'bg-[#e8f2ff]' : 'bg-[#e9f8ee]'}`}>
+                        <span className={`inline-flex items-center gap-2 font-medium ${current ? 'text-[#007aff]' : 'text-[#248a3d]'}`}>
+                          <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-white ${current ? 'bg-[#007aff]' : 'bg-[#34c759]'}`}>{idx >= 0 ? idx + 1 : '•'}</span>
+                          {t(`purchase.status.${h.newStatus}`)}
+                        </span>
+                        <span className="text-gic-muted">{formatDate(h.createdAt)}{h.userName ? ` · ${h.userName}` : ''}{h.comment ? ` · ${h.comment}` : ''}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+          );
+        })()}
 
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
