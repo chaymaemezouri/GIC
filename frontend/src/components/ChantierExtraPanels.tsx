@@ -1,5 +1,6 @@
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api, formatDate, formatMad } from '../lib/api';
 import { Btn, Input, MacActionBtn, Modal, Select, TableWrap, Td, Th } from './ui';
@@ -26,10 +27,12 @@ type Subcontractor = {
   endDate?: string | null;
   follows?: Follow[];
   payments?: Pay[];
+  workProgress?: { id: string; taskName: string; tranche?: string | null } | null;
 };
 
 export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string }) {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [items, setItems] = useState<Subcontractor[]>([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ companyName: '', phone: '', amount: '', remark: '', workProgressId: '', scope: 'task', phaseLabel: '' });
@@ -133,7 +136,31 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
   }
 
   const ordered = [...items].sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)));
-  const openItems = ordered.filter(isOpen);
+
+  async function openOnTask(item: Subcontractor) {
+    const progressId = item.workProgress?.id;
+    const trancheName = item.tranche || item.workProgress?.tranche;
+    if (!progressId || !trancheName) {
+      openEdit(item);
+      return;
+    }
+    try {
+      const tranches = await api<{ id: string; name: string }[]>(`/chantiers/${chantierId}/tranches`);
+      const tranche = (Array.isArray(tranches) ? tranches : []).find((row) => row.name === trancheName);
+      if (!tranche) {
+        openEdit(item);
+        return;
+      }
+      navigate(`/chantiers/${chantierId}/tranches/${tranche.id}`, {
+        state: {
+          focusTaskId: progressId,
+          focusPhase: item.scope === 'phase' ? item.phaseLabel || null : null,
+        },
+      });
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
 
   async function remove(id: string) {
     if (!await appConfirm(t('msg.confirmDeleteSubcontractor'))) return;
@@ -151,20 +178,6 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
         <p className="text-[13px] font-medium text-gic-ink">{t('detail.subcontractorsTitle')}</p>
         <Btn icon={Plus} onClick={openCreate}>{t('common.add')}</Btn>
       </div>
-      {openItems.length > 0 && (
-        <div className="rounded-lg border border-[#ff9500]/30 bg-[rgba(255,149,0,0.06)] p-3 space-y-2">
-          <p className="text-[12px] font-medium text-gic-ink">{t('detail.stOpen')} · {openItems.length}</p>
-          {openItems.map((item) => (
-            <button key={item.id} type="button" className="block w-full text-left text-[12px]" onClick={() => openEdit(item)}>
-              <span className="font-medium">{item.companyName}</span>
-              <span className="text-gic-muted"> · {item.corpsEtat || '—'} · {scopeLine(item)}</span>
-              <span className="block text-[11px] text-gic-muted">
-                {Math.round(Number(item.progressPct || 0))} % · {t('siteOps.paid')} {formatMad(item.paidAmount || 0)} · {t('siteOps.moneyLeft')} {formatMad(Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)))}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
       {items.length > 0 && (
         <div className="flex flex-wrap gap-3 text-[12px]">
           <span className="mac-chip mac-chip-gray">{t('fields.amount')} {formatMad(items.reduce((s, i) => s + Number(i.amount || 0), 0))}</span>
@@ -190,7 +203,7 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
           </thead>
           <tbody>
             {ordered.map((item) => (
-              <tr key={item.id} className="cursor-pointer" onClick={() => openEdit(item)}>
+              <tr key={item.id} className="cursor-pointer" onClick={() => openOnTask(item)}>
                 <Td mac>
                   <span className="font-medium">{item.companyName}</span>
                   {item.phone && <span className="block text-[10px] text-gic-muted">{item.phone}</span>}
@@ -210,7 +223,7 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
                 </Td>
                 <Td mac className="mac-td-actions">
                   <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
-                    <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEdit(item)} />
+                    <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openOnTask(item)} />
                     <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => remove(item.id)} />
                   </div>
                 </Td>

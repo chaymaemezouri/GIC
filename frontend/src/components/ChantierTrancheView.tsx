@@ -1,6 +1,6 @@
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Plus, Users, Truck, HardHat, Layers, ShoppingCart, Pencil, Trash2, Clock, ChevronRight, FileText,
 } from 'lucide-react';
@@ -212,6 +212,8 @@ export function ChantierTrancheView({
   onRefresh: () => void;
 }) {
   const { t } = useI18n();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<TrancheDetail | null>(null);
   const [tab, setTab] = useState<TrancheTab>('avancement');
   const [error, setError] = useState('');
@@ -266,6 +268,22 @@ export function ChantierTrancheView({
       .then(setStandardLots)
       .catch(() => {});
   }, [chantierId, trancheId]);
+
+  useEffect(() => {
+    const focus = location.state as { focusTaskId?: string; focusPhase?: string | null } | null;
+    if (!detail || !focus?.focusTaskId) return;
+    const task = detail.progress.find((row) => row.id === focus.focusTaskId);
+    if (!task) return;
+    setTab('avancement');
+    const phaseOnly = focus.focusPhase
+      ? (task.subcontractors || []).filter((row) => row.scope === 'phase' && row.phaseLabel === focus.focusPhase)
+      : [];
+    setStTask(phaseOnly.length ? { ...task, subcontractors: phaseOnly } : task);
+    window.setTimeout(() => {
+      document.getElementById(`task-${task.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 50);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [detail, location.state]);
 
   useEffect(() => {
     if (tab !== 'pointage' || !detail) return;
@@ -788,7 +806,7 @@ export function ChantierTrancheView({
                 const whole = contracts.find((item) => item.scope !== 'phase');
                 const phaseOnes = contracts.filter((item) => item.scope === 'phase');
                 return (
-                <div key={p.id} className="mac-task-row items-center">
+                <div key={p.id} id={`task-${p.id}`} className="mac-task-row items-center">
                   <div className="mac-task-meta !w-[200px]">
                     <p className="mac-task-name truncate flex items-center gap-1.5">
                       <span className="truncate">{p.taskName}</span>
