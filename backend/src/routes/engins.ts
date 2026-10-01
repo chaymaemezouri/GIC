@@ -14,6 +14,7 @@ import {
 } from '../lib/cashSync.js';
 import { CHAUFFEUR_CATEGORY } from '../lib/workforceScope.js';
 import { nextReference } from '../lib/references.js';
+import { ownedDelta, stockSnapshot } from '../lib/materielStock.js';
 import {
   ENGIN_KINDS,
   ENGIN_STATUSES,
@@ -1109,6 +1110,7 @@ router.get('/', async (req, res) => {
 });
 
 const ENGIN_NUMBER_FIELDS = [
+  'quantity',
   'fuelLevel',
   'counterValue',
   'purchasePrice',
@@ -1146,7 +1148,7 @@ const RENTAL_FIELDS = [
 
 /** Champs modifiables de la fiche (les relations et calculs sont ignorés). */
 const ENGIN_WRITABLE_FIELDS = [
-  'kind', 'designation', 'model', 'acquisitionYear', 'commissioningDate', 'location', 'ownershipType', 'depreciationMethod',
+  'kind', 'quantity', 'designation', 'model', 'acquisitionYear', 'commissioningDate', 'location', 'ownershipType', 'depreciationMethod',
   'brand', 'genre', 'groupe', 'workPassport', 'matricule', 'chassisNo', 'emptyWeight', 'totalWeight', 'gsmNumber', 'gpsNumber',
   'gpsMountDate', 'transferDate', 'counterValue', 'counterUnit', 'counterDate', 'status', 'fuelLevel',
   'insuranceExpiry', 'vignetteExpiry', 'visitExpiry', 'authExpiry',
@@ -1475,6 +1477,103 @@ router.delete('/:id', async (req, res) => {
   await prisma.engin.delete({ where: { id } });
   await audit(req, 'suppression', 'Engin', id, motif);
   res.json({ ok: true, label: `${engin?.matricule || ''} ${engin?.brand || ''}`.trim() });
+});
+
+const movementInclude = {
+  chantier: { select: { id: true, name: true } },
+  fromChantier: { select: { id: true, name: true } },
+} as const;
+
+function movementInput(body: Record<string, unknown>) {
+  return {
+    movementType: String(body.movementType || '').trim(),
+    quantity: Number(body.quantity),
+    chantierId: body.chantierId ? String(body.chantierId) : null,
+    tranche: body.tranche ? String(body.tranche).trim() : null,
+    fromChantierId: body.fromChantierId ? String(body.fromChantierId) : null,
+    fromTranche: body.fromTranche ? String(body.fromTranche).trim() : null,
+    date: body.date ? new Date(String(body.date)) : new Date(),
+    remark: body.remark ? String(body.remark).trim() : null,
+  };
+}
+
+async function stockOf(enginId: string) {
+  const engin = await prisma.engin.findUnique({ where: { id: enginId } });
+  if (!engin) return null;
+  const movements = await prisma.materielMovement.findMany({
+    where: { enginId },
+    include: movementInclude,
+    orderBy: [{ createdAt: 'asc' }],
+  });
+  const opening = (engin.quantity || 0) - ownedDelta(movements);
+  const snap = stockSnapshot(opening, movements);
+  return { engin, movements, snap };
+}
+
+router.get('/materiel/positions', async (req, res) => {
+  const chantierId = req.query.chantierId ? String(req.query.chantierId) : '';
+  const engins = await prisma.engin.findMany({
+    where: { kind: 'materiel' },
+    select: { id: true, code: true, designation: true, quantity: true },
+    orderBy: { designation: 'asc' },
+  });
+  const rows: Array<{ enginId: string; code: string | null; designation: string | null; tranche: string | null; quantity: number }> = [];
+  const movements = [];
+  for (const engin of engins) {
+    const stock = await stockOf(engin.id);
+    if (!stock || !stock.snap.ok) continue;
+    const sites = chantierId ? stock.snap.sites.filter((site) => site.chantierId === chantierId) : stock.snap.sites;
+    for (const site of sites) {
+      rows.push({ enginId: engin.id, code: engin.code, designation: engin.designation, tranche: site.tranche, quantity: site.quantity });
+    }
+    const related = chantierId
+      ? stock.movements.filter((move) => move.chantierId === chantierId || move.fromChantierId === chantierId)
+      : stock.movements;
+    movements.push(...related.map((move) => ({ ...move, engin: { id: engin.id, code: engin.code, designation: engin.designation } })));
+  }
+  movements.sort((a, b) => +new Date(b.date) - +new Date(a.date));
+  res.json({ rows, movements });
+});
+
+router.get('/:id/mouvements', async (req, res) => {
+  const stock = await stockOf(String(req.params.id));
+  if (!stock) return res.status(404).json({ message: 'Matériel introuvable' });
+  if (!stock.snap.ok) return res.status(400).json({ message: stock.snap.message });
+  const names = await prisma.chantier.findMany({
+    where: { id: { in: stock.snap.sites.map((site) => site.chantierId) } },
+    select: { id: true, name: true },
+  });
+  const nameOf = new Map(names.map((row) => [row.id, row.name]));
+  res.json({
+    owned: stock.snap.owned,
+    depot: stock.snap.depot,
+    repair: stock.snap.repair,
+    sites: stock.snap.sites.map((site) => ({ ...site, chantierName: nameOf.get(site.chantierId) || site.chantierId })),
+    movements: [...stock.movements].reverse(),
+  });
+});
+
+router.post('/:id/mouvements', async (req, res) => {
+  const id = String(req.params.id);
+  const stock = await stockOf(id);
+  if (!stock) return res.status(404).json({ message: 'Matériel introuvable' });
+  if (stock.engin.kind !== 'materiel') return res.status(400).json({ message: 'Les mouvements de quantité concernent le matériel' });
+  const input = movementInput(req.body as Record<string, unknown>);
+  const opening = (stock.engin.quantity || 0) - ownedDelta(stock.movements);
+  const next = stockSnapshot(opening, [...stock.movements, input]);
+  if (!next.ok) return res.status(400).json({ message: next.message });
+  await prisma.materielMovement.create({
+    data: { enginId: id, ...input },
+  });
+  await prisma.engin.update({ where: { id }, data: { quantity: next.owned } });
+  const fresh = await stockOf(id);
+  res.status(201).json(fresh && fresh.snap.ok ? {
+    owned: fresh.snap.owned,
+    depot: fresh.snap.depot,
+    repair: fresh.snap.repair,
+    sites: fresh.snap.sites,
+    movements: [...fresh.movements].reverse(),
+  } : { owned: next.owned });
 });
 
 export default router;

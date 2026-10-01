@@ -3,8 +3,10 @@ import type { Dict } from './types';
 /** وحدة « تدبير الآليات والمعدات » (مفاتيح `fleet.*`). */
 const fleetAr: Dict = {
   nav: {
-    group: 'الآليات والمعدات',
-    groupDesc: 'الممتلكات، التخصيصات، الاستغلال والتكاليف المحمّلة على الأوراش',
+    group: 'الآليات',
+    groupDesc: 'آلية واحدة لكل مرجع : تخصيص، نقل، مهمة، استعمال، إصلاح وسجل',
+    materielGroup: 'المعدات',
+    materielGroupDesc: 'تسيير بالكمية : تخصيص، نقل، دخول، خروج وسجل حسب الورش',
     referentielEngins: 'مرجع الآليات',
     referentielMateriels: 'مرجع المعدات',
     acquisitions: 'الممتلكات / الاقتناءات',
@@ -220,6 +222,7 @@ const fleetAr: Dict = {
     depreciationYears: 'مدة الاستهلاك (سنوات)',
     description: 'الوصف',
     designation: 'التسمية',
+    quantity: 'الكمية',
     details: 'التفاصيل',
     document: 'الوثيقة',
     documentName: 'اسم الوثيقة',
@@ -464,6 +467,27 @@ const fleetAr: Dict = {
     schedule: 'أدخل ثمن الاقتناء والمدة للحصول على جدول الاستهلاك.',
     toReturn: 'لا توجد آليات للإرجاع.',
     usage: 'لا توجد تسجيلات استعمال.',
+  },
+  stock: {
+    title: 'الكميات',
+    depot: 'المستودع',
+    onSites: 'في الأوراش',
+    repair: 'قيد الإصلاح',
+    total: 'الكمية الإجمالية',
+    history: 'السجل',
+    newMovement: 'حركة جديدة',
+    type: 'النوع',
+    source: 'المصدر',
+    destination: 'الوجهة',
+    tranche: 'الشطر',
+    entree: 'دخول',
+    sortie: 'خروج',
+    affectation: 'تخصيص',
+    transfert: 'تحويل',
+    maintenance: 'إصلاح',
+    retour: 'عودة من الإصلاح',
+    onSite: 'في هذا الورش',
+    empty: 'لا توجد حركات كميات.',
   },
 };
 

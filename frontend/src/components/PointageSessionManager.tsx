@@ -335,6 +335,26 @@ export default function PointageSessionManager({
     return line ? lineDefaults(line) : pendingDefaults(workforceId);
   }
 
+  function advanceCeiling(saved: number, sum: number) {
+    return Math.max(saved, sum);
+  }
+
+  function onAdvanceChange(raw: string, saved: number, sum: number) {
+    if (raw.trim() === '') return raw;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return raw;
+    const ceiling = advanceCeiling(saved, sum);
+    if (n > ceiling) return String(ceiling);
+    return raw;
+  }
+
+  function settleAdvance(raw: string, saved: number, sum: number) {
+    const n = Number(raw);
+    const ceiling = advanceCeiling(saved, sum);
+    const value = Number.isFinite(n) ? n : saved;
+    return String(Math.round(Math.min(Math.max(value, saved), ceiling) * 100) / 100);
+  }
+
   function patchRow(workforceId: string, patch: Partial<RowEdit>) {
     setDrafts((prev) => ({ ...prev, [workforceId]: { ...rowFor(workforceId), ...patch } }));
   }
@@ -877,7 +897,7 @@ export default function PointageSessionManager({
             <KpiCard title={t('columns.brut')} value={formatMad(totals.brut)} icon={Wallet} tone="emerald" compact />
             <KpiCard
               title={t('pointageMgmt.netToPay')}
-              value={formatMad(totals.brut + totals.bonuses - totals.advances)}
+              value={formatMad(Math.max(0, totals.brut + totals.bonuses - totals.advances))}
               icon={Wallet}
               tone="coral"
               compact
@@ -970,12 +990,23 @@ export default function PointageSessionManager({
                           </Td>
                           <Td mac className="mac-table-muted">{formatMad(d * rate)}</Td>
                           <Td mac>
-                            <input
-                              className={cellClass(locked)}
-                              readOnly={locked}
-                              value={e.advance}
-                              onChange={(ev) => patchRow(r.workforceId, { advance: ev.target.value })}
-                            />
+                            {(() => {
+                              const saved = r.line?.advance ?? 0;
+                              const sum = Math.round(d * rate * 100) / 100;
+                              return (
+                                <input
+                                  className={cellClass(locked)}
+                                  type="number"
+                                  min={saved}
+                                  max={advanceCeiling(saved, sum)}
+                                  step="0.01"
+                                  readOnly={locked}
+                                  value={e.advance}
+                                  onChange={(ev) => patchRow(r.workforceId, { advance: onAdvanceChange(ev.target.value, saved, sum) })}
+                                  onBlur={(ev) => patchRow(r.workforceId, { advance: settleAdvance(ev.currentTarget.value, saved, sum) })}
+                                />
+                              );
+                            })()}
                           </Td>
                           <Td mac>
                             <input

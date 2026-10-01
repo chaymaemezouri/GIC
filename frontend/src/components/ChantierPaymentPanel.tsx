@@ -20,6 +20,7 @@ type PayLine = {
   tranche: string;
   totalDays: number;
   advances: number;
+  brut?: number;
   netDue: number;
   amountPaid: number;
   remaining: number;
@@ -43,6 +44,7 @@ type PayDay = {
   advance: number;
   bonus: number;
   net: number;
+  validated?: boolean;
 };
 
 type PayPayload = {
@@ -133,9 +135,32 @@ export function ChantierPaymentPanel({
     { totalDays: 0, advances: 0, netDue: 0, amountPaid: 0, remaining: 0 },
   ), [visible]);
 
-  const payableSelected = selection.rows.filter((row) => row.remaining > 0);
-  const targetRest = payTargets.reduce((s, row) => s + row.remaining, 0);
+  const payableSelected = selection.rows.filter((row) => payMax(row) > 0);
+  const targetRest = payTargets.reduce((s, row) => s + payMax(row), 0);
   const single = payTargets.length === 1 ? payTargets[0] : null;
+
+  function wageSum(row: PayLine) {
+    if (!row.monthly && row.days?.length) return row.days.reduce((sum, day) => sum + day.days * day.rate, 0);
+    return row.brut ?? row.netDue;
+  }
+
+  function payMax(row: PayLine) {
+    const left = Math.max(0, wageSum(row) - row.amountPaid);
+    return Math.round(Math.min(row.remaining, left) * 100) / 100;
+  }
+
+  function formulaOf(days: number, price: number) {
+    return t('siteOps.payFormula', { days: days.toFixed(2), price: formatMad(price), sum: formatMad(days * price) });
+  }
+
+  function formulaLines(row: PayLine) {
+    if (row.monthly || !row.days?.length) return [];
+    const groups = new Map<number, number>();
+    for (const day of row.days) {
+      groups.set(day.rate, (groups.get(day.rate) || 0) + day.days);
+    }
+    return [...groups.entries()].map(([price, days]) => formulaOf(days, price));
+  }
 
   function placeOf(row: PayLine) {
     const place = row.tranche || t('msg.wholeSite');
@@ -157,13 +182,13 @@ export function ChantierPaymentPanel({
   }
 
   function openPay(rows: PayLine[]) {
-    const picked = rows.filter((row) => row.remaining > 0);
+    const picked = rows.filter((row) => payMax(row) > 0);
     if (!picked.length) return;
     setPayTargets(picked);
     setPayMode('especes');
     setPayDate(localISO(new Date()));
     setPayRemark('');
-    setPayAmount(String(picked.reduce((s, row) => s + row.remaining, 0)));
+    setPayAmount(String(picked.reduce((s, row) => s + payMax(row), 0)));
     setPayOpen(true);
   }
 
@@ -172,12 +197,16 @@ export function ChantierPaymentPanel({
     if (!data || !payTargets.length) return;
     const amount = Number(payAmount);
     if (!Number.isFinite(amount) || amount <= 0) return;
-    if (payTargets.length === 1 && amount > payTargets[0].remaining + 0.01) return;
+    const ceiling = payTargets.length === 1 ? payMax(payTargets[0]) : targetRest;
+    if (amount > ceiling + 0.01) {
+      await appAlert(t('siteOps.payOverSum', { amount: formatMad(ceiling) }));
+      return;
+    }
     if (payTargets.length > 1 && Math.abs(amount - targetRest) > 0.01) return;
     setPaying(true);
     const failed: string[] = [];
     for (const row of payTargets) {
-      const lineAmount = payTargets.length === 1 ? amount : row.remaining;
+      const lineAmount = payTargets.length === 1 ? amount : payMax(row);
       try {
         await api(`/chantiers/salaries/${row.workforceId}/pay`, {
           method: 'POST',
@@ -250,6 +279,7 @@ export function ChantierPaymentPanel({
               <Th mac>{scope === 'drivers' ? t('pages.drivers') : t('columns.worker')}</Th>
               <Th mac>{t('siteOps.payPlace')}</Th>
               <Th mac>{t('siteOps.payDays')}</Th>
+              <Th mac>{t('siteOps.payCalc')}</Th>
               <Th mac>{t('siteOps.payAdvances')}</Th>
               <Th mac>{t('columns.netDue')}</Th>
               <Th mac>{t('columns.paid')}</Th>
@@ -270,6 +300,15 @@ export function ChantierPaymentPanel({
                 </Td>
                 <Td mac>{placeOf(row)}</Td>
                 <Td mac>{row.monthly ? '—' : row.totalDays.toFixed(2)}</Td>
+                <Td mac>
+                  {row.monthly ? (
+                    formatMad(row.netDue)
+                  ) : (
+                    <span className="block whitespace-nowrap text-[11px] leading-4">
+                      {formulaLines(row).map((line) => <span key={line} className="block">{line}</span>)}
+                    </span>
+                  )}
+                </Td>
                 <Td mac>{formatMad(row.advances)}</Td>
                 <Td mac>{formatMad(row.netDue)}</Td>
                 <Td mac>{formatMad(row.amountPaid)}</Td>
@@ -285,7 +324,7 @@ export function ChantierPaymentPanel({
                   )}
                 </Td>
                 <Td mac className="mac-td-actions">
-                  {row.remaining > 0 && (
+                  {payMax(row) > 0 && (
                     <Btn
                       variant="secondary"
                       icon={Banknote}
@@ -305,6 +344,7 @@ export function ChantierPaymentPanel({
               <Td mac>{t('siteOps.payLineTotal')}</Td>
               <Td mac />
               <Td mac>{shownTotals.totalDays.toFixed(2)}</Td>
+              <Td mac>{formatMad(visible.reduce((sum, row) => sum + wageSum(row), 0))}</Td>
               <Td mac>{formatMad(shownTotals.advances)}</Td>
               <Td mac>{formatMad(shownTotals.netDue)}</Td>
               <Td mac>{formatMad(shownTotals.amountPaid)}</Td>
@@ -322,12 +362,12 @@ export function ChantierPaymentPanel({
       <Modal
         open={!!detail}
         size="xl"
-        title={detail ? `${detail.firstName} ${detail.lastName} — ${t('siteOps.payWorkDetail')}` : ''}
+        title={detail ? `${detail.firstName} ${detail.lastName} — ${t('siteOps.paymentSynthesis')}` : ''}
         onClose={() => setDetail(null)}
         footer={
           <>
             <Btn variant="secondary" onClick={() => setDetail(null)}>{t('common.close')}</Btn>
-            {detail && detail.remaining > 0 && (
+            {detail && payMax(detail) > 0 && (
               <Btn icon={Banknote} onClick={() => { const row = detail; setDetail(null); openPay([row]); }}>
                 {t('actions.pay')}
               </Btn>
@@ -340,9 +380,22 @@ export function ChantierPaymentPanel({
             <div className="grid gap-2 sm:grid-cols-2">
               <p className="text-[12px]"><span className="text-gic-muted">{t('siteOps.payPlace')} : </span>{placeOf(detail)}</p>
               <p className="text-[12px]"><span className="text-gic-muted">{t('siteOps.payTask')} : </span>{detail.task || detail.category || '—'}</p>
-              <p className="text-[12px]"><span className="text-gic-muted">{t('columns.netDue')} : </span>{formatMad(detail.netDue)}</p>
-              <p className="text-[12px]"><span className="text-gic-muted">{t('columns.paid')} : </span>{formatMad(detail.amountPaid)}</p>
-              <p className="text-[12px] font-medium"><span className="text-gic-muted">{t('siteOps.payRemaining')} : </span>{formatMad(detail.remaining)}</p>
+              {!detail.monthly && formulaLines(detail).map((line) => (
+                <p key={line} className="text-[12px] font-medium sm:col-span-2">{line}</p>
+              ))}
+              {detail.amountPaid > 0 && (
+                <p className="text-[12px] sm:col-span-2">
+                  <span className="text-gic-muted">{t('columns.paid')} : </span>{formatMad(detail.amountPaid)}
+                  {detail.paidAt ? ` · ${formatDate(detail.paidAt)}` : ''}
+                  {modeLabel(detail.paymentMode) ? ` · ${modeLabel(detail.paymentMode)}` : ''}
+                </p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <KpiCard title={t('siteOps.payDays')} value={detail.monthly ? '—' : detail.totalDays.toFixed(2)} icon={Clock} compact />
+              <KpiCard title={t('siteOps.payCalc')} value={formatMad(wageSum(detail))} icon={Wallet} compact />
+              <KpiCard title={t('siteOps.payAdvances')} value={formatMad(detail.advances)} icon={Wallet} compact />
+              <KpiCard title={t('siteOps.payRemaining')} value={formatMad(payMax(detail))} icon={Banknote} tone="coral" compact />
             </div>
             {(detail.days || []).length === 0 ? (
               <p className="py-4 text-center text-[12px] text-gic-muted">{t('pointageMgmt.emptyLines')}</p>
@@ -355,10 +408,11 @@ export function ChantierPaymentPanel({
                     <Th mac>{t('siteOps.payTask')}</Th>
                     <Th mac>{t('siteOps.payDays')}</Th>
                     <Th mac>{t('columns.dailyRateMad')}</Th>
-                    <Th mac>{t('columns.brut')}</Th>
+                    <Th mac>{t('siteOps.payCalc')}</Th>
                     <Th mac>{t('columns.advance')}</Th>
                     <Th mac>{t('columns.bonus')}</Th>
                     <Th mac>{t('columns.netDue')}</Th>
+                    <Th mac>{t('columns.status')}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -372,10 +426,15 @@ export function ChantierPaymentPanel({
                       </Td>
                       <Td mac>{day.days.toFixed(2)}{day.hours ? <span className="block text-[10px] text-gic-muted">{day.hours.toFixed(1)} h</span> : null}</Td>
                       <Td mac>{formatMad(day.rate)}</Td>
-                      <Td mac>{formatMad(day.brut)}</Td>
+                      <Td mac className="whitespace-nowrap font-medium">{formulaOf(day.days, day.rate)}</Td>
                       <Td mac>{formatMad(day.advance)}</Td>
                       <Td mac>{formatMad(day.bonus)}</Td>
                       <Td mac className="font-medium">{formatMad(day.net)}</Td>
+                      <Td mac>
+                        <span className={`mac-chip ${day.validated ? 'mac-chip-green' : 'mac-chip-gray'}`}>
+                          {day.validated ? t('pointageMgmt.validated') : t('pointageMgmt.draft')}
+                        </span>
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -422,8 +481,13 @@ export function ChantierPaymentPanel({
           <ul className="max-h-40 space-y-1 overflow-auto text-[12px]">
             {payTargets.map((row) => (
               <li key={row.id} className="flex justify-between gap-3">
-                <span>{row.firstName} {row.lastName} · {row.tranche || t('msg.wholeSite')}</span>
-                <span className="shrink-0 font-medium">{formatMad(row.remaining)}</span>
+                <span>
+                  {row.firstName} {row.lastName} · {row.tranche || t('msg.wholeSite')}
+                  {!row.monthly && formulaLines(row).map((line) => (
+                    <span key={line} className="block text-gic-ink">{line}</span>
+                  ))}
+                </span>
+                <span className="shrink-0 font-medium">{formatMad(payMax(row))}</span>
               </li>
             ))}
           </ul>
@@ -432,9 +496,18 @@ export function ChantierPaymentPanel({
             type="number"
             min="0"
             step="0.01"
-            max={single ? single.remaining : undefined}
+            max={single ? payMax(single) : targetRest}
             value={single ? payAmount : String(targetRest)}
-            onChange={(e) => setPayAmount(e.target.value)}
+            onChange={(e) => {
+              if (!single) return;
+              const next = Number(e.target.value);
+              const cap = payMax(single);
+              if (e.target.value === '' || !Number.isFinite(next)) {
+                setPayAmount(e.target.value);
+                return;
+              }
+              setPayAmount(next > cap ? String(cap) : e.target.value);
+            }}
             disabled={!single}
             required
           />

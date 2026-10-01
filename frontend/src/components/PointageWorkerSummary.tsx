@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle, Clock, Lock, Printer, Save, Trash2, Users, Wallet } from 'lucide-react';
+import { Banknote, CheckCircle, Clock, Lock, Printer, Save, Trash2, Users, Wallet } from 'lucide-react';
 import { api, formatDate, formatMad, type PaginatedResponse } from '../lib/api';
 import { escHtml } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { printRows, type PrintFilter } from '../lib/listPrint';
 import { workforceDetailPathForCategory } from '../lib/workforceScope';
 import {
-  Btn, Card, EmptyState, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect, Modal, StatusPill, TableWrap, Td, Th,
+  Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect, Modal, Select, TableWrap, Td, Textarea, Th,
 } from './ui';
 import { SelectAllTh, SelectTd, SelectionBar } from './RowSelection';
 import { useRowSelection } from '../hooks/useRowSelection';
@@ -29,6 +29,8 @@ type SummaryItem = {
   brut: number;
   bonuses: number;
   advances: number;
+  amountPaid?: number;
+  payments?: { amount: number; paidAt?: string | null; paymentMode?: string | null; tranche?: string }[];
   remaining: number;
   firstDate: string;
   lastDate: string;
@@ -55,6 +57,15 @@ type Line = {
 type RowEdit = { days: string; dayRate: string; advance: string; bonus: string };
 
 const DAY_STEP = 0.125;
+
+function localISO(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function monthStartISO() {
+  const d = new Date();
+  return localISO(new Date(d.getFullYear(), d.getMonth(), 1));
+}
 
 function fmtDays(n: number) {
   return Number.isFinite(n) ? String(Math.round(n * 1000) / 1000) : '0';
@@ -98,8 +109,8 @@ export default function PointageWorkerSummary({
 }) {
   const { t } = useI18n();
   const [tranches, setTranches] = useState<{ id: string; name: string }[]>([]);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFrom, setDateFrom] = useState(() => (hideSiteSelect ? monthStartISO() : ''));
+  const [dateTo, setDateTo] = useState(() => (hideSiteSelect ? localISO(new Date()) : ''));
   const [validated, setValidated] = useState('');
   const [q, setQ] = useState('');
   const [items, setItems] = useState<SummaryItem[]>([]);
@@ -113,6 +124,12 @@ export default function PointageWorkerSummary({
   const [busy, setBusy] = useState<string | null>(null);
   const [deleteLine, setDeleteLine] = useState<Line | null>(null);
   const [deleteMotif, setDeleteMotif] = useState('');
+  const [payTarget, setPayTarget] = useState<SummaryItem | null>(null);
+  const [payAmount, setPayAmount] = useState('');
+  const [payMode, setPayMode] = useState('especes');
+  const [payDate, setPayDate] = useState('');
+  const [payRemark, setPayRemark] = useState('');
+  const [paying, setPaying] = useState(false);
   const selection = useRowSelection<SummaryRow>();
   const lineSelection = useRowSelection<Line>();
 
@@ -211,6 +228,94 @@ export default function PointageWorkerSummary({
 
   function patch(l: Line, p: Partial<RowEdit>) {
     setDrafts((prev) => ({ ...prev, [l.id]: { ...rowFor(l), ...p } }));
+  }
+
+  function lineWage(l: Line, e = rowFor(l)) {
+    const days = num(e.days);
+    const rate = rateOrNull(e.dayRate) ?? l.workforce.dailySalary ?? 0;
+    return { days, rate, sum: Math.round(days * rate * 100) / 100 };
+  }
+
+  function amountDue(sum: number, advance: number, bonus: number) {
+    return Math.max(0, Math.round((sum + bonus - advance) * 100) / 100);
+  }
+
+  function payState(due: number, advance: number, paid = 0): 'paid' | 'partial' | 'pending' {
+    if (due <= 0) return 'paid';
+    if (advance > 0 || paid > 0) return 'partial';
+    return 'pending';
+  }
+
+  function payableOf(row: { remaining: number; brut: number }) {
+    return Math.max(0, Math.round(Math.min(Math.max(0, row.remaining), row.brut) * 100) / 100);
+  }
+
+  function openPay(row: SummaryItem) {
+    const due = payableOf(row);
+    if (due <= 0) return;
+    const d = new Date();
+    setPayTarget(row);
+    setPayAmount(String(due));
+    setPayMode('especes');
+    setPayRemark('');
+    setPayDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+  }
+
+  async function confirmPay(e: React.FormEvent) {
+    e.preventDefault();
+    if (!payTarget) return;
+    const due = payableOf(payTarget);
+    const amount = Number(payAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > due + 0.01) return;
+    const d = payDate ? new Date(`${payDate}T12:00:00`) : new Date();
+    setPaying(true);
+    try {
+      await api(`/chantiers/salaries/${payTarget.workforceId}/pay`, {
+        method: 'POST',
+        body: JSON.stringify({
+          periodYear: d.getFullYear(),
+          periodMonth: d.getMonth() + 1,
+          amount,
+          paymentMode: payMode,
+          paidAt: payDate,
+          remark: payRemark.trim() || undefined,
+          ...(chantierId ? { chantierId } : {}),
+          ...(tranche ? { tranche } : {}),
+        }),
+      });
+      setPayTarget(null);
+      load();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setPaying(false);
+    }
+  }
+
+  function payStateLabel(state: 'paid' | 'partial' | 'pending') {
+    if (state === 'paid') return t('rental.paid');
+    if (state === 'partial') return t('status.partial');
+    return t('rental.toPay');
+  }
+
+  function advanceCeiling(saved: number, sum: number) {
+    return Math.max(saved, sum);
+  }
+
+  function onAdvanceChange(raw: string, saved: number, sum: number) {
+    if (raw.trim() === '') return raw;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return raw;
+    const ceiling = advanceCeiling(saved, sum);
+    if (n > ceiling) return String(ceiling);
+    return raw;
+  }
+
+  function settleAdvance(raw: string, saved: number, sum: number) {
+    const n = Number(raw);
+    const ceiling = advanceCeiling(saved, sum);
+    const value = Number.isFinite(n) ? n : saved;
+    return String(Math.round(Math.min(Math.max(value, saved), ceiling) * 100) / 100);
   }
 
   async function saveLine(l: Line, validatedValue?: boolean) {
@@ -315,7 +420,7 @@ export default function PointageWorkerSummary({
       advances += num(e.advance);
       bonuses += num(e.bonus);
     }
-    return { days, brut, advances, bonuses, remaining: brut + bonuses - advances };
+    return { days, brut, advances, bonuses, remaining: Math.max(0, brut + bonuses - advances) };
   }, [lines, drafts]);
 
   const scopeLabel = [
@@ -464,7 +569,7 @@ export default function PointageWorkerSummary({
           delta={`${t('columns.brut')} ${formatMad(totals?.brut ?? 0)}`}
           deltaTone="muted"
         />
-        <KpiCard title={t('pointageMgmt.remainingToPay')} value={formatMad(totals?.remaining ?? 0)} icon={Wallet} tone="coral" compact />
+        <KpiCard title={t('rental.toPay')} value={formatMad(Math.max(0, totals?.remaining ?? 0))} icon={Wallet} tone="coral" compact />
       </div>
 
       <SelectionBar selection={selection} onPrint={printList} />
@@ -485,8 +590,10 @@ export default function PointageWorkerSummary({
                 <Th mac>{t('columns.brut')}</Th>
                 <Th mac>{t('columns.bonus')}</Th>
                 <Th mac>{t('pointageMgmt.totalAdvances')}</Th>
-                <Th mac>{t('pointageMgmt.remainingToPay')}</Th>
+                <Th mac>{t('rental.toPay')}</Th>
+                <Th mac>{t('columns.status')}</Th>
                 <Th mac>{t('pointageMgmt.period')}</Th>
+                <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
               </tr>
             </thead>
             <tbody>
@@ -511,9 +618,28 @@ export default function PointageWorkerSummary({
                   <Td mac className="mac-table-muted">{formatMad(i.brut)}</Td>
                   <Td mac className="mac-table-muted">{formatMad(i.bonuses)}</Td>
                   <Td mac className="text-gic-coral">{formatMad(i.advances)}</Td>
-                  <Td mac className="font-medium">{formatMad(i.remaining)}</Td>
+                  <Td mac className="font-medium">{formatMad(Math.max(0, i.remaining))}</Td>
+                  <Td mac>
+                    {(() => {
+                      const state = payState(Math.max(0, i.remaining), i.advances, i.amountPaid || 0);
+                      const chip = state === 'paid' ? 'mac-chip-green' : state === 'partial' ? 'mac-chip-orange' : 'mac-chip-blue';
+                      return <span className={`mac-chip ${chip}`}>{payStateLabel(state)}</span>;
+                    })()}
+                  </Td>
                   <Td mac className="mac-table-muted text-[11px]">
                     {formatDate(i.firstDate)} → {formatDate(i.lastDate)}
+                  </Td>
+                  <Td mac className="mac-td-actions">
+                    {payableOf(i) > 0 && (
+                      <Btn
+                        variant="secondary"
+                        icon={Banknote}
+                        className="!py-1 !px-2 !text-[11px] !h-7 !bg-[#e9f8ee] !text-[#248a3d] hover:!bg-[#dff3e6]"
+                        onClick={(e) => { e.stopPropagation(); openPay(i); }}
+                      >
+                        {t('actions.pay')}
+                      </Btn>
+                    )}
                   </Td>
                 </tr>
               ))}
@@ -541,6 +667,9 @@ export default function PointageWorkerSummary({
               {t('common.print')}
             </Btn>
             <Btn variant="secondary" onClick={closeWorker}>{t('common.close')}</Btn>
+            {selected && payableOf(selected) > 0 && (
+              <Btn icon={Banknote} onClick={() => openPay(selected)}>{t('actions.pay')}</Btn>
+            )}
             <Btn
               variant="secondary"
               icon={Save}
@@ -565,7 +694,7 @@ export default function PointageWorkerSummary({
           <EmptyState title={t('msg.emptyAttendance')} />
         ) : (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[12px]">
               <div className="rounded-lg bg-black/[0.03] px-3 py-2">
                 <p className="text-[10px] text-gic-muted uppercase">{t('pointageMgmt.totalDaysWorked')}</p>
                 <p className="font-semibold">{fmtDays(lineTotals.days)}</p>
@@ -579,10 +708,31 @@ export default function PointageWorkerSummary({
                 <p className="font-semibold text-gic-coral">{formatMad(lineTotals.advances)}</p>
               </div>
               <div className="rounded-lg bg-black/[0.03] px-3 py-2">
-                <p className="text-[10px] text-gic-muted uppercase">{t('pointageMgmt.remainingToPay')}</p>
-                <p className="font-semibold">{formatMad(lineTotals.remaining)}</p>
+                <p className="text-[10px] text-gic-muted uppercase">{t('columns.paid')}</p>
+                <p className="font-semibold">{formatMad(selected?.amountPaid || 0)}</p>
+              </div>
+              <div className="rounded-lg bg-black/[0.03] px-3 py-2">
+                <p className="text-[10px] text-gic-muted uppercase">{t('rental.toPay')}</p>
+                <p className="font-semibold">{formatMad(Math.max(0, lineTotals.remaining - (selected?.amountPaid || 0)))}</p>
               </div>
             </div>
+            {(selected?.payments || []).length > 0 && (
+              <div>
+                <p className="mb-1 text-[12px] font-semibold">{t('columns.paid')}</p>
+                <ul className="space-y-1 text-[12px]">
+                  {(selected?.payments || []).map((payment, index) => (
+                    <li key={`${payment.paidAt || ''}-${index}`} className="flex justify-between gap-3">
+                      <span>
+                        {payment.tranche || t('msg.wholeSite')}
+                        {payment.paidAt ? ` · ${formatDate(payment.paidAt)}` : ''}
+                        {payment.paymentMode === 'virement' ? ` · ${t('fields.modeTransfer')}` : payment.paymentMode === 'cheque' ? ` · ${t('fields.modeCheck')}` : payment.paymentMode ? ` · ${t('fields.modeCash')}` : ''}
+                      </span>
+                      <span className="font-medium">{formatMad(payment.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <SelectionBar selection={lineSelection} onPrint={printLines} />
             <div className="overflow-x-auto">
               <TableWrap mac>
@@ -596,6 +746,7 @@ export default function PointageWorkerSummary({
                     <Th mac>{t('columns.dailyRate')}</Th>
                     <Th mac>{t('columns.advance')}</Th>
                     <Th mac>{t('columns.bonus')}</Th>
+                    <Th mac>{t('rental.toPay')}</Th>
                     <Th mac>{t('columns.status')}</Th>
                     <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
                   </tr>
@@ -634,12 +785,25 @@ export default function PointageWorkerSummary({
                           />
                         </Td>
                         <Td mac>
-                          <input
-                            className={cellClass(locked)}
-                            readOnly={locked}
-                            value={e.advance}
-                            onChange={(ev) => patch(l, { advance: ev.target.value })}
-                          />
+                          {(() => {
+                            const wage = lineWage(l, e);
+                            const saved = l.advance || 0;
+                            return (
+                              <>
+                                <input
+                                  className={cellClass(locked)}
+                                  type="number"
+                                  min={saved}
+                                  max={advanceCeiling(saved, wage.sum)}
+                                  step="0.01"
+                                  readOnly={locked}
+                                  value={e.advance}
+                                  onChange={(ev) => patch(l, { advance: onAdvanceChange(ev.target.value, saved, wage.sum) })}
+                                  onBlur={(ev) => patch(l, { advance: settleAdvance(ev.currentTarget.value, saved, wage.sum) })}
+                                />
+                              </>
+                            );
+                          })()}
                         </Td>
                         <Td mac>
                           <input
@@ -649,8 +813,21 @@ export default function PointageWorkerSummary({
                             onChange={(ev) => patch(l, { bonus: ev.target.value })}
                           />
                         </Td>
+                        <Td mac className="font-medium">
+                          {formatMad(amountDue(lineWage(l, e).sum, num(e.advance), num(e.bonus)))}
+                        </Td>
                         <Td mac>
-                          <StatusPill status={locked ? 'validé' : 'brouillon'} quiet />
+                          {(() => {
+                            const due = amountDue(lineWage(l, e).sum, num(e.advance), num(e.bonus));
+                            const state = payState(due, num(e.advance));
+                            const chip = state === 'paid' ? 'mac-chip-green' : state === 'partial' ? 'mac-chip-orange' : 'mac-chip-blue';
+                            return (
+                              <>
+                                <span className={`mac-chip ${chip}`}>{payStateLabel(state)}</span>
+                                <span className="mt-0.5 block text-[10px] text-gic-muted">{locked ? t('pointageMgmt.validated') : t('pointageMgmt.draft')}</span>
+                              </>
+                            );
+                          })()}
                         </Td>
                         <Td mac className="mac-td-actions">
                           <div className="mac-actions">
@@ -696,6 +873,57 @@ export default function PointageWorkerSummary({
               </TableWrap>
             </div>
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!payTarget}
+        title={t('actions.pay')}
+        onClose={() => setPayTarget(null)}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => setPayTarget(null)}>{t('common.cancel')}</Btn>
+            <Btn form="pay-worker-form" type="submit" disabled={paying}>
+              {paying ? t('common.inProgress') : t('actions.confirmPayment')}
+            </Btn>
+          </>
+        }
+      >
+        {payTarget && (
+          <form id="pay-worker-form" onSubmit={confirmPay} className="space-y-3">
+            <p className="text-[12px] text-gic-muted">
+              {payTarget.workforce.firstName} {payTarget.workforce.lastName} · {t('rental.toPay')} {formatMad(payableOf(payTarget))}
+            </p>
+            <Input
+              label={t('fields.amountMad')}
+              type="number"
+              min="0"
+              step="0.01"
+              max={payableOf(payTarget)}
+              value={payAmount}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                const cap = payableOf(payTarget);
+                if (e.target.value === '' || !Number.isFinite(next)) {
+                  setPayAmount(e.target.value);
+                  return;
+                }
+                setPayAmount(next > cap ? String(cap) : e.target.value);
+              }}
+              required
+            />
+            <div className="w-40">
+              <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('columns.date')}</p>
+              <MacDateInput value={payDate} onChange={setPayDate} placeholder={t('columns.date')} />
+            </div>
+            <Select label={t('fields.mode')} value={payMode} onChange={(e) => setPayMode(e.target.value)}>
+              <option value="especes">{t('fields.modeCash')}</option>
+              <option value="virement">{t('fields.modeTransfer')}</option>
+              <option value="cheque">{t('fields.modeCheck')}</option>
+            </Select>
+            <Textarea label={t('fields.remark')} value={payRemark} onChange={(e) => setPayRemark(e.target.value)} rows={2} />
+            <p className="text-[11px] text-gic-muted">{t('msg.debitBalanceHint')}</p>
+          </form>
         )}
       </Modal>
 

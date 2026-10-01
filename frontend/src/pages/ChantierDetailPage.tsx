@@ -478,6 +478,11 @@ export default function ChantierDetailPage() {
     achats: chantier?.purchases?.length ?? 0,
     documents: chantier?.documents?.length ?? 0,
     cameras: chantier?.cameras?.length ?? 0,
+    subcontractors: (chantier?.subcontractors || []).filter((row: { status?: string; progressPct?: number | null; amount?: number | null; paidAmount?: number | null }) => {
+      const workOpen = row.status !== 'termine' && Number(row.progressPct || 0) < 100;
+      const moneyOpen = Number(row.amount || 0) > Number(row.paidAmount || 0) + 0.01;
+      return workOpen || moneyOpen;
+    }).length,
   });
 
   const linkedProject = chantier?.project;

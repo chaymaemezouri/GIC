@@ -30,6 +30,7 @@ export function enginOwnershipLabel(type: string | null | undefined, t: Translat
 
 export type EnginFormData = {
   kind: string;
+  quantity: string;
   designation: string;
   genre: string;
   groupe: string;
@@ -81,6 +82,7 @@ export type EnginFormData = {
 export function emptyEnginForm(kind = 'engin', ownershipType: EnginOwnershipType = 'personnel'): EnginFormData {
   return {
     kind,
+    quantity: '1',
     designation: '',
     genre: '',
     groupe: '',
@@ -246,6 +248,9 @@ export function EnginFormFields({
         <div className="sm:col-span-2">
           <Input label={t('fleet.fields.designation')} placeholder={[form.genre, form.brand].filter(Boolean).join(' ')} value={form.designation} onChange={(e) => set({ designation: e.target.value })} />
         </div>
+        {form.kind === 'materiel' && (
+          <Input label={t('fleet.fields.quantity')} type="number" min="0" step="1" value={form.quantity} onChange={(e) => set({ quantity: e.target.value })} />
+        )}
         <Input label={t('fleet.fields.type')} placeholder={t('fleet.hints.typeExample')} value={form.genre} onChange={(e) => set({ genre: e.target.value })} />
         <Input label={t('fleet.fields.category')} placeholder={t('fleet.hints.categoryExample')} value={form.groupe} onChange={(e) => set({ groupe: e.target.value })} />
         <Input label={t('fleet.fields.brand')} value={form.brand} onChange={(e) => set({ brand: e.target.value })} />

@@ -35,6 +35,7 @@ export function buildChantierNavGroups(
     achats: number;
     documents: number;
     cameras: number;
+    subcontractors: number;
   },
 ): ChantierNavGroup[] {
   return [
@@ -61,7 +62,7 @@ export function buildChantierNavGroups(
       label: t('tabs.supply'),
       items: [
         { id: 'achats', label: t('tabs.purchases'), icon: ShoppingCart, badge: counts.achats || undefined },
-        { id: 'subcontractors', label: t('tabs.subcontractors'), icon: Briefcase },
+        { id: 'subcontractors', label: t('tabs.subcontractors'), icon: Briefcase, badge: counts.subcontractors || undefined },
       ],
     },
     {

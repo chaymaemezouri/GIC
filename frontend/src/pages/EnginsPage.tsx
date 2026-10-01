@@ -55,6 +55,7 @@ type Engin = {
   authExpiry?: string | null;
   currentAssignment?: { id: string; chantierId: string | null; chantierName: string | null; tranche: string | null; startDate: string; endDate: string | null } | null;
   costInfo?: { dailyRate?: number | null; annualDepreciation?: number; dailyDepreciation?: number; netBookValue?: number | null };
+  quantity?: number | null;
   _count?: { missions: number; maintenances: number; assignments: number };
 };
 
@@ -887,6 +888,7 @@ function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
                 <SelectAllTh selection={parcSelection} rows={items} />
                 <Th mac>{t('fleet.fields.code')}</Th>
                 <Th mac>{t('fleet.fields.designation')}</Th>
+                {kind === 'materiel' && <Th mac>{t('fleet.fields.quantity')}</Th>}
                 {!kind && <Th mac>{t('fleet.fields.kind')}</Th>}
                 {!view && <Th mac>{t('fleet.fields.mode')}</Th>}
                 {view === 'acquisitions' && (
@@ -923,6 +925,7 @@ function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
                     {e.designation || [e.genre, e.brand].filter(Boolean).join(' ') || '—'}
                     <span className="block text-[10px] mac-table-muted">{[e.genre, e.brand, e.model].filter(Boolean).join(' · ') || '—'}</span>
                   </Td>
+                  {kind === 'materiel' && <Td mac className="font-medium">{e.quantity ?? 0}</Td>}
                   {!kind && (
                     <Td mac>
                       <span className={`mac-chip ${e.kind === 'materiel' ? 'mac-chip-gray' : 'mac-chip-blue'}`}>{kindLabel(e.kind, t)}</span>

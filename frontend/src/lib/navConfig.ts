@@ -89,10 +89,18 @@ export const navbarGroups: NavGroup[] = [
     items: [
       { to: '/engins/tableau-de-bord', label: 'fleet.nav.dashboard', icon: PieChart },
       { to: '/engins?kind=engin', label: 'fleet.nav.referentielEngins', icon: Truck },
-      { to: '/engins?kind=materiel', label: 'fleet.nav.referentielMateriels', icon: Package },
       { to: '/engins/affectations', label: 'fleet.nav.affectations', icon: CalendarRange },
       { to: '/engins/entretien', label: 'fleet.nav.entretien', icon: Cog },
       { to: '/engins/couts', label: 'fleet.nav.couts', icon: Calculator },
+    ],
+  },
+  {
+    id: 'materiel',
+    label: 'fleet.nav.materielGroup',
+    description: 'fleet.nav.materielGroupDesc',
+    icon: Package,
+    items: [
+      { to: '/engins?kind=materiel', label: 'fleet.nav.referentielMateriels', icon: Package },
     ],
   },
   {

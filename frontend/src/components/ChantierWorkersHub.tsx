@@ -259,8 +259,8 @@ export function ChantierWorkersHub({
     { id: 'transfer', label: t('siteOps.transfer') },
     { id: 'pointage', label: t('siteOps.attendance') },
     { id: 'synthese', label: t('siteOps.synthesisByDate') },
-    { id: 'syntheseWorker', label: scope === 'drivers' ? t('siteOps.synthesisByDriver') : t('pointageMgmt.byWorkerTab') },
-    { id: 'paiement', label: t('actions.payment') },
+    { id: 'syntheseWorker', label: t('actions.payment') },
+    { id: 'paiement', label: t('siteOps.paymentSynthesis') },
   ];
 
   return (

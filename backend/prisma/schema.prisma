@@ -704,6 +704,8 @@ model Chantier {
   progress     WorkProgress[]
   missions     Mission[]
   enginAssignments EnginAssignment[]
+  materielMovements MaterielMovement[] @relation("MaterielToSite")
+  materielMovesFrom MaterielMovement[] @relation("MaterielFromSite")
   enginUsages  EnginUsage[]
   enginExpenses EnginExpense[]
   enginMaintenances Maintenance[]
@@ -767,8 +769,47 @@ model ChantierSubcontractor {
   paidAmount  Float    @default(0)
   status      String   @default("actif")
   remark      String?
+  workProgressId String?
+  workProgress WorkProgress? @relation(fields: [workProgressId], references: [id], onDelete: SetNull)
+  /// task = tâche entière ; phase = une seule phase
+  scope       String   @default("task")
+  phaseLabel  String?
+  tranche     String?
+  startDate   DateTime?
+  endDate     DateTime?
+  follows     SubcontractFollow[]
+  payments    SubcontractorPayment[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+/// Suivi d'une phase (ou de la tâche complète) sous-traitée.
+model SubcontractFollow {
+  id              String   @id @default(cuid())
+  subcontractorId String
+  subcontractor   ChantierSubcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
+  label           String
+  percent         Float    @default(0)
+  validated       Boolean  @default(false)
+  validatedAt     DateTime?
+  sortOrder       Int      @default(0)
+
+  @@index([subcontractorId])
+}
+
+model SubcontractorPayment {
+  id              String   @id @default(cuid())
+  subcontractorId String
+  subcontractor   ChantierSubcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
+  amount          Float
+  /// avance | situation | solde
+  kind            String   @default("avance")
+  paymentMode     String?
+  date            DateTime @default(now())
+  remark          String?
+  createdAt       DateTime @default(now())
+
+  @@index([subcontractorId])
 }
 
 model ChantierCamera {
@@ -907,6 +948,7 @@ model WorkProgress {
   remark     String?
   /// Phases manuelles du lot : [{ percent, label, description?, deliverables? }]
   phases     Json?
+  subcontractors ChantierSubcontractor[]
   updatedAt  DateTime @updatedAt
   createdAt  DateTime @default(now())
 }
@@ -963,6 +1005,8 @@ model Engin {
   counterDate   DateTime?
   purchasePrice Float?
   status        String   @default("disponible")
+  /// Stock disponible pour le matériel géré par quantité. Un engin individuel reste à 1.
+  quantity      Float    @default(1)
   fuelLevel     Float?
   insuranceExpiry DateTime?
   vignetteExpiry  DateTime?
@@ -979,6 +1023,29 @@ model Engin {
   assignments   EnginAssignment[]
   usages        EnginUsage[]
   expenses      EnginExpense[]
+  movements     MaterielMovement[]
+}
+
+/// Entrée, sortie, affectation ou transfert d'une quantité de matériel.
+model MaterielMovement {
+  id           String    @id @default(cuid())
+  enginId      String
+  engin        Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
+  chantierId   String?
+  chantier     Chantier? @relation("MaterielToSite", fields: [chantierId], references: [id])
+  tranche      String?
+  fromChantierId String?
+  fromChantier   Chantier? @relation("MaterielFromSite", fields: [fromChantierId], references: [id])
+  fromTranche    String?
+  /// entree | sortie | affectation | transfert | maintenance | retour
+  movementType String
+  quantity     Float
+  date         DateTime  @default(now())
+  remark       String?
+  createdAt    DateTime  @default(now())
+
+  @@index([enginId, date])
+  @@index([chantierId])
 }
 
 /// Affectation d'un engin / matériel à un projet, chantier ou tranche (historisée)

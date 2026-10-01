@@ -2491,6 +2491,7 @@ html[dir="rtl"] .shell-dropdown-right {
 
 .mac-chip-green { background: rgba(52, 199, 89, 0.12); color: #248a3d; }
 .mac-chip-blue { background: rgba(0, 122, 255, 0.12); color: #007aff; }
+.mac-chip-violet { background: rgba(124, 58, 237, 0.12); color: #6d28d9; }
 .mac-chip-orange { background: rgba(255, 149, 0, 0.14); color: #c93400; }
 .mac-chip-gray { background: rgba(0, 0, 0, 0.05); color: #636366; }
 
@@ -2825,6 +2826,17 @@ html[dir="rtl"] .shell-dropdown-right {
 
 .mac-steps-item:first-child {
   flex: 0 0 auto;
+}
+
+.mac-steps-st {
+  display: block;
+  margin-top: 2px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #6d28d9;
+  text-align: center;
+  line-height: 1;
 }
 
 .mac-steps-line {

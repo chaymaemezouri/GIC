@@ -110,6 +110,14 @@ export async function getChantierTrancheDetail(chantierId: string, trancheId: st
   const [progress, assignments, pointedWorkers, missions, purchases] = await Promise.all([
     prisma.workProgress.findMany({
       where: { chantierId, tranche: tranche.name },
+      include: {
+        subcontractors: {
+          include: {
+            payments: { orderBy: { date: 'desc' } },
+            follows: { orderBy: { sortOrder: 'asc' } },
+          },
+        },
+      },
     }),
     prisma.workforceAssignment.findMany({
       where: { chantierId, tranche: tranche.name },

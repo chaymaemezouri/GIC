@@ -23,6 +23,15 @@ export type TaskPhaseContext = {
   remark?: string | null;
   updatedAt?: string | null;
   phases?: TaskPhaseInput[] | null;
+  subcontracts?: Array<{
+    scope?: string;
+    phaseLabel?: string | null;
+    companyName: string;
+    amount?: number | null;
+    paidAmount?: number | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  }>;
 };
 
 export type TrackStepKind = 'start' | 'phase' | 'validation';

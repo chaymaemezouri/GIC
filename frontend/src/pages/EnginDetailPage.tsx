@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Pencil, Trash2, Printer, Wrench, AlertTriangle, ExternalLink, MapPin, Fuel, ClipboardList, FileText,
-  Upload, Info, History, Bell, UserRound, Landmark, CalendarRange, Gauge, Receipt, Calculator, Hammer, RotateCcw, Clock, Wallet,
+  Upload, Info, History, Bell, UserRound, Landmark, CalendarRange, Gauge, Receipt, Calculator, Hammer, RotateCcw, Clock, Wallet, Package,
 } from 'lucide-react';
 import { api, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
 import {
@@ -19,6 +19,7 @@ import MacProfilePhoto from '../components/MacProfilePhoto';
 import DriverVehiclePanel from '../components/DriverVehiclePanel';
 import { fileUrl, printDocumentFiche } from '../lib/documentDisplay';
 import { AssignmentsPanel } from '../components/engins/Assignments';
+import { MaterielStockPanel } from '../components/engins/MaterielStockPanel';
 import { ExpensePanel, FuelPanel, UsagePanel } from '../components/engins/Logs';
 import { MaintenanceModal } from '../components/engins/MaintenanceModal';
 import { CostChips, DeleteMotifModal, FleetStatusPill, InfoRow, invalidateFleetRefs } from '../components/engins/FleetCommon';
@@ -28,7 +29,7 @@ import {
 } from '../lib/engins';
 
 type Tab =
-  | 'infos' | 'acquisition' | 'affectations' | 'utilisation' | 'chauffeurs' | 'missions' | 'gps'
+  | 'infos' | 'acquisition' | 'quantites' | 'affectations' | 'utilisation' | 'chauffeurs' | 'missions' | 'gps'
   | 'maintenance' | 'carburant' | 'depenses' | 'couts' | 'documents' | 'rappels' | 'historique';
 
 type EnginCosts = {
@@ -102,6 +103,10 @@ export default function EnginDetailPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    if (engin?.kind === 'materiel') setTab('quantites');
+  }, [engin?.id, engin?.kind]);
 
   useEffect(() => {
     loadCosts();
@@ -234,6 +239,7 @@ export default function EnginDetailPage() {
   }
 
   const isRented = engin.ownershipType === 'loue';
+  const isMateriel = engin.kind === 'materiel';
   const missionCount = engin._count?.missions ?? engin.missions?.length ?? 0;
   const maintCount = engin._count?.maintenances ?? engin.maintenances?.length ?? 0;
   const assignmentCount = engin._count?.assignments ?? 0;
@@ -352,6 +358,7 @@ export default function EnginDetailPage() {
                 id: 'exploitation',
                 label: t('tabs.exploitation'),
                 items: [
+                  ...(isMateriel ? [{ id: 'quantites', label: t('fleet.stock.title'), icon: Package }] : []),
                   { id: 'affectations', label: t('fleet.nav.affectations'), icon: CalendarRange, badge: assignmentCount || undefined },
                   { id: 'utilisation', label: t('fleet.tabs.usage'), icon: Gauge },
                   { id: 'chauffeurs', label: t('driverMgmt.driversTab'), icon: UserRound, badge: engin.driverAssignments?.length || undefined },
@@ -503,6 +510,8 @@ export default function EnginDetailPage() {
             )}
           </div>
         )}
+
+        {tab === 'quantites' && engin.id && <MaterielStockPanel enginId={engin.id} />}
 
         {tab === 'affectations' && (
           <div className="mt-1">

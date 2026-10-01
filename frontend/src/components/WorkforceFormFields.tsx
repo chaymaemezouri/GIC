@@ -85,11 +85,13 @@ export function WorkforceFormFields({
   setForm,
   categories = [],
   hideCategory = false,
+  driverModes = false,
 }: {
   form: WorkforceFormData;
   setForm: (f: WorkforceFormData) => void;
   categories?: string[];
   hideCategory?: boolean;
+  driverModes?: boolean;
 }) {
   const { t } = useI18n();
   const isMois = form.salaryPeriod === 'mois';
@@ -137,8 +139,8 @@ export function WorkforceFormFields({
           });
         }}
       >
-        <option value="jour">{t('fields.payDaily')}</option>
-        <option value="mois">{t('fields.payMonthly')}</option>
+        <option value="jour">{driverModes ? t('fields.driverPointage') : t('fields.payDaily')}</option>
+        <option value="mois">{driverModes ? t('fields.driverMonthly') : t('fields.payMonthly')}</option>
       </Select>
       <Select
         label={t('fields.contractType')}

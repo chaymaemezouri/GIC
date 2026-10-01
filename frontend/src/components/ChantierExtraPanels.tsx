@@ -1,9 +1,13 @@
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
-import { api, formatMad } from '../lib/api';
+import { api, formatDate, formatMad } from '../lib/api';
 import { Btn, Input, MacActionBtn, Modal, Select, TableWrap, Td, Th } from './ui';
 import { useI18n } from '../i18n/I18nContext';
+
+type Follow = { id: string; label: string; percent: number; validated: boolean };
+type Pay = { id: string; amount: number; kind: string; paymentMode?: string | null; date: string; remark?: string | null };
+type Task = { id: string; taskName: string; tranche?: string | null; phases?: { label?: string; percent?: number }[] | null };
 
 type Subcontractor = {
   id: string;
@@ -15,66 +19,121 @@ type Subcontractor = {
   paidAmount?: number | null;
   status: string;
   remark?: string | null;
+  scope?: string;
+  phaseLabel?: string | null;
+  tranche?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  follows?: Follow[];
+  payments?: Pay[];
 };
 
 export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string }) {
   const { t } = useI18n();
   const [items, setItems] = useState<Subcontractor[]>([]);
   const [open, setOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ companyName: '', corpsEtat: '', phone: '', amount: '', progressPct: '0', paidAmount: '0', status: 'actif', remark: '' });
+  const [form, setForm] = useState({ companyName: '', phone: '', amount: '', remark: '', workProgressId: '', scope: 'task', phaseLabel: '' });
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [standardPhases, setStandardPhases] = useState<{ name: string; phases: { label?: string; percent?: number }[] }[]>([]);
+  const [detail, setDetail] = useState<Subcontractor | null>(null);
+  const [payAmount, setPayAmount] = useState('');
+  const [payMode, setPayMode] = useState('especes');
+  const [payKind, setPayKind] = useState('avance');
 
   function load() {
     api<Subcontractor[]>(`/chantiers/${chantierId}/subcontractors`).then(setItems).catch(() => setItems([]));
+    api<Task[]>(`/chantiers/${chantierId}/progress`).then(setTasks).catch(() => setTasks([]));
+    api<{ name: string; phases: { label?: string; percent?: number }[] }[]>('/chantiers/tasks/standard')
+      .then(setStandardPhases)
+      .catch(() => setStandardPhases([]));
   }
 
   useEffect(() => { load(); }, [chantierId]);
 
   function openCreate() {
-    setEditId(null);
-    setForm({ companyName: '', corpsEtat: '', phone: '', amount: '', progressPct: '0', paidAmount: '0', status: 'actif', remark: '' });
+    setForm({ companyName: '', phone: '', amount: '', remark: '', workProgressId: '', scope: 'task', phaseLabel: '' });
     setOpen(true);
   }
 
   function openEdit(item: Subcontractor) {
-    setEditId(item.id);
-    setForm({
-      companyName: item.companyName,
-      corpsEtat: item.corpsEtat || '',
-      phone: item.phone || '',
-      amount: item.amount != null ? String(item.amount) : '',
-      progressPct: item.progressPct != null ? String(item.progressPct) : '0',
-      paidAmount: item.paidAmount != null ? String(item.paidAmount) : '0',
-      status: item.status,
-      remark: item.remark || '',
-    });
-    setOpen(true);
+    setDetail(item);
+    setPayAmount('');
+    setPayKind('avance');
+    setPayMode('especes');
   }
+
+  async function toggleFollow(follow: Follow) {
+    if (!detail) return;
+    try {
+      const updated = await api<Subcontractor>(`/chantiers/${chantierId}/subcontractors/${detail.id}/follows/${follow.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ validated: !follow.validated }),
+      });
+      setDetail(updated);
+      load();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function addPayment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!detail) return;
+    try {
+      const updated = await api<Subcontractor>(`/chantiers/${chantierId}/subcontractors/${detail.id}/payments`, {
+        method: 'POST',
+        body: JSON.stringify({ amount: Number(payAmount), kind: payKind, paymentMode: payMode }),
+      });
+      setDetail(updated);
+      setPayAmount('');
+      load();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  const selectedTask = tasks.find((task) => task.id === form.workProgressId);
+  const taskPhases = selectedTask?.phases?.length
+    ? selectedTask.phases
+    : (standardPhases.find((lot) => lot.name === selectedTask?.taskName)?.phases || []);
+  const phaseOptions = taskPhases.map((p) => String(p.label || '')).filter(Boolean);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const body = {
       companyName: form.companyName,
-      corpsEtat: form.corpsEtat || null,
       phone: form.phone || null,
       amount: form.amount ? Number(form.amount) : null,
-      progressPct: form.progressPct ? Number(form.progressPct) : 0,
-      paidAmount: form.paidAmount ? Number(form.paidAmount) : 0,
-      status: form.status,
       remark: form.remark || null,
+      workProgressId: form.workProgressId || null,
+      scope: form.scope,
+      phaseLabel: form.scope === 'phase' ? form.phaseLabel : null,
     };
     try {
-      if (editId) {
-        await api(`/chantiers/${chantierId}/subcontractors/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await api(`/chantiers/${chantierId}/subcontractors`, { method: 'POST', body: JSON.stringify(body) });
-      }
+      await api(`/chantiers/${chantierId}/subcontractors`, { method: 'POST', body: JSON.stringify(body) });
       setOpen(false);
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
   }
+
+  function scopeLine(item: Subcontractor) {
+    const what = item.scope === 'phase' && item.phaseLabel ? item.phaseLabel : t('detail.subcontractWhole');
+    const period = item.startDate || item.endDate
+      ? ` · ${item.startDate ? formatDate(item.startDate) : '…'} → ${item.endDate ? formatDate(item.endDate) : '…'}`
+      : '';
+    return `${item.tranche || t('msg.wholeSite')} · ${what}${period}`;
+  }
+
+  function isOpen(item: Subcontractor) {
+    const workOpen = item.status !== 'termine' && Number(item.progressPct || 0) < 100;
+    const moneyOpen = Number(item.amount || 0) > Number(item.paidAmount || 0) + 0.01;
+    return workOpen || moneyOpen;
+  }
+
+  const ordered = [...items].sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)));
+  const openItems = ordered.filter(isOpen);
 
   async function remove(id: string) {
     if (!await appConfirm(t('msg.confirmDeleteSubcontractor'))) return;
@@ -92,6 +151,20 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
         <p className="text-[13px] font-medium text-gic-ink">{t('detail.subcontractorsTitle')}</p>
         <Btn icon={Plus} onClick={openCreate}>{t('common.add')}</Btn>
       </div>
+      {openItems.length > 0 && (
+        <div className="rounded-lg border border-[#ff9500]/30 bg-[rgba(255,149,0,0.06)] p-3 space-y-2">
+          <p className="text-[12px] font-medium text-gic-ink">{t('detail.stOpen')} · {openItems.length}</p>
+          {openItems.map((item) => (
+            <button key={item.id} type="button" className="block w-full text-left text-[12px]" onClick={() => openEdit(item)}>
+              <span className="font-medium">{item.companyName}</span>
+              <span className="text-gic-muted"> · {item.corpsEtat || '—'} · {scopeLine(item)}</span>
+              <span className="block text-[11px] text-gic-muted">
+                {Math.round(Number(item.progressPct || 0))} % · {t('siteOps.paid')} {formatMad(item.paidAmount || 0)} · {t('siteOps.moneyLeft')} {formatMad(Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)))}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       {items.length > 0 && (
         <div className="flex flex-wrap gap-3 text-[12px]">
           <span className="mac-chip mac-chip-gray">{t('fields.amount')} {formatMad(items.reduce((s, i) => s + Number(i.amount || 0), 0))}</span>
@@ -116,20 +189,27 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
+            {ordered.map((item) => (
+              <tr key={item.id} className="cursor-pointer" onClick={() => openEdit(item)}>
                 <Td mac>
                   <span className="font-medium">{item.companyName}</span>
                   {item.phone && <span className="block text-[10px] text-gic-muted">{item.phone}</span>}
                 </Td>
-                <Td mac className="mac-table-muted">{item.corpsEtat || '—'}</Td>
+                <Td mac className="mac-table-muted">
+                  {item.corpsEtat || '—'}
+                  <span className="block text-[10px]">{scopeLine(item)}</span>
+                </Td>
                 <Td mac>{item.amount != null ? formatMad(item.amount) : '—'}</Td>
                 <Td mac>{Math.round(Number(item.progressPct || 0))} %</Td>
                 <Td mac>{formatMad(item.paidAmount || 0)}</Td>
                 <Td mac>{formatMad(Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)))}</Td>
-                <Td mac>{item.status}</Td>
+                <Td mac>
+                  <span className={`mac-chip ${isOpen(item) ? 'mac-chip-orange' : 'mac-chip-green'}`}>
+                    {isOpen(item) ? t('detail.stOpen') : t('detail.stDone')}
+                  </span>
+                </Td>
                 <Td mac className="mac-td-actions">
-                  <div className="mac-actions">
+                  <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
                     <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEdit(item)} />
                     <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => remove(item.id)} />
                   </div>
@@ -141,7 +221,7 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
       )}
       <Modal
         open={open}
-        title={editId ? t('actions.editSubcontractor') : t('actions.newSubcontractor')}
+        title={t('actions.newSubcontractor')}
         onClose={() => setOpen(false)}
         footer={
           <>
@@ -151,21 +231,91 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
         }
       >
         <form id="sub-form" onSubmit={save} className="grid gap-3">
+          <p className="text-[12px] text-gic-muted">{t('detail.subcontractHint')}</p>
+          <Select required label={t('detail.subcontractTask')} value={form.workProgressId} onChange={(e) => setForm({ ...form, workProgressId: e.target.value, phaseLabel: '' })}>
+            <option value="">{t('common.choose')}</option>
+            {tasks.map((task) => (
+              <option key={task.id} value={task.id}>{task.tranche || t('msg.wholeSite')} · {task.taskName}</option>
+            ))}
+          </Select>
+          <Select label={t('detail.subcontractScope')} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value, phaseLabel: '' })}>
+            <option value="task">{t('detail.subcontractWhole')}</option>
+            <option value="phase">{t('detail.subcontractOnePhase')}</option>
+          </Select>
+          {form.scope === 'phase' && (
+            <Select label={t('detail.subcontractPhase')} value={form.phaseLabel} onChange={(e) => setForm({ ...form, phaseLabel: e.target.value })}>
+              <option value="">{t('common.choose')}</option>
+              {phaseOptions.map((label) => <option key={label} value={label}>{label}</option>)}
+            </Select>
+          )}
           <Input label={t('fields.companyRequired')} required value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
-          <Input label={t('fields.corpsEtat')} value={form.corpsEtat} onChange={(e) => setForm({ ...form, corpsEtat: e.target.value })} placeholder={t('fields.corpsEtatPlaceholder')} />
           <Input label={t('fields.phone')} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           <Input label={t('fields.contractAmountMad')} type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-          <Input label={t('siteOps.progress')} type="number" min="0" max="100" value={form.progressPct} onChange={(e) => setForm({ ...form, progressPct: e.target.value })} />
-          <Input label={t('siteOps.paid')} type="number" min="0" value={form.paidAmount} onChange={(e) => setForm({ ...form, paidAmount: e.target.value })} />
-          <Select label={t('fields.status')} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-            <option value="actif">{t('status.active')}</option>
-            <option value="termine">{t('fields.statusFinishedShort')}</option>
-            <option value="suspendu">{t('fields.statusSuspendedShort')}</option>
-          </Select>
           <Input label={t('fields.remark')} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
         </form>
+      </Modal>
+      <Modal
+        open={!!detail}
+        size="lg"
+        title={detail ? `${detail.companyName} — ${detail.corpsEtat || ''}` : ''}
+        onClose={() => setDetail(null)}
+        footer={<Btn variant="secondary" onClick={() => setDetail(null)}>{t('common.close')}</Btn>}
+      >
+        {detail && (
+          <div className="space-y-4">
+            <p className="text-[12px] text-gic-muted">
+              <span className={`mac-chip mr-2 ${isOpen(detail) ? 'mac-chip-orange' : 'mac-chip-green'}`}>{isOpen(detail) ? t('detail.stOpen') : t('detail.stDone')}</span>
+              {detail.corpsEtat || '—'} · {scopeLine(detail)}
+              {' · '}{formatMad(detail.amount || 0)} · {t('siteOps.paid')} {formatMad(detail.paidAmount || 0)} · {t('siteOps.moneyLeft')} {formatMad(Math.max(0, Number(detail.amount || 0) - Number(detail.paidAmount || 0)))}
+            </p>
+            <div>
+              <p className="mb-2 text-[13px] font-medium">{t('detail.subcontractFollow')}</p>
+              {(detail.follows || []).length === 0 ? (
+                <p className="text-[12px] text-gic-muted">{t('common.empty')}</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(detail.follows || []).map((follow) => (
+                    <li key={follow.id} className="flex items-center justify-between gap-2 rounded-lg border border-black/[0.06] px-3 py-2">
+                      <span className="text-[12px]">
+                        {follow.label}
+                        <span className={`ml-2 mac-chip ${follow.validated ? 'mac-chip-green' : 'mac-chip-gray'}`}>{follow.validated ? t('pointageMgmt.validated') : t('pointageMgmt.draft')}</span>
+                      </span>
+                      <Btn variant="secondary" className="!py-1 !text-[11px]" onClick={() => toggleFollow(follow)}>{follow.validated ? t('detail.unvalidatePhase') : t('detail.validatePhase')}</Btn>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-[13px] font-medium">{t('detail.paymentsTitle')}</p>
+              <ul className="mb-3 space-y-1 text-[12px]">
+                {(detail.payments || []).map((pay) => (
+                  <li key={pay.id} className="flex justify-between gap-2">
+                    <span>{formatDate(pay.date)} · {pay.kind}</span>
+                    <span className="font-medium">{formatMad(pay.amount)}</span>
+                  </li>
+                ))}
+                {(detail.payments || []).length === 0 && <li className="text-gic-muted">{t('common.empty')}</li>}
+              </ul>
+              <form onSubmit={addPayment} className="grid gap-2 sm:grid-cols-3">
+                <Input label={t('fields.amountMad')} type="number" min="0" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} required />
+                <Select label={t('fields.mode')} value={payMode} onChange={(e) => setPayMode(e.target.value)}>
+                  <option value="especes">{t('fields.modeCash')}</option>
+                  <option value="virement">{t('fields.modeTransfer')}</option>
+                  <option value="cheque">{t('fields.modeCheck')}</option>
+                </Select>
+                <Select label={t('fields.operationType')} value={payKind} onChange={(e) => setPayKind(e.target.value)}>
+                  <option value="avance">{t('columns.advance')}</option>
+                  <option value="situation">{t('siteOps.progress')}</option>
+                  <option value="solde">{t('siteOps.moneyLeft')}</option>
+                </Select>
+                <Btn type="submit">{t('detail.addAdvance')}</Btn>
+              </form>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
 }
-
+

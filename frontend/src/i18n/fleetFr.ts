@@ -3,8 +3,10 @@ import type { Dict } from './types';
 /** Module « Gestion des Engins & Matériels » (clés `fleet.*`). */
 const fleetFr: Dict = {
   nav: {
-    group: 'Engins & Matériels',
-    groupDesc: 'Patrimoine, affectations, exploitation et coûts imputés aux chantiers',
+    group: 'Engins',
+    groupDesc: 'Un engin par référence : affectation, transfert, mission, utilisation, réparation et historique',
+    materielGroup: 'Matériel',
+    materielGroupDesc: 'Gestion par quantité : affectation, transfert, entrées, sorties et historique par chantier',
     referentielEngins: 'Référentiel Engins',
     referentielMateriels: 'Référentiel Matériels',
     acquisitions: 'Propriétés / Acquisitions',
@@ -220,6 +222,7 @@ const fleetFr: Dict = {
     depreciationYears: 'Durée d’amortissement (ans)',
     description: 'Description',
     designation: 'Désignation',
+    quantity: 'Quantité',
     details: 'Détails',
     document: 'Document',
     documentName: 'Nom du document',
@@ -464,6 +467,27 @@ const fleetFr: Dict = {
     schedule: 'Renseignez le prix d’acquisition et la durée pour obtenir le tableau d’amortissement.',
     toReturn: 'Aucun engin à retourner.',
     usage: 'Aucun pointage d’utilisation.',
+  },
+  stock: {
+    title: 'Quantités',
+    depot: 'Dépôt',
+    onSites: 'Sur chantiers',
+    repair: 'En réparation',
+    total: 'Quantité totale',
+    history: 'Historique',
+    newMovement: 'Nouveau mouvement',
+    type: 'Type',
+    source: 'Origine',
+    destination: 'Destination',
+    tranche: 'Tranche',
+    entree: 'Entrée',
+    sortie: 'Sortie',
+    affectation: 'Affectation',
+    transfert: 'Transfert',
+    maintenance: 'Réparation',
+    retour: 'Retour de réparation',
+    onSite: 'Sur ce chantier',
+    empty: 'Aucun mouvement de quantité.',
   },
 };
 

@@ -9,7 +9,7 @@ import {
 import { api, downloadCsv, downloadExcel, fetchChantierList, formatMad, uploadForm, type PaginatedResponse } from '../lib/api';
 import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacSearch, MacSelect,
-  Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
+  Modal, PageHeader, Pagination, StatusPill, TableWrap, Tabs, Td, Th,
 } from '../components/ui';
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
@@ -85,6 +85,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
   const [activeFilter, setActiveFilter] = useState(searchParams.get('active') || '');
   const [declaredFilter, setDeclaredFilter] = useState(searchParams.get('declared') || '');
   const [chantierFilter, setChantierFilter] = useState(searchParams.get('chantierId') || '');
+  const [driverMode, setDriverMode] = useState<'jour' | 'mois'>(searchParams.get('salaryPeriod') === 'mois' ? 'mois' : 'jour');
   const [sort, setSort] = useState(searchParams.get('sort') || 'lastName');
   const [order, setOrder] = useState<SortOrder>((searchParams.get('order') === 'desc' ? 'desc' : 'asc'));
   const [showFilters, setShowFilters] = useState(false);
@@ -122,6 +123,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
     if (activeFilter) qs.set('active', activeFilter);
     if (declaredFilter) qs.set('declared', declaredFilter);
     if (chantierFilter) qs.set('chantierId', chantierFilter);
+    if (isChauffeur) qs.set('salaryPeriod', driverMode);
     qs.set('sort', sort);
     qs.set('order', order);
     qs.set('page', String(pageNum));
@@ -145,6 +147,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
     if (act) qs.set('active', act);
     if (decl) qs.set('declared', decl);
     if (ch) qs.set('chantierId', ch);
+    if (isChauffeur) qs.set('salaryPeriod', driverMode);
     qs.set('sort', sort);
     qs.set('order', order);
     qs.set('page', String(pageNum));
@@ -166,7 +169,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
 
   useEffect(() => {
     load(page);
-  }, [sort, order]);
+  }, [sort, order, driverMode]);
 
   useEffect(() => {
     const qs = new URLSearchParams();
@@ -204,7 +207,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
 
   function openCreate() {
     setEditId(null);
-    setForm(isChauffeur ? { ...emptyWorkforceForm(), category: CHAUFFEUR_CATEGORY } : emptyWorkforceForm());
+    setForm(isChauffeur ? { ...emptyWorkforceForm(), category: CHAUFFEUR_CATEGORY, salaryPeriod: driverMode } : emptyWorkforceForm());
     setError('');
     setOpen(true);
   }
@@ -371,6 +374,23 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
           </>
         }
       />
+
+      {isChauffeur && (
+        <div className="mb-3">
+          <Tabs
+            mac
+            active={driverMode}
+            onChange={(id) => {
+              setDriverMode(id === 'mois' ? 'mois' : 'jour');
+              setPage(1);
+            }}
+            tabs={[
+              { id: 'jour', label: t('fields.driverPointage') },
+              { id: 'mois', label: t('fields.driverMonthly') },
+            ]}
+          />
+        </div>
+      )}
 
       <div className="mac-kpi-grid mac-kpi-grid-4">
         <KpiCard title={isChauffeur ? t('kpi.totalDrivers') : t('kpi.totalPersonnel')} value={stats.total} icon={Users} tone="violet" />
@@ -679,6 +699,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
             setForm={setForm}
             categories={isChauffeur ? [CHAUFFEUR_CATEGORY] : stats.categories}
             hideCategory={isChauffeur}
+            driverModes={isChauffeur}
           />
           {error && <p className="mt-3 text-[11px] text-gic-coral">{error}</p>}
         </form>

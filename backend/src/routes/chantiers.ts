@@ -88,6 +88,7 @@ function buildWorkforceWhere(
   declared: string,
   chantierId: string,
   excludeCategory = '',
+  salaryPeriod = '',
 ) {
   return {
     AND: [
@@ -109,6 +110,7 @@ function buildWorkforceWhere(
       active === 'true' ? { isActive: true } : active === 'false' ? { isActive: false } : {},
       declared === 'true' ? { declared: true } : declared === 'false' ? { declared: false } : {},
       chantierId ? { assignments: { some: { chantierId } } } : {},
+      salaryPeriod === 'jour' || salaryPeriod === 'mois' ? { salaryPeriod } : {},
     ],
   };
 }
@@ -263,12 +265,13 @@ router.get('/workforce', async (req, res) => {
   const active = String(req.query.active || '');
   const declared = String(req.query.declared || '');
   const chantierId = String(req.query.chantierId || '');
+  const salaryPeriod = String(req.query.salaryPeriod || '');
   const sort = String(req.query.sort || 'lastName');
   const order = req.query.order === 'desc' ? 'desc' : 'asc';
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(5, Number(req.query.limit) || 20));
   const skip = (page - 1) * limit;
-  const where = buildWorkforceWhere(q, category, groupe, active, declared, chantierId, excludeCategory);
+  const where = buildWorkforceWhere(q, category, groupe, active, declared, chantierId, excludeCategory, salaryPeriod);
   const orderBy =
     sort === 'dailySalary'
       ? { dailySalary: order as 'asc' | 'desc' }
@@ -659,6 +662,15 @@ function pointageBrut(
   return p.totalDay * pointageRate(p, dailySalary);
 }
 
+/** L'avance reste au moins égale au montant déjà enregistré, et au plus égale à jours × prix. */
+function boundAdvance(requested: number, saved: number, days: number, rate: number) {
+  const floor = Math.max(0, Number.isFinite(saved) ? saved : 0);
+  const wage = Math.max(0, Math.round(Math.max(0, days) * Math.max(0, rate) * 100) / 100);
+  const ceiling = Math.max(floor, wage);
+  const value = Number.isFinite(requested) ? requested : floor;
+  return Math.round(Math.min(Math.max(value, floor), ceiling) * 100) / 100;
+}
+
 function computeSalary(
   dailySalary: number,
   pointages: Array<{ totalDay: number; advance: number; bonus: number; dayRate?: number | null }>
@@ -998,11 +1010,19 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
     .reduce((s, r) => s + r.amountPaid, 0);
   const prevPaid = existing?.amountPaid ?? 0;
   const amountPaid = prevPaid + amount;
-  const cap = siteKey ? netDue : Math.max(0, netDue - paidElsewhere);
-  if (amountPaid > cap + 0.01) {
-    return res.status(400).json({
-      message: `Montant supérieur au net dû (${netDue.toLocaleString('fr-MA')} MAD, reste ${Math.max(0, cap - prevPaid).toLocaleString('fr-MA')} MAD)`,
-    });
+  const wageCap = siteKey && !isMonthlyWorkforce(worker) ? computed.brut : netDue;
+  const cap = siteKey ? wageCap : Math.max(0, netDue - paidElsewhere);
+  const paidOnSite = siteKey && !trancheSpecified
+    ? periodRecords.filter((r) => r.chantierId === siteKey).reduce((s, r) => s + r.amountPaid, 0)
+    : prevPaid;
+  const paidForCap = siteKey && !trancheSpecified ? paidOnSite : prevPaid;
+  const nextForCap = paidForCap + amount;
+  if (nextForCap > cap + 0.01) {
+    const left = Math.max(0, cap - paidForCap);
+    const message = siteKey && !isMonthlyWorkforce(worker)
+      ? `La somme ne peut pas dépasser jours × prix (${computed.brut.toLocaleString('fr-MA')} MAD, reste ${left.toLocaleString('fr-MA')} MAD)`
+      : `Montant supérieur au net dû (${netDue.toLocaleString('fr-MA')} MAD, reste ${left.toLocaleString('fr-MA')} MAD)`;
+    return res.status(400).json({ message });
   }
 
   const remaining = siteKey
@@ -1140,6 +1160,7 @@ router.get('/:id/payroll-lines', async (req, res) => {
     advance: number;
     bonus: number;
     net: number;
+    validated: boolean;
   };
   type Bucket = {
     workforceId: string;
@@ -1197,6 +1218,7 @@ router.get('/:id/payroll-lines', async (req, res) => {
       advance: p.advance,
       bonus: p.bonus,
       net: brut + p.bonus - p.advance,
+      validated: p.validated,
     });
   }
 
@@ -1243,13 +1265,18 @@ router.get('/:id/payroll-lines', async (req, res) => {
   const lines = [...buckets.values()]
     .map((b) => {
       const netDue = b.brut + b.bonuses - b.advances;
-      const record = records.find((r) => (
-        r.workforceId === b.workforceId
-        && r.chantierId === (b.monthly ? '' : chantierId)
-        && String(r.tranche || '') === (b.monthly ? '' : b.tranche)
-      ));
-      const paid = record?.amountPaid ?? 0;
-      const remaining = Math.max(0, netDue - paid);
+      const own = records.filter((r) => r.workforceId === b.workforceId && r.chantierId === (b.monthly ? '' : chantierId));
+      const record = own.find((r) => String(r.tranche || '') === (b.monthly ? '' : b.tranche));
+      const unallocated = own
+        .filter((r) => !String(r.tranche || ''))
+        .reduce((s, r) => s + r.amountPaid, 0);
+      const workerDue = [...buckets.values()]
+        .filter((row) => row.workforceId === b.workforceId)
+        .reduce((s, row) => s + Math.max(0, Math.min(row.brut, row.brut + row.bonuses - row.advances)), 0);
+      const lineDue = Math.max(0, Math.min(b.monthly ? netDue : b.brut, netDue));
+      const share = workerDue > 0 ? unallocated * (lineDue / workerDue) : 0;
+      const paid = (record && String(record.tranche || '') ? record.amountPaid : 0) + share;
+      const remaining = Math.max(0, lineDue - paid);
       const status = netDue <= 0 ? 'none' : remaining <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
       return {
         id: `${b.workforceId}::${b.tranche}`,
@@ -1263,6 +1290,7 @@ router.get('/:id/payroll-lines', async (req, res) => {
         task: b.task,
         totalDays: b.totalDays,
         advances: b.advances,
+        brut: b.brut,
         netDue,
         amountPaid: paid,
         remaining,
@@ -1747,7 +1775,7 @@ router.post('/pointage/sessions/:id/lines', async (req, res) => {
     if (!workforceId) continue;
     const worker = await prisma.workforce.findUnique({
       where: { id: workforceId },
-      select: { id: true, salaryPeriod: true, firstName: true, lastName: true },
+      select: { id: true, salaryPeriod: true, dailySalary: true, firstName: true, lastName: true },
     });
     if (!worker) {
       errors.push(`Ouvrier introuvable (${workforceId})`);
@@ -1778,7 +1806,7 @@ router.post('/pointage/sessions/:id/lines', async (req, res) => {
       hours: dv * 8,
       totalDay: dv,
       dayRate: rate,
-      advance: Number(raw.advance) || 0,
+      advance: boundAdvance(Number(raw.advance) || 0, other?.advance ?? 0, dv, rate != null && rate > 0 ? rate : worker.dailySalary || 0),
       bonus: Number(raw.bonus) || 0,
       validated,
       validatedAt: validated ? other?.validatedAt || new Date() : null,
@@ -1893,28 +1921,66 @@ router.get('/pointage/by-worker', async (req, res) => {
     if (p.date < entry.firstDate) entry.firstDate = p.date;
     if (p.date > entry.lastDate) entry.lastDate = p.date;
   }
+  const chantierFilter = String(req.query.chantierId || '').trim();
+  const trancheFilter = String(req.query.tranche || '').trim();
+  const { from: paidFrom, to: paidTo } = parseDateRange(
+    req.query.dateFrom ? String(req.query.dateFrom) : undefined,
+    req.query.dateTo ? String(req.query.dateTo) : undefined,
+  );
+  const paidIds = [...map.keys()];
+  const paidRecords = paidIds.length
+    ? await prisma.workforcePayrollRecord.findMany({
+        where: {
+          workforceId: { in: paidIds },
+          ...(chantierFilter ? { chantierId: chantierFilter } : {}),
+          ...(trancheFilter ? { tranche: trancheFilter } : {}),
+        },
+      })
+    : [];
+  const inPaidWindow = (year: number, month: number) => {
+    if (!paidFrom && !paidTo) return true;
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0, 23, 59, 59, 999);
+    if (paidFrom && end < paidFrom) return false;
+    if (paidTo && start > paidTo) return false;
+    return true;
+  };
   const items = [...map.values()]
-    .map((e) => ({
-      workforceId: e.workforce.id,
-      workforce: {
-        id: e.workforce.id,
-        reference: e.workforce.reference,
-        firstName: e.workforce.firstName,
-        lastName: e.workforce.lastName,
-        category: e.workforce.category,
-        photo: e.workforce.photo,
-        dailySalary: e.workforce.dailySalary,
-      },
-      lines: e.lines,
-      validatedLines: e.validatedLines,
-      totalDays: e.totalDays,
-      brut: e.brut,
-      bonuses: e.bonuses,
-      advances: e.advances,
-      remaining: e.brut + e.bonuses - e.advances,
-      firstDate: e.firstDate,
-      lastDate: e.lastDate,
-    }))
+    .map((e) => {
+      const payments = paidRecords
+        .filter((r) => r.workforceId === e.workforce.id && r.amountPaid > 0 && inPaidWindow(r.periodYear, r.periodMonth))
+        .map((r) => ({
+          amount: r.amountPaid,
+          paidAt: r.paidAt,
+          paymentMode: r.paymentMode,
+          tranche: r.tranche || '',
+        }));
+      const amountPaid = payments.reduce((s, r) => s + r.amount, 0);
+      const due = Math.max(0, Math.min(e.brut, e.brut + e.bonuses - e.advances));
+      return {
+        workforceId: e.workforce.id,
+        workforce: {
+          id: e.workforce.id,
+          reference: e.workforce.reference,
+          firstName: e.workforce.firstName,
+          lastName: e.workforce.lastName,
+          category: e.workforce.category,
+          photo: e.workforce.photo,
+          dailySalary: e.workforce.dailySalary,
+        },
+        lines: e.lines,
+        validatedLines: e.validatedLines,
+        totalDays: e.totalDays,
+        brut: e.brut,
+        bonuses: e.bonuses,
+        advances: e.advances,
+        amountPaid,
+        payments,
+        remaining: Math.max(0, due - amountPaid),
+        firstDate: e.firstDate,
+        lastDate: e.lastDate,
+      };
+    })
     .sort((a, b) => a.workforce.lastName.localeCompare(b.workforce.lastName, 'fr'));
   const totals = items.reduce(
     (s, i) => ({
@@ -2120,6 +2186,11 @@ router.put('/pointage/:id', async (req, res) => {
       sessionPatch = { sessionId: null, tranche: null };
     }
   }
+  const salary = await prisma.workforce.findUnique({
+    where: { id: existing.workforceId },
+    select: { dailySalary: true },
+  });
+  const rateUsed = dayRate != null && dayRate > 0 ? dayRate : salary?.dailySalary || 0;
   const pointage = await prisma.pointage.update({
     where: { id },
     data: {
@@ -2129,7 +2200,12 @@ router.put('/pointage/:id', async (req, res) => {
       hours,
       totalDay,
       dayRate,
-      advance: req.body.advance != null ? Number(req.body.advance) : existing.advance,
+      advance: boundAdvance(
+        req.body.advance != null ? Number(req.body.advance) : existing.advance,
+        existing.advance,
+        totalDay,
+        rateUsed,
+      ),
       bonus: req.body.bonus != null ? Number(req.body.bonus) : existing.bonus,
       validated,
       validatedAt: validated ? (existing.validatedAt || new Date()) : null,
@@ -2191,6 +2267,135 @@ router.delete('/progress/:progressId', async (req, res) => {
   await prisma.chantier.update({ where: { id: progress.chantierId }, data: { progressPct: avg } });
   await audit(req, 'suppression', 'WorkProgress', progress.id, progress.taskName);
   res.json({ ok: true });
+});
+
+function subcontractDate(value: unknown) {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+router.put('/progress/:progressId/subcontract', async (req, res) => {
+  const task = await prisma.workProgress.findUnique({ where: { id: String(req.params.progressId) } });
+  if (!task) return res.status(404).json({ message: 'Tâche introuvable' });
+  const mode = req.body.mode === 'task' || req.body.mode === 'phases' ? req.body.mode : 'none';
+  const existing = await prisma.chantierSubcontractor.findMany({
+    where: { workProgressId: task.id },
+    include: { payments: true, follows: true },
+  });
+  const stored = Array.isArray(task.phases) ? task.phases as Array<{ label?: string; percent?: number }> : [];
+  const standardLot = STANDARD_TRANCHE_LOTS.find((lot) => lot.name === task.taskName);
+  const phaseList = stored.length ? stored : (standardLot ? buildStandardLotPhases(standardLot) : [{ label: task.taskName, percent: 100 }]);
+
+  async function removeIfSafe(rows: typeof existing) {
+    const blocked = rows.filter((row) => row.payments.length > 0);
+    if (blocked.length) return blocked.map((row) => row.phaseLabel || row.companyName).join(', ');
+    if (rows.length) await prisma.chantierSubcontractor.deleteMany({ where: { id: { in: rows.map((row) => row.id) } } });
+    return null;
+  }
+
+  const paidOf = (row: { payments: Array<{ amount: number }> }) => row.payments.reduce((sum, pay) => sum + pay.amount, 0);
+
+  if (mode === 'none') {
+    const blocked = await removeIfSafe(existing);
+    if (blocked) return res.status(400).json({ message: `Des paiements existent (${blocked}). La sous-traitance ne peut pas être retirée.` });
+    return res.json([]);
+  }
+
+  if (mode === 'task') {
+    const form = req.body.task || {};
+    const companyName = String(form.companyName || '').trim();
+    const amount = Number(form.amount);
+    if (!companyName) return res.status(400).json({ message: 'Entreprise requise' });
+    if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ message: 'Montant invalide' });
+    const blocked = await removeIfSafe(existing.filter((row) => row.scope === 'phase'));
+    if (blocked) return res.status(400).json({ message: `Des phases ont déjà des paiements (${blocked}).` });
+    const current = existing.find((row) => row.scope !== 'phase');
+    if (current && paidOf(current) > amount + 0.01) {
+      return res.status(400).json({ message: 'Le montant est inférieur aux paiements déjà enregistrés' });
+    }
+    const data = {
+      companyName,
+      phone: form.phone ? String(form.phone).trim() : null,
+      amount,
+      startDate: subcontractDate(form.startDate),
+      endDate: subcontractDate(form.endDate),
+      corpsEtat: task.taskName,
+      tranche: task.tranche,
+      scope: 'task',
+      phaseLabel: null,
+    };
+    const id = current
+      ? (await prisma.chantierSubcontractor.update({ where: { id: current.id }, data })).id
+      : (await prisma.chantierSubcontractor.create({ data: { ...data, chantierId: task.chantierId, workProgressId: task.id, status: 'actif' } })).id;
+    const follows = current?.follows || [];
+    const wanted = phaseList.map((phase, index) => ({ label: String(phase.label || `Phase ${index + 1}`), percent: Number(phase.percent) || 0, sortOrder: index }));
+    const keep = new Set(wanted.map((phase) => phase.label));
+    const stale = follows.filter((follow) => !keep.has(follow.label));
+    if (stale.length) await prisma.subcontractFollow.deleteMany({ where: { id: { in: stale.map((follow) => follow.id) } } });
+    for (const phase of wanted) {
+      if (!follows.some((follow) => follow.label === phase.label)) {
+        await prisma.subcontractFollow.create({ data: { subcontractorId: id, ...phase } });
+      }
+    }
+    await refreshSubcontract(id);
+  } else {
+    const wanted = (Array.isArray(req.body.phases) ? req.body.phases : [])
+      .map((row: { label?: string; companyName?: string; phone?: string; amount?: unknown; startDate?: unknown; endDate?: unknown }) => ({
+        label: String(row.label || '').trim(),
+        companyName: String(row.companyName || '').trim(),
+        phone: row.phone ? String(row.phone).trim() : null,
+        amount: Number(row.amount),
+        startDate: subcontractDate(row.startDate),
+        endDate: subcontractDate(row.endDate),
+      }))
+      .filter((row: { label: string; companyName: string }) => row.label && row.companyName);
+    const blockedTask = await removeIfSafe(existing.filter((row) => row.scope !== 'phase'));
+    if (blockedTask) return res.status(400).json({ message: `La tâche entière a déjà des paiements (${blockedTask}).` });
+    const labels = new Set(wanted.map((row: { label: string }) => row.label));
+    const blocked = await removeIfSafe(existing.filter((row) => row.scope === 'phase' && !labels.has(row.phaseLabel || '')));
+    if (blocked) return res.status(400).json({ message: `Des paiements existent (${blocked}).` });
+    for (const row of wanted) {
+      if (!Number.isFinite(row.amount) || row.amount < 0) return res.status(400).json({ message: `Montant invalide pour ${row.label}` });
+      const prev = existing.find((item) => item.scope === 'phase' && item.phaseLabel === row.label);
+      if (prev && paidOf(prev) > row.amount + 0.01) {
+        return res.status(400).json({ message: `Le montant de « ${row.label} » est inférieur aux paiements déjà versés` });
+      }
+      const data = {
+        companyName: row.companyName,
+        phone: row.phone,
+        amount: row.amount,
+        startDate: row.startDate,
+        endDate: row.endDate,
+        corpsEtat: task.taskName,
+        tranche: task.tranche,
+        scope: 'phase',
+        phaseLabel: row.label,
+      };
+      if (prev) {
+        await prisma.chantierSubcontractor.update({ where: { id: prev.id }, data });
+        await refreshSubcontract(prev.id);
+      } else {
+        const created = await prisma.chantierSubcontractor.create({
+          data: {
+            ...data,
+            chantierId: task.chantierId,
+            workProgressId: task.id,
+            status: 'actif',
+            follows: { create: [{ label: row.label, percent: 100, sortOrder: 0 }] },
+          },
+        });
+        await refreshSubcontract(created.id);
+      }
+    }
+  }
+
+  const items = await prisma.chantierSubcontractor.findMany({
+    where: { workProgressId: task.id },
+    include: subcontractorInclude(),
+    orderBy: { phaseLabel: 'asc' },
+  });
+  res.json(items);
 });
 
 // Chantier routes
@@ -2729,6 +2934,20 @@ router.get('/:id', async (req, res) => {
       assignments: { include: { workforce: true } },
       progress: true,
       missions: { include: { engin: true } },
+      subcontractors: {
+        select: {
+          id: true,
+          status: true,
+          progressPct: true,
+          paidAmount: true,
+          amount: true,
+          companyName: true,
+          corpsEtat: true,
+          scope: true,
+          phaseLabel: true,
+          tranche: true,
+        },
+      },
       documents: true,
       cameras: { orderBy: { createdAt: 'asc' } },
     },
@@ -3206,29 +3425,142 @@ router.delete('/:id/photo', async (req, res) => {
   res.json(chantier);
 });
 
+function subcontractorInclude() {
+  return {
+    workProgress: { select: { id: true, taskName: true, tranche: true, percent: true, phases: true } },
+    follows: { orderBy: { sortOrder: 'asc' as const } },
+    payments: { orderBy: { date: 'desc' as const } },
+  };
+}
+
+async function refreshSubcontract(id: string) {
+  const sub = await prisma.chantierSubcontractor.findUnique({
+    where: { id },
+    include: { follows: true, payments: true },
+  });
+  if (!sub) return null;
+  const paidAmount = sub.payments.reduce((s, p) => s + p.amount, 0);
+  const progressPct = sub.follows.length
+    ? Math.round((sub.follows.filter((f) => f.validated).length / sub.follows.length) * 100)
+    : sub.progressPct;
+  const done = progressPct >= 100;
+  return prisma.chantierSubcontractor.update({
+    where: { id },
+    data: {
+      paidAmount,
+      progressPct,
+      status: done ? 'termine' : 'actif',
+    },
+    include: subcontractorInclude(),
+  });
+}
+
 router.get('/:id/subcontractors', async (req, res) => {
   const items = await prisma.chantierSubcontractor.findMany({
     where: { chantierId: String(req.params.id) },
+    include: subcontractorInclude(),
     orderBy: { companyName: 'asc' },
   });
   res.json(items);
 });
 
 router.post('/:id/subcontractors', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const companyName = String(req.body.companyName || '').trim();
+  if (!companyName) return res.status(400).json({ message: 'Entreprise requise' });
+  const amount = req.body.amount != null && req.body.amount !== '' ? Number(req.body.amount) : null;
+  if (amount != null && (!Number.isFinite(amount) || amount < 0)) {
+    return res.status(400).json({ message: 'Montant invalide' });
+  }
+  const workProgressId = req.body.workProgressId ? String(req.body.workProgressId) : null;
+  const scope = req.body.scope === 'phase' ? 'phase' : 'task';
+  let corpsEtat = req.body.corpsEtat ? String(req.body.corpsEtat).trim() : null;
+  let tranche = req.body.tranche ? String(req.body.tranche).trim() : null;
+  let phaseLabel = req.body.phaseLabel ? String(req.body.phaseLabel).trim() : null;
+  const follows: Array<{ label: string; percent: number; sortOrder: number }> = [];
+
+  if (workProgressId) {
+    const task = await prisma.workProgress.findFirst({ where: { id: workProgressId, chantierId } });
+    if (!task) return res.status(404).json({ message: 'Tâche introuvable sur ce chantier' });
+    corpsEtat = task.taskName;
+    tranche = task.tranche;
+    const stored = Array.isArray(task.phases) ? task.phases as Array<{ label?: string; percent?: number }> : [];
+    const standardLot = STANDARD_TRANCHE_LOTS.find((lot) => lot.name === task.taskName);
+    const phases = stored.length ? stored : (standardLot ? buildStandardLotPhases(standardLot) : []);
+    if (scope === 'phase') {
+      const phase = phases.find((p) => String(p.label || '') === phaseLabel) || (phaseLabel ? { label: phaseLabel, percent: 100 } : null);
+      if (!phase) return res.status(400).json({ message: 'Choisissez une phase' });
+      follows.push({ label: String(phase.label), percent: Number(phase.percent) || 0, sortOrder: 0 });
+      phaseLabel = String(phase.label);
+    } else if (phases.length) {
+      phases.forEach((p, i) => follows.push({ label: String(p.label || `Phase ${i + 1}`), percent: Number(p.percent) || 0, sortOrder: i }));
+      phaseLabel = null;
+    } else {
+      follows.push({ label: task.taskName, percent: 100, sortOrder: 0 });
+      phaseLabel = null;
+    }
+  }
+
   const sub = await prisma.chantierSubcontractor.create({
     data: {
-      chantierId: String(req.params.id),
-      companyName: String(req.body.companyName || '').trim(),
-      corpsEtat: req.body.corpsEtat ? String(req.body.corpsEtat).trim() : null,
+      chantierId,
+      companyName,
+      corpsEtat,
       phone: req.body.phone ? String(req.body.phone).trim() : null,
-      amount: req.body.amount != null ? Number(req.body.amount) : null,
-      progressPct: req.body.progressPct != null ? Number(req.body.progressPct) : 0,
-      paidAmount: req.body.paidAmount != null ? Number(req.body.paidAmount) : 0,
-      status: req.body.status || 'actif',
+      amount,
+      status: 'actif',
+      remark: req.body.remark ? String(req.body.remark).trim() : null,
+      workProgressId,
+      scope,
+      phaseLabel,
+      tranche,
+      follows: follows.length ? { create: follows } : undefined,
+    },
+    include: subcontractorInclude(),
+  });
+  res.status(201).json(sub);
+});
+
+router.put('/:id/subcontractors/:subId/follows/:followId', async (req, res) => {
+  const follow = await prisma.subcontractFollow.findFirst({
+    where: {
+      id: String(req.params.followId),
+      subcontractor: { id: String(req.params.subId), chantierId: String(req.params.id) },
+    },
+  });
+  if (!follow) return res.status(404).json({ message: 'Phase introuvable' });
+  const validated = req.body.validated !== false;
+  await prisma.subcontractFollow.update({
+    where: { id: follow.id },
+    data: { validated, validatedAt: validated ? new Date() : null },
+  });
+  res.json(await refreshSubcontract(String(req.params.subId)));
+});
+
+router.post('/:id/subcontractors/:subId/payments', async (req, res) => {
+  const sub = await prisma.chantierSubcontractor.findFirst({
+    where: { id: String(req.params.subId), chantierId: String(req.params.id) },
+    include: { payments: true },
+  });
+  if (!sub) return res.status(404).json({ message: 'Sous-traitance introuvable' });
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: 'Montant invalide' });
+  const already = sub.payments.reduce((s, p) => s + p.amount, 0);
+  const cap = sub.amount ?? 0;
+  if (cap > 0 && already + amount > cap + 0.01) {
+    return res.status(400).json({ message: `Le paiement dépasse le montant de sous-traitance (reste ${(cap - already).toLocaleString('fr-MA')} MAD)` });
+  }
+  await prisma.subcontractorPayment.create({
+    data: {
+      subcontractorId: sub.id,
+      amount,
+      kind: req.body.kind === 'solde' || req.body.kind === 'situation' ? String(req.body.kind) : 'avance',
+      paymentMode: req.body.paymentMode ? String(req.body.paymentMode) : null,
+      date: req.body.date ? new Date(String(req.body.date)) : new Date(),
       remark: req.body.remark ? String(req.body.remark).trim() : null,
     },
   });
-  res.status(201).json(sub);
+  res.status(201).json(await refreshSubcontract(sub.id));
 });
 
 router.put('/:id/subcontractors/:subId', async (req, res) => {

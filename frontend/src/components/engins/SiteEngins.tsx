@@ -6,6 +6,7 @@ import { COST_CATEGORIES, type CostBucket, type CostLine } from '../../lib/engin
 import { useI18n } from '../../i18n/I18nContext';
 import { Btn, KpiCard, MacSearch, Modal, TableWrap, Tabs, Td, Th } from '../ui';
 import { AssignmentsPanel } from './Assignments';
+import { MaterielStockPanel } from './MaterielStockPanel';
 
 export type SiteEnginCosts = {
   total: number;
@@ -21,7 +22,7 @@ type CostsPayload = {
   lines: CostLine[];
 };
 
-type Section = 'affectation' | 'missions' | 'synthese';
+type Section = 'affectation' | 'materiel' | 'missions' | 'synthese';
 
 /** Onglet chantier : affectation, missions et synthèse des coûts, avec le fonctionnement propre aux engins. */
 export function SiteEnginsPanel({
@@ -77,6 +78,7 @@ export function SiteEnginsPanel({
         onChange={(id) => setSection(id as Section)}
         tabs={[
           { id: 'affectation', label: t('siteOps.affectation') },
+          { id: 'materiel', label: t('fleet.nav.materielGroup') },
           { id: 'missions', label: missionsCount ? `${t('msg.equipmentMissionsTitle')} (${missionsCount})` : t('msg.equipmentMissionsTitle') },
           { id: 'synthese', label: t('siteOps.synthesis') },
         ]}
@@ -93,6 +95,8 @@ export function SiteEnginsPanel({
           onChanged={() => { setReloadKey((k) => k + 1); onChanged?.(); }}
         />
       )}
+
+      {section === 'materiel' && <MaterielStockPanel chantierId={chantierId} />}
 
       {section === 'missions' && missions}
 

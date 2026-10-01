@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, Circle, Flag, Play, ShieldCheck } from 'lucide-react';
-import { formatDate } from '../lib/api';
+import { formatDate, formatMad } from '../lib/api';
 import {
   getPhaseDefinition,
   nearestStage,
@@ -96,6 +96,7 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
                     />
                   </button>
                 )}
+                <div className="flex flex-col items-center shrink-0">
                 <button
                   type="button"
                   disabled={!interactive && !task}
@@ -136,6 +137,10 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
                     <Check size={sm ? 9 : 11} strokeWidth={3} />
                   ) : null}
                 </button>
+                {step.kind === 'phase' && task?.subcontracts?.some((item) => item.scope !== 'phase' || item.phaseLabel === step.label) && (
+                  <span className="mac-steps-st">ST</span>
+                )}
+                </div>
               </div>
             );
           })}
@@ -219,6 +224,16 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
               {selectedPhase.description && (
                 <p className="text-[12px] text-gic-muted leading-relaxed mt-2">{selectedPhase.description}</p>
               )}
+              {task.subcontracts?.filter((item) => item.scope !== 'phase' || item.phaseLabel === selectedPhase.label).map((item) => (
+                <div key={`${item.companyName}-${item.phaseLabel || 'task'}`} className="mt-3 rounded-lg border border-[#6d28d9]/20 bg-[rgba(124,58,237,0.06)] p-3 text-[12px]">
+                  <p className="font-semibold text-[#6d28d9]">ST · {item.scope === 'phase' ? item.phaseLabel : 'Tâche entière'}</p>
+                  <p className="mt-1">{item.companyName} · {formatMad(item.amount || 0)}</p>
+                  <p className="text-gic-muted">Payé {formatMad(item.paidAmount || 0)} · Reste {formatMad(Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)))}</p>
+                  {(item.startDate || item.endDate) && (
+                    <p className="text-gic-muted">{item.startDate ? formatDate(item.startDate) : '…'} → {item.endDate ? formatDate(item.endDate) : '…'}</p>
+                  )}
+                </div>
+              ))}
               {selectedStatus === 'done' && task.updatedAt && (
                 <p className="text-[10px] text-gic-muted mt-3 pt-3 border-t border-black/[0.06]">
                   Dernière mise à jour : {formatDate(task.updatedAt)}
