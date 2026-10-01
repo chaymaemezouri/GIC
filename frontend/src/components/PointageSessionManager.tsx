@@ -207,7 +207,7 @@ export default function PointageSessionManager({
       setDetail(null);
       return;
     }
-    if (!hideSiteSelect) {
+    if (!hideSiteSelect && !chantierId) {
       loadSessions(null);
       return;
     }
@@ -260,9 +260,33 @@ export default function PointageSessionManager({
   const currentIndex = visibleSessions.findIndex((s) => s.id === currentId);
   const hasUnsaved = pendingIds.length > 0 || Object.keys(drafts).length > 0;
 
+  async function fillAssigned(date: string) {
+    if (!chantierId || !date) return null;
+    const body: Record<string, unknown> = { chantierId, date };
+    if (tranche === '__whole') body.tranche = '';
+    else if (tranche) body.tranche = tranche;
+    if (category) body.category = category;
+    if (excludeCategory) body.excludeCategory = excludeCategory;
+    const result = await api<{ id: string | null }>('/chantiers/pointage/sessions/ensure', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return result.id;
+  }
+
   async function goTo(id: string | null) {
     if (!id || id === currentId) return;
     if (hasUnsaved && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) return;
+    const session = sessions.find((row) => row.id === id);
+    if (session) {
+      try {
+        const filled = await fillAssigned(isoDay(session.date));
+        setCurrentId(filled || id);
+        return;
+      } catch {
+        /* la feuille existante reste consultable */
+      }
+    }
     setCurrentId(id);
   }
 
@@ -281,31 +305,24 @@ export default function PointageSessionManager({
       setGotoMiss(false);
       return;
     }
+    if (chantierId) {
+      try {
+        const filled = await fillAssigned(value);
+        if (!filled) {
+          setGotoMiss(true);
+          return;
+        }
+        setGotoMiss(false);
+        setGotoDate('');
+        loadSessions(filled);
+        if (filled === currentId) loadDetail(filled);
+        return;
+      } catch (err) {
+        await appAlert(err instanceof Error ? err.message : t('common.error'));
+      }
+    }
     const matches = sessionsOnDay(value);
     if (!matches.length) {
-      if (hideSiteSelect && chantierId) {
-        try {
-          const body: Record<string, unknown> = { chantierId, date: value };
-          if (tranche === '__whole') body.tranche = '';
-          else if (tranche) body.tranche = tranche;
-          if (category) body.category = category;
-          if (excludeCategory) body.excludeCategory = excludeCategory;
-          const result = await api<{ id: string | null }>('/chantiers/pointage/sessions/ensure', {
-            method: 'POST',
-            body: JSON.stringify(body),
-          });
-          if (!result.id) {
-            setGotoMiss(true);
-            return;
-          }
-          setGotoMiss(false);
-          setGotoDate('');
-          loadSessions(result.id);
-          return;
-        } catch (err) {
-          await appAlert(err instanceof Error ? err.message : t('common.error'));
-        }
-      }
       setGotoMiss(true);
       return;
     }

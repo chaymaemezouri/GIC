@@ -1584,7 +1584,7 @@ function coversPointageDay(
   return true;
 }
 
-/** Crée le pointage du jour, s'il manque, et y ajoute les ouvriers affectés à cette date. */
+/** Crée le pointage du jour, s'il manque, et y place les personnes affectées à cette date. */
 router.post('/pointage/sessions/ensure', async (req, res) => {
   const chantierId = String(req.body.chantierId || '').trim();
   if (!chantierId || !req.body.date) return res.status(400).json({ message: 'Chantier et date requis' });
@@ -1613,61 +1613,64 @@ router.post('/pointage/sessions/ensure', async (req, res) => {
     include: { workforce: { select: { id: true, dailySalary: true, salaryPeriod: true, contractType: true } } },
   });
   const active = assignments.filter((row) => coversPointageDay(row, date) && !isMonthlyWorkforce(row.workforce));
-  const byTranche = new Map<string, typeof active>();
-  for (const row of active) {
-    const name = String(row.tranche || '').trim();
-    const list = byTranche.get(name) || [];
-    list.push(row);
-    byTranche.set(name, list);
+  if (onlyTranche != null) {
+    const wanted = onlyTranche;
+    for (let i = active.length - 1; i >= 0; i -= 1) {
+      if (String(active[i].tranche || '').trim() !== wanted) active.splice(i, 1);
+    }
   }
 
-  const targets = onlyTranche != null
-    ? [onlyTranche]
-    : [...byTranche.keys()].filter((name) => name || ![...byTranche.keys()].some(Boolean));
+  const dayStart = new Date(date);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(date);
+  dayEnd.setHours(23, 59, 59, 999);
+  const dayWhere = { chantierId, date: { gte: dayStart, lte: dayEnd } };
 
-  let primaryId: string | null = null;
-  for (const tranche of targets) {
-    const workers = byTranche.get(tranche) || [];
-    let session = await prisma.pointageSession.findFirst({ where: { chantierId, tranche, date } });
-    if (!session) {
-      const conflict = await findSessionConflict(chantierId, tranche, date);
-      if (conflict) {
-        if (!primaryId) primaryId = conflict.existingId;
-        continue;
+  let session = onlyTranche != null
+    ? await prisma.pointageSession.findFirst({ where: { ...dayWhere, tranche: onlyTranche } })
+    : await prisma.pointageSession.findFirst({ where: dayWhere, orderBy: { createdAt: 'desc' } });
+
+  if (!session && active.length) {
+    const names = [...new Set(active.map((row) => String(row.tranche || '').trim()))];
+    const tranche = onlyTranche != null ? onlyTranche : (names.length === 1 ? names[0] : '');
+    const conflict = await findSessionConflict(chantierId, tranche, date);
+    if (conflict) {
+      session = await prisma.pointageSession.findUnique({ where: { id: conflict.existingId } });
+    } else {
+      try {
+        session = await prisma.pointageSession.create({ data: { chantierId, tranche, date } });
+      } catch {
+        session = await prisma.pointageSession.findFirst({ where: dayWhere, orderBy: { createdAt: 'desc' } });
       }
-      if (!workers.length && trancheSpecified) continue;
-      if (!workers.length) continue;
-      session = await prisma.pointageSession.create({
-        data: { chantierId, tranche, date },
-      });
     }
-    const already = new Set(
-      (await prisma.pointage.findMany({
-        where: { chantierId, date },
-        select: { workforceId: true },
-      })).map((row) => row.workforceId),
-    );
-    for (const row of workers) {
-      if (already.has(row.workforceId)) continue;
-      await prisma.pointage.create({
-        data: {
-          date,
-          workforceId: row.workforceId,
-          chantierId,
-          sessionId: session.id,
-          tranche: tranche || null,
-          dayValue: 1,
-          hours: 8,
-          totalDay: 1,
-          dayRate: row.workforce.dailySalary > 0 ? row.workforce.dailySalary : null,
-        },
-      });
-      already.add(row.workforceId);
-    }
-    primaryId = session.id;
+  }
+  if (!session) return res.json({ id: null });
+
+  const already = new Set(
+    (await prisma.pointage.findMany({
+      where: { chantierId, date: { gte: dayStart, lte: dayEnd } },
+      select: { workforceId: true },
+    })).map((row) => row.workforceId),
+  );
+  for (const row of active) {
+    if (already.has(row.workforceId)) continue;
+    await prisma.pointage.create({
+      data: {
+        date: session.date,
+        workforceId: row.workforceId,
+        chantierId,
+        sessionId: session.id,
+        tranche: String(row.tranche || session.tranche || '').trim() || null,
+        dayValue: 1,
+        hours: 8,
+        totalDay: 1,
+        dayRate: row.workforce.dailySalary > 0 ? row.workforce.dailySalary : null,
+      },
+    });
+    already.add(row.workforceId);
   }
 
-  res.json({ id: primaryId });
+  res.json({ id: session.id });
 });
 
 router.get('/pointage/sessions/:id', async (req, res) => {
