@@ -165,6 +165,23 @@ model Reconnu {
   movements  OfficeCashMovement[]
 }
 
+/// Société sous-traitante (Intervenants).
+model Entreprise {
+  id          String   @id @default(cuid())
+  reference   String   @unique
+  companyName String
+  phone       String?
+  email       String?
+  address     String?
+  ice         String?
+  remark      String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyName])
+}
+
 model OfficeCashMovement {
   id           String   @id @default(cuid())
   date         DateTime @default(now())
@@ -519,8 +536,22 @@ model WorkforcePayrollRecord {
   tranche     String    @default("")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  payments    WorkforcePayrollPayment[]
 
   @@unique([workforceId, periodYear, periodMonth, chantierId, tranche])
+}
+
+model WorkforcePayrollPayment {
+  id          String                  @id @default(cuid())
+  recordId    String
+  record      WorkforcePayrollRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  amount      Float
+  paymentMode String?
+  paidAt      DateTime
+  remark      String?
+  createdAt   DateTime                @default(now())
+
+  @@index([recordId])
 }
 
 model Supplier {
@@ -905,6 +936,8 @@ model PointageSession {
   tranche     String     @default("")
   date        DateTime
   remark      String?
+  /// IDs ouvriers retirés manuellement : ensure ne les rajoute plus ce jour.
+  excludedWorkforceIds Json     @default("[]")
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   lines       Pointage[]

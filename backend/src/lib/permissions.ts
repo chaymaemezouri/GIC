@@ -80,6 +80,7 @@ export function apiPathToModule(path: string, method = 'GET'): PermissionModule 
     if (p.includes('/salaries')) return 'finance';
     return 'ops';
   }
+  if (p.startsWith('/api/entreprises')) return 'ops';
 
   if (p.startsWith('/api/audit')) return 'system';
   if (p.startsWith('/api/dropdowns')) {

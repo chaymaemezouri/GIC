@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Banknote, Clock, Wallet } from 'lucide-react';
+import { Banknote, Clock, Gift, Wallet } from 'lucide-react';
 import { api, formatDate, formatMad } from '../lib/api';
 import { appAlert } from '../lib/dialog';
 import { CHAUFFEUR_CATEGORY, workforceDetailPathForCategory } from '../lib/workforceScope';
@@ -20,6 +20,7 @@ type PayLine = {
   tranche: string;
   totalDays: number;
   advances: number;
+  bonuses?: number;
   brut?: number;
   netDue: number;
   amountPaid: number;
@@ -27,8 +28,10 @@ type PayLine = {
   status: string;
   paymentMode?: string | null;
   paidAt?: string | null;
+  remark?: string | null;
   task?: string;
   days?: PayDay[];
+  payments?: { amount: number; paidAt?: string | null; paymentMode?: string | null; tranche?: string; remark?: string | null }[];
 };
 
 type PayDay = {
@@ -98,6 +101,7 @@ export function ChantierPaymentPanel({
       .then((payload) => {
         setData(payload);
         selection.clear();
+        setDetail((cur) => (cur ? payload.lines.find((row) => row.id === cur.id) || null : null));
       })
       .catch(async (err) => {
         setData(null);
@@ -172,6 +176,61 @@ export function ChantierPaymentPanel({
     if (row.status === 'partial') return t('status.partial');
     if (row.status === 'pending') return t('rental.toPay');
     return '—';
+  }
+
+  function payHistory(row: PayLine) {
+    const events: { key: string; date: string; kind: 'wage' | 'advance' | 'bonus' | 'payment'; amount: number; after: number; mode?: string | null; note?: string }[] = [];
+    const days = [...(row.days || [])].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    let running = 0;
+    days.forEach((day, i) => {
+      const wage = day.days * day.rate;
+      if (wage > 0) {
+        running += wage;
+        events.push({ key: `w-${day.id}`, date: day.date, kind: 'wage', amount: wage, after: running, note: day.task || undefined });
+      }
+      if (day.bonus > 0) {
+        running += day.bonus;
+        events.push({ key: `b-${day.id}`, date: day.date, kind: 'bonus', amount: day.bonus, after: running, note: day.remark || undefined });
+      }
+      if (day.advance > 0) {
+        running -= day.advance;
+        events.push({ key: `a-${day.id}`, date: day.date, kind: 'advance', amount: day.advance, after: running, note: day.remark || undefined });
+      }
+      if (!wage && !day.bonus && !day.advance && i === 0) {
+        /* keep empty days out of history */
+      }
+    });
+    if (!days.length) {
+      const wage = wageSum(row);
+      if (wage > 0) {
+        running += wage;
+        events.push({ key: 'w-total', date: '', kind: 'wage', amount: wage, after: running });
+      }
+      if ((row.bonuses || 0) > 0) {
+        running += row.bonuses || 0;
+        events.push({ key: 'b-total', date: '', kind: 'bonus', amount: row.bonuses || 0, after: running });
+      }
+      if (row.advances > 0) {
+        running -= row.advances;
+        events.push({ key: 'a-total', date: '', kind: 'advance', amount: row.advances, after: running });
+      }
+    }
+    const pays = (row.payments || []).length
+      ? row.payments!
+      : (row.amountPaid > 0 ? [{ amount: row.amountPaid, paidAt: row.paidAt, paymentMode: row.paymentMode, remark: row.remark }] : []);
+    pays.forEach((payment, i) => {
+      running -= payment.amount;
+      events.push({
+        key: `p-${payment.paidAt || i}-${i}`,
+        date: payment.paidAt || '',
+        kind: 'payment',
+        amount: payment.amount,
+        after: running,
+        mode: payment.paymentMode,
+        note: payment.remark || undefined,
+      });
+    });
+    return events;
   }
 
   function modeLabel(mode?: string | null) {
@@ -362,13 +421,13 @@ export function ChantierPaymentPanel({
       <Modal
         open={!!detail}
         size="xl"
-        title={detail ? `${detail.firstName} ${detail.lastName} — ${t('siteOps.paymentSynthesis')}` : ''}
+        title={detail ? `${detail.firstName} ${detail.lastName} — ${t('actions.payment')}` : ''}
         onClose={() => setDetail(null)}
         footer={
           <>
             <Btn variant="secondary" onClick={() => setDetail(null)}>{t('common.close')}</Btn>
-            {detail && payMax(detail) > 0 && (
-              <Btn icon={Banknote} onClick={() => { const row = detail; setDetail(null); openPay([row]); }}>
+            {detail && detail.remaining > 0.01 && (
+              <Btn icon={Banknote} onClick={() => openPay([detail])}>
                 {t('actions.pay')}
               </Btn>
             )}
@@ -377,25 +436,70 @@ export function ChantierPaymentPanel({
       >
         {detail && (
           <div className="space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <p className="text-[12px]"><span className="text-gic-muted">{t('siteOps.payPlace')} : </span>{placeOf(detail)}</p>
-              <p className="text-[12px]"><span className="text-gic-muted">{t('siteOps.payTask')} : </span>{detail.task || detail.category || '—'}</p>
-              {!detail.monthly && formulaLines(detail).map((line) => (
-                <p key={line} className="text-[12px] font-medium sm:col-span-2">{line}</p>
-              ))}
-              {detail.amountPaid > 0 && (
-                <p className="text-[12px] sm:col-span-2">
-                  <span className="text-gic-muted">{t('columns.paid')} : </span>{formatMad(detail.amountPaid)}
-                  {detail.paidAt ? ` · ${formatDate(detail.paidAt)}` : ''}
-                  {modeLabel(detail.paymentMode) ? ` · ${modeLabel(detail.paymentMode)}` : ''}
-                </p>
-              )}
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="grid min-w-0 flex-1 gap-1 sm:grid-cols-2">
+                <p className="text-[12px]"><span className="text-gic-muted">{t('siteOps.payPlace')} : </span>{placeOf(detail)}</p>
+                <p className="text-[12px]"><span className="text-gic-muted">{t('siteOps.payTask')} : </span>{detail.task || detail.category || '—'}</p>
+                {!detail.monthly && formulaLines(detail).map((line) => (
+                  <p key={line} className="text-[12px] font-medium sm:col-span-2">{line}</p>
+                ))}
+              </div>
+              <span className={`mac-chip ${detail.status === 'paid' ? 'mac-chip-green' : detail.status === 'partial' ? 'mac-chip-orange' : 'mac-chip-blue'}`}>
+                {lineStatus(detail)}
+              </span>
             </div>
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
               <KpiCard title={t('siteOps.payDays')} value={detail.monthly ? '—' : detail.totalDays.toFixed(2)} icon={Clock} compact />
               <KpiCard title={t('siteOps.payCalc')} value={formatMad(wageSum(detail))} icon={Wallet} compact />
+              <KpiCard title={t('columns.bonus')} value={formatMad(detail.bonuses || (detail.days || []).reduce((s, d) => s + d.bonus, 0))} icon={Gift} compact />
               <KpiCard title={t('siteOps.payAdvances')} value={formatMad(detail.advances)} icon={Wallet} compact />
-              <KpiCard title={t('siteOps.payRemaining')} value={formatMad(payMax(detail))} icon={Banknote} tone="coral" compact />
+              <KpiCard title={t('columns.paid')} value={formatMad(detail.amountPaid)} icon={Banknote} compact />
+              <KpiCard title={t('siteOps.payRemaining')} value={formatMad(detail.remaining)} icon={Banknote} tone="coral" compact />
+            </div>
+            <div className="rounded-xl border border-gic-border bg-[#fbfbfd] px-3 py-2">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gic-muted">{t('siteOps.payHistory')}</p>
+              <div className="mb-2 grid gap-1 text-[12px] sm:grid-cols-2">
+                <p><span className="text-gic-muted">{t('columns.status')} : </span>{lineStatus(detail)}</p>
+                <p><span className="text-gic-muted">{t('columns.netDue')} : </span>{formatMad(detail.netDue)}</p>
+                <p className="sm:col-span-2">
+                  <span className="text-gic-muted">{t('siteOps.payRemaining')} : </span>
+                  <span className="font-medium">{formatMad(detail.remaining)}</span>
+                </p>
+              </div>
+              {payHistory(detail).length === 0 ? (
+                <p className="text-[12px] text-gic-muted">{t('rental.toPay')}</p>
+              ) : (
+                <TableWrap mac>
+                  <thead>
+                    <tr>
+                      <Th mac>{t('columns.date')}</Th>
+                      <Th mac>{t('columns.type')}</Th>
+                      <Th mac>{t('columns.amount')}</Th>
+                      <Th mac>{t('siteOps.payAfter')}</Th>
+                      <Th mac>{t('fields.remark')}</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payHistory(detail).map((row) => (
+                      <tr key={row.key}>
+                        <Td mac>{row.date ? formatDate(row.date) : '—'}</Td>
+                        <Td mac>
+                          <span className={`mac-chip ${row.kind === 'payment' ? 'mac-chip-green' : row.kind === 'advance' ? 'mac-chip-orange' : row.kind === 'bonus' ? 'mac-chip-blue' : 'mac-chip-gray'}`}>
+                            {row.kind === 'wage' ? t('siteOps.payEventWage') : row.kind === 'advance' ? t('siteOps.payEventAdvance') : row.kind === 'bonus' ? t('siteOps.payEventBonus') : t('siteOps.payEventPayment')}
+                          </span>
+                        </Td>
+                        <Td mac className={row.kind === 'advance' || row.kind === 'payment' ? 'font-medium text-gic-coral' : 'font-medium'}>
+                          {row.kind === 'advance' || row.kind === 'payment' ? '− ' : '+ '}{formatMad(row.amount)}
+                        </Td>
+                        <Td mac className="font-medium">{formatMad(row.after)}</Td>
+                        <Td mac className="mac-table-muted">
+                          {[row.mode ? modeLabel(row.mode) : '', row.note].filter(Boolean).join(' · ') || '—'}
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </TableWrap>
+              )}
             </div>
             {(detail.days || []).length === 0 ? (
               <p className="py-4 text-center text-[12px] text-gic-muted">{t('pointageMgmt.emptyLines')}</p>
@@ -427,8 +531,8 @@ export function ChantierPaymentPanel({
                       <Td mac>{day.days.toFixed(2)}{day.hours ? <span className="block text-[10px] text-gic-muted">{day.hours.toFixed(1)} h</span> : null}</Td>
                       <Td mac>{formatMad(day.rate)}</Td>
                       <Td mac className="whitespace-nowrap font-medium">{formulaOf(day.days, day.rate)}</Td>
-                      <Td mac>{formatMad(day.advance)}</Td>
-                      <Td mac>{formatMad(day.bonus)}</Td>
+                      <Td mac className={day.advance > 0 ? 'font-medium text-gic-coral' : ''}>{formatMad(day.advance)}</Td>
+                      <Td mac className={day.bonus > 0 ? 'font-medium' : ''}>{formatMad(day.bonus)}</Td>
                       <Td mac className="font-medium">{formatMad(day.net)}</Td>
                       <Td mac>
                         <span className={`mac-chip ${day.validated ? 'mac-chip-green' : 'mac-chip-gray'}`}>
@@ -438,6 +542,24 @@ export function ChantierPaymentPanel({
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <Td mac>{t('siteOps.payLineTotal')}</Td>
+                    <Td mac />
+                    <Td mac />
+                    <Td mac>{detail.totalDays.toFixed(2)}</Td>
+                    <Td mac />
+                    <Td mac>{formatMad(wageSum(detail))}</Td>
+                    <Td mac>{formatMad(detail.advances)}</Td>
+                    <Td mac>{formatMad(detail.bonuses || (detail.days || []).reduce((s, d) => s + d.bonus, 0))}</Td>
+                    <Td mac className="font-medium">{formatMad(detail.netDue)}</Td>
+                    <Td mac>
+                      <span className={`mac-chip ${detail.status === 'paid' ? 'mac-chip-green' : detail.status === 'partial' ? 'mac-chip-orange' : 'mac-chip-blue'}`}>
+                        {lineStatus(detail)}
+                      </span>
+                    </Td>
+                  </tr>
+                </tfoot>
               </TableWrap>
             )}
             {data && data.lines.filter((row) => row.workforceId === detail.workforceId && row.id !== detail.id).length > 0 && (
@@ -447,7 +569,7 @@ export function ChantierPaymentPanel({
                   {data.lines.filter((row) => row.workforceId === detail.workforceId && row.id !== detail.id).map((row) => (
                     <li key={row.id}>
                       <button type="button" className="text-left text-[12px] text-[#007aff] hover:underline" onClick={() => setDetail(row)}>
-                        {row.tranche || t('msg.wholeSite')} · {row.task || row.category || '—'} · {row.totalDays.toFixed(2)} j · {t('siteOps.payRemaining')} {formatMad(row.remaining)}
+                        {row.tranche || t('msg.wholeSite')} · {row.task || row.category || '—'} · {row.totalDays.toFixed(2)} j · {lineStatus(row)} · {t('siteOps.payRemaining')} {formatMad(row.remaining)}
                       </button>
                     </li>
                   ))}

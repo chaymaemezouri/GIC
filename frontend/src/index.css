@@ -3378,6 +3378,116 @@ html[dir="rtl"] .shell-dropdown-right {
   font-variant-numeric: tabular-nums;
 }
 
+.pointage-nav-btn.is-open {
+  background: var(--color-gic-violet-soft, #f1f0ff);
+  border-color: var(--color-gic-violet, #6c63ff);
+}
+
+.pointage-mini {
+  position: relative;
+  flex-shrink: 0;
+}
+.pointage-mini-picker {
+  position: fixed;
+  left: auto;
+  min-width: 252px;
+  z-index: 80;
+}
+.pointage-mini-picker .mac-date-picker-day {
+  min-height: 26px;
+}
+.pointage-mini-title {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.pointage-mini-title:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.pointage-mini-months {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px 0 2px;
+}
+.pointage-mini-month {
+  font-size: 12px;
+  padding: 8px 4px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #1d1d1f;
+  cursor: pointer;
+}
+.pointage-mini-month:hover {
+  background: rgba(0, 122, 255, 0.12);
+}
+.pointage-mini-month.is-active {
+  background: #007aff;
+  color: #fff;
+  font-weight: 600;
+}
+.pointage-mini-day.is-ok {
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 600;
+}
+.pointage-mini-day.is-partial {
+  background: #ffedd5;
+  color: #9a3412;
+  font-weight: 600;
+}
+.pointage-mini-day.is-miss {
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 600;
+}
+.pointage-mini-day.is-future {
+  color: #86868b;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.pointage-mini-day.is-future:hover,
+.pointage-mini-day:disabled:hover {
+  background: transparent;
+  color: #86868b;
+}
+.pointage-mini-day.is-ok:hover:not(.is-selected),
+.pointage-mini-day.is-partial:hover:not(.is-selected),
+.pointage-mini-day.is-miss:hover:not(.is-selected) {
+  filter: brightness(0.96);
+  color: inherit;
+  background: inherit;
+}
+.pointage-mini-day.is-ok:hover:not(.is-selected) { background: #bbf7d0; color: #166534; }
+.pointage-mini-day.is-partial:hover:not(.is-selected) { background: #fed7aa; color: #9a3412; }
+.pointage-mini-day.is-miss:hover:not(.is-selected) { background: #fecaca; color: #b91c1c; }
+.pointage-mini-day.is-selected {
+  box-shadow: inset 0 0 0 2px #007aff;
+}
+.pointage-mini-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 4px 2px 2px;
+  font-size: 10px;
+  color: #86868b;
+}
+.pointage-cal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  display: inline-block;
+  margin-inline-end: 4px;
+  vertical-align: middle;
+}
+.pointage-cal-dot.is-ok { background: #22c55e; }
+.pointage-cal-dot.is-partial { background: #f97316; }
+.pointage-cal-dot.is-miss { background: #ef4444; }
+
 .tranche-detail-toolbar-actions {
   display: flex;
   align-items: center;

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import {
-  CalendarPlus, CheckCircle, ChevronLeft, ChevronRight, Clock, Lock, Pencil, Printer, RotateCcw, Save, Trash2, UserPlus,
+  Calendar, CalendarPlus, CheckCircle, ChevronLeft, ChevronRight, Clock, Lock, Pencil, Printer, RotateCcw, Save, Trash2, UserPlus,
   Users, Wallet, X,
 } from 'lucide-react';
 import { api, formatDate, formatMad, type ApiError } from '../lib/api';
@@ -10,7 +11,7 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { printRows } from '../lib/listPrint';
 import { workforceDetailPathForCategory } from '../lib/workforceScope';
 import {
-  Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect, Modal, StatusPill, TableWrap, Td, Th,
+  Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacSearch, MacSelect, Modal, StatusPill, TableWrap, Td, Th,
 } from './ui';
 import { EntityPickerPanel, workforceToPickerItem } from './EntityPickerPanel';
 import { SelectAllTh, SelectTd, SelectionBar } from './RowSelection';
@@ -80,9 +81,37 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function isFutureIso(value: string) {
+  return value > todayIso();
+}
+
+function clampDays(raw: string) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return '0';
+  return fmtDays(Math.min(1, n));
+}
+
 function isoDay(value: string) {
   const d = new Date(value);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function toIso(y: number, m: number, d: number) {
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function mondayPad(y: number, m: number) {
+  const dow = new Date(y, m, 1).getDay();
+  return dow === 0 ? 6 : dow - 1;
+}
+
+type DayTone = 'ok' | 'partial' | 'miss' | 'future';
+
+function sessionDayTone(daySessions: SessionSummary[]): Exclude<DayTone, 'future'> {
+  const pointed = daySessions.filter((s) => s.linesCount > 0);
+  if (!pointed.length) return 'miss';
+  if (pointed.every((s) => s.validatedCount >= s.linesCount)) return 'ok';
+  return 'partial';
 }
 
 function fmtDays(n: number) {
@@ -128,10 +157,32 @@ export default function PointageSessionManager({
   excludeCategory?: string;
 }) {
   const { t } = useI18n();
+  const MONTHS = [
+    t('months.jan'), t('months.feb'), t('months.mar'), t('months.apr'),
+    t('months.may'), t('months.jun'), t('months.jul'), t('months.aug'),
+    t('months.sep'), t('months.oct'), t('months.nov'), t('months.dec'),
+  ];
+  const MONTHS_SHORT = [
+    t('monthsShort.jan'), t('monthsShort.feb'), t('monthsShort.mar'), t('monthsShort.apr'),
+    t('monthsShort.may'), t('monthsShort.jun'), t('monthsShort.jul'), t('monthsShort.aug'),
+    t('monthsShort.sep'), t('monthsShort.oct'), t('monthsShort.nov'), t('monthsShort.dec'),
+  ];
+  const WEEKDAYS = [
+    t('common.weekdayMon'), t('common.weekdayTue'), t('common.weekdayWed'),
+    t('common.weekdayThu'), t('common.weekdayFri'), t('common.weekdaySat'), t('common.weekdaySun'),
+  ];
   const [tranches, setTranches] = useState<{ id: string; name: string }[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [gotoDate, setGotoDate] = useState('');
   const [gotoMiss, setGotoMiss] = useState(false);
+  const [calCursor, setCalCursor] = useState(() => {
+    const d = new Date();
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+  const [calOpen, setCalOpen] = useState(false);
+  const [calMode, setCalMode] = useState<'days' | 'months'>('days');
+  const [calPos, setCalPos] = useState({ top: 0, left: 0 });
+  const calRef = useRef<HTMLDivElement>(null);
+  const calPopRef = useRef<HTMLDivElement>(null);
   const [lineQuery, setLineQuery] = useState('');
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -201,6 +252,58 @@ export default function PointageSessionManager({
   }
 
   useEffect(() => {
+    const d = new Date();
+    setCalCursor({ y: d.getFullYear(), m: d.getMonth() });
+    setCalOpen(false);
+    setCalMode('days');
+  }, [chantierId, tranche]);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      const node = e.target as Node;
+      if (calRef.current?.contains(node) || calPopRef.current?.contains(node)) return;
+      setCalOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setCalOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!calOpen) return;
+    function place() {
+      const el = calRef.current;
+      const pop = calPopRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const width = pop?.offsetWidth || 252;
+      const height = pop?.offsetHeight || 310;
+      const tab = 72;
+      const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - width - 8));
+      let top = r.bottom + 4;
+      if (top + height > window.innerHeight - tab) {
+        top = Math.max(8, r.top - height - 4);
+      }
+      setCalPos({ top, left });
+    }
+    place();
+    const id = window.requestAnimationFrame(place);
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.cancelAnimationFrame(id);
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [calOpen, calMode, calCursor]);
+
+  useEffect(() => {
     if (!chantierId) {
       setSessions([]);
       setCurrentId(null);
@@ -261,7 +364,7 @@ export default function PointageSessionManager({
   const hasUnsaved = pendingIds.length > 0 || Object.keys(drafts).length > 0;
 
   async function fillAssigned(date: string) {
-    if (!chantierId || !date) return null;
+    if (!chantierId || !date || isFutureIso(date)) return null;
     const body: Record<string, unknown> = { chantierId, date };
     if (tranche === '__whole') body.tranche = '';
     else if (tranche) body.tranche = tranche;
@@ -278,6 +381,10 @@ export default function PointageSessionManager({
     if (!id || id === currentId) return;
     if (hasUnsaved && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) return;
     const session = sessions.find((row) => row.id === id);
+    if (session && isFutureIso(isoDay(session.date))) {
+      await appAlert(t('pointageMgmt.cannotPointFuture'));
+      return;
+    }
     if (session) {
       try {
         const filled = await fillAssigned(isoDay(session.date));
@@ -299,11 +406,37 @@ export default function PointageSessionManager({
     });
   }
 
+  const sessionsByDay = useMemo(() => {
+    const map = new Map<string, SessionSummary[]>();
+    for (const s of visibleSessions) {
+      const key = isoDay(s.date);
+      const list = map.get(key);
+      if (list) list.push(s);
+      else map.set(key, [s]);
+    }
+    return map;
+  }, [visibleSessions]);
+
+  function toneForIso(iso: string): DayTone {
+    if (iso > todayIso()) return 'future';
+    return sessionDayTone(sessionsByDay.get(iso) || []);
+  }
+
   async function jumpToDate(value: string) {
-    setGotoDate(value);
     if (!value) {
       setGotoMiss(false);
       return;
+    }
+    if (isFutureIso(value)) {
+      await appAlert(t('pointageMgmt.cannotPointFuture'));
+      return;
+    }
+    if (hasUnsaved && detail && isoDay(detail.date) !== value && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) {
+      return;
+    }
+    const parts = value.split('-').map(Number);
+    if (parts.length === 3 && parts.every(Number.isFinite)) {
+      setCalCursor({ y: parts[0], m: parts[1] - 1 });
     }
     if (chantierId) {
       try {
@@ -313,7 +446,6 @@ export default function PointageSessionManager({
           return;
         }
         setGotoMiss(false);
-        setGotoDate('');
         loadSessions(filled);
         if (filled === currentId) loadDetail(filled);
         return;
@@ -329,7 +461,6 @@ export default function PointageSessionManager({
     setGotoMiss(false);
     const target = matches[matches.length - 1];
     if (target.id !== currentId) await goTo(target.id);
-    setGotoDate('');
   }
 
   function lineDefaults(line: SessionLine): RowEdit {
@@ -373,6 +504,7 @@ export default function PointageSessionManager({
   }
 
   function patchRow(workforceId: string, patch: Partial<RowEdit>) {
+    if (patch.days != null) patch = { ...patch, days: clampDays(patch.days) };
     setDrafts((prev) => ({ ...prev, [workforceId]: { ...rowFor(workforceId), ...patch } }));
   }
 
@@ -434,6 +566,10 @@ export default function PointageSessionManager({
     e.stopPropagation();
     if (!chantierId) return;
     setNewError('');
+    if (isFutureIso(newForm.date)) {
+      setNewError(t('pointageMgmt.cannotPointFuture'));
+      return;
+    }
     setBusy(true);
     try {
       const created = await api<SessionDetail>('/chantiers/pointage/sessions', {
@@ -487,7 +623,7 @@ export default function PointageSessionManager({
         const e = rowFor(r.workforceId);
         return {
           workforceId: r.workforceId,
-          dayValue: num(e.days),
+          dayValue: Math.min(1, num(e.days)),
           dayRate: rateOrNull(e.dayRate),
           advance: num(e.advance),
           bonus: num(e.bonus),
@@ -619,7 +755,8 @@ export default function PointageSessionManager({
   }
 
   function applyBulkDays() {
-    const value = bulkDays;
+    const value = clampDays(bulkDays);
+    setBulkDays(value);
     if (!Number.isFinite(Number(value)) || Number(value) < 0) return;
     setDrafts((prev) => {
       const next = { ...prev };
@@ -688,43 +825,180 @@ export default function PointageSessionManager({
     });
   }
 
-  const sessionNav = chantierId && visibleSessions.length > 0 ? (
-    <div className="pointage-nav">
-      <button
-        type="button"
-        className="pointage-nav-btn"
-        disabled={currentIndex <= 0}
-        onClick={() => goTo(visibleSessions[currentIndex - 1]?.id ?? null)}
-        aria-label={t('pointageMgmt.previous')}
-      >
-        <ChevronLeft size={15} />
-      </button>
-      <select
-        className="pointage-nav-select"
-        value={currentId || ''}
-        onChange={(e) => goTo(e.target.value)}
-        aria-label={t('pointageMgmt.selectPointage')}
-      >
-        {visibleSessions.map((s) => (
-          <option key={s.id} value={s.id}>
-            {formatDate(s.date)}{!tranche ? ` · ${trancheLabel(s)}` : ''} · {s.linesCount}
-          </option>
-        ))}
-      </select>
-      <span className="pointage-nav-count">
-        {currentIndex + 1} / {visibleSessions.length}
-      </span>
-      <button
-        type="button"
-        className="pointage-nav-btn"
-        disabled={currentIndex < 0 || currentIndex >= visibleSessions.length - 1}
-        onClick={() => goTo(visibleSessions[currentIndex + 1]?.id ?? null)}
-        aria-label={t('pointageMgmt.next')}
-      >
-        <ChevronRight size={15} />
-      </button>
+  const monthDays = useMemo(() => {
+    const pad = mondayPad(calCursor.y, calCursor.m);
+    const count = new Date(calCursor.y, calCursor.m + 1, 0).getDate();
+    const cells: { iso: string | null; day: number | null }[] = [];
+    for (let i = 0; i < pad; i++) cells.push({ iso: null, day: null });
+    for (let d = 1; d <= count; d++) cells.push({ iso: toIso(calCursor.y, calCursor.m, d), day: d });
+    return cells;
+  }, [calCursor]);
+
+  const selectedIso = detail ? isoDay(detail.date) : '';
+  const today = todayIso();
+
+  const pointageCalendar = (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <h2 className="text-[17px] font-semibold text-gic-ink">
+            {MONTHS[calCursor.m]} {calCursor.y}
+          </h2>
+          <div ref={calRef} className="pointage-mini">
+            <button
+              type="button"
+              className={`pointage-nav-btn${calOpen ? ' is-open' : ''}`}
+              onClick={() => { setCalMode('days'); setCalOpen((o) => !o); }}
+              aria-label={t('common.calendar')}
+              aria-haspopup="dialog"
+              aria-expanded={calOpen}
+            >
+              <Calendar size={15} />
+            </button>
+            {calOpen && createPortal(
+              <div
+                ref={calPopRef}
+                className="mac-date-picker pointage-mini-picker"
+                role="dialog"
+                aria-label={t('pointageMgmt.dayCalendar')}
+                style={{ top: calPos.top, left: calPos.left }}
+              >
+                <div className="mac-date-picker-header">
+                  <button
+                    type="button"
+                    className="mac-date-picker-nav"
+                    aria-label={calMode === 'months' ? t('pointageMgmt.prevYear') : t('common.prevMonth')}
+                    onClick={() => setCalCursor((c) => (
+                      calMode === 'months'
+                        ? { ...c, y: c.y - 1 }
+                        : c.m === 0 ? { y: c.y - 1, m: 11 } : { ...c, m: c.m - 1 }
+                    ))}
+                  >
+                    <ChevronLeft size={14} strokeWidth={2.25} />
+                  </button>
+                  <button
+                    type="button"
+                    className="mac-date-picker-title pointage-mini-title"
+                    onClick={() => setCalMode((mode) => (mode === 'days' ? 'months' : 'days'))}
+                  >
+                    {calMode === 'months' ? calCursor.y : `${MONTHS[calCursor.m]} ${calCursor.y}`}
+                  </button>
+                  <button
+                    type="button"
+                    className="mac-date-picker-nav"
+                    aria-label={calMode === 'months' ? t('pointageMgmt.nextYear') : t('common.nextMonth')}
+                    onClick={() => setCalCursor((c) => (
+                      calMode === 'months'
+                        ? { ...c, y: c.y + 1 }
+                        : c.m === 11 ? { y: c.y + 1, m: 0 } : { ...c, m: c.m + 1 }
+                    ))}
+                  >
+                    <ChevronRight size={14} strokeWidth={2.25} />
+                  </button>
+                </div>
+                {calMode === 'months' ? (
+                  <div className="pointage-mini-months">
+                    {MONTHS_SHORT.map((label, idx) => (
+                      <button
+                        key={`${label}-${idx}`}
+                        type="button"
+                        className={`pointage-mini-month${calCursor.m === idx ? ' is-active' : ''}`}
+                        onClick={() => { setCalCursor((c) => ({ ...c, m: idx })); setCalMode('days'); }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <div className="mac-date-picker-weekdays">
+                      {WEEKDAYS.map((d, i) => (
+                        <span key={`${d}-${i}`} className="mac-date-picker-weekday">{d}</span>
+                      ))}
+                    </div>
+                    <div className="mac-date-picker-grid">
+                      {monthDays.map((cell, i) => {
+                        if (!cell.iso || cell.day == null) {
+                          return <span key={`pad-${i}`} className="mac-date-picker-day mac-date-picker-day-empty" />;
+                        }
+                        const tone = toneForIso(cell.iso);
+                        const cls = [
+                          'mac-date-picker-day',
+                          'pointage-mini-day',
+                          `is-${tone}`,
+                          cell.iso === today ? 'mac-date-picker-day-today' : '',
+                          cell.iso === selectedIso ? 'is-selected' : '',
+                        ].filter(Boolean).join(' ');
+                        return (
+                          <button
+                            key={cell.iso}
+                            type="button"
+                            className={cls}
+                                onClick={() => {
+                                  if (tone === 'future') return;
+                                  void jumpToDate(cell.iso!);
+                                  setCalOpen(false);
+                                }}
+                                disabled={tone === 'future'}
+                            aria-label={cell.iso}
+                            aria-current={cell.iso === selectedIso ? 'date' : undefined}
+                          >
+                            {cell.day}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>,
+              document.body,
+            )}
+          </div>
+        </div>
+        {detail && (
+          <>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+              <span className="mac-chip">{trancheLabel(detail)}</span>
+              {allValidated ? (
+                <span className="mac-chip mac-chip-green">{t('pointageMgmt.validated')}</span>
+              ) : anyValidated ? (
+                <span className="mac-chip mac-chip-orange">
+                  {t('pointageMgmt.partiallyValidated', { done: detail.validatedCount, total: detail.linesCount })}
+                </span>
+              ) : (
+                <span className="mac-chip mac-chip-gray">{t('pointageMgmt.draft')}</span>
+              )}
+              {hasUnsaved && <span className="mac-chip mac-chip-blue">{t('pointageMgmt.unsaved')}</span>}
+            </div>
+            {remarkDraft == null ? (
+              <button
+                type="button"
+                className="mt-2 text-[12px] text-gic-muted hover:text-gic-ink inline-flex items-center gap-1"
+                onClick={() => setRemarkDraft(detail.remark || '')}
+              >
+                <Pencil size={11} /> {detail.remark || t('pointageMgmt.addRemark')}
+              </button>
+            ) : (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  className="rounded-lg border border-gic-border px-2 py-1 text-[12px] w-72 max-w-full"
+                  value={remarkDraft}
+                  autoFocus
+                  onChange={(e) => setRemarkDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void saveRemark();
+                    if (e.key === 'Escape') setRemarkDraft(null);
+                  }}
+                />
+                <MacActionBtn icon={Save} tone="blue" title={t('common.save')} onClick={saveRemark} />
+                <MacActionBtn icon={X} tone="gray" title={t('common.cancel')} onClick={() => setRemarkDraft(null)} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
-  ) : null;
+  );
 
   const filterControls = (
     <>
@@ -755,14 +1029,6 @@ export default function PointageSessionManager({
             ...tranches.map((tr) => ({ value: tr.name, label: tr.name })),
           ]}
           className="w-44 shrink-0"
-        />
-      )}
-      {chantierId && (
-        <MacDateInput
-          value={gotoDate}
-          onChange={(value) => { void jumpToDate(value); }}
-          placeholder={t('pointageMgmt.goToDate')}
-          className="w-40 shrink-0"
         />
       )}
       {gotoMiss && <span className="text-[12px] text-gic-coral">{t(hideSiteSelect ? 'pointageMgmt.noWorkersThatDay' : 'pointageMgmt.noPointageThatDay')}</span>}
@@ -806,9 +1072,10 @@ export default function PointageSessionManager({
           className="w-16 rounded-lg border border-gic-border bg-white px-2 py-1 text-[11px]"
           type="number"
           min={0}
+          max={1}
           step={DAY_STEP}
           value={bulkDays}
-          onChange={(e) => setBulkDays(e.target.value)}
+          onChange={(e) => setBulkDays(clampDays(e.target.value))}
         />
         <span>{t('columns.days')}</span>
         <Btn variant="secondary" className="!py-1" onClick={applyBulkDays} disabled={!detail}>{t('pointageMgmt.apply')}</Btn>
@@ -844,70 +1111,9 @@ export default function PointageSessionManager({
         <Card>
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
         </Card>
-      ) : sessions.length === 0 ? (
-        <Card>
-          <div className="py-10 text-center">
-            <p className="text-[13px] font-medium text-gic-ink">{hideSiteSelect ? t('pointageMgmt.noWorkersThatDay') : t('pointageMgmt.emptySessions')}</p>
-            {!hideSiteSelect && <p className="text-[12px] text-gic-muted mt-1 mb-4">{t('pointageMgmt.emptySessionsHint')}</p>}
-            {!hideSiteSelect && <Btn icon={CalendarPlus} onClick={openNew}>{t('pointageMgmt.newPointage')}</Btn>}
-          </div>
-        </Card>
-      ) : visibleSessions.length === 0 ? (
-        <Card>
-          <p className="py-10 text-center text-[13px] text-gic-muted">{t('pointageMgmt.emptyPeriod')}</p>
-        </Card>
-      ) : !detail ? (
-        <Card>
-          <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
-        </Card>
       ) : (
         <>
-          <Card className="!p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-[17px] font-semibold text-gic-ink">{formatDate(detail.date)}</h2>
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  <span className="mac-chip">{trancheLabel(detail)}</span>
-                  {allValidated ? (
-                    <span className="mac-chip mac-chip-green">{t('pointageMgmt.validated')}</span>
-                  ) : anyValidated ? (
-                    <span className="mac-chip mac-chip-orange">
-                      {t('pointageMgmt.partiallyValidated', { done: detail.validatedCount, total: detail.linesCount })}
-                    </span>
-                  ) : (
-                    <span className="mac-chip mac-chip-gray">{t('pointageMgmt.draft')}</span>
-                  )}
-                  {hasUnsaved && <span className="mac-chip mac-chip-blue">{t('pointageMgmt.unsaved')}</span>}
-                </div>
-                {remarkDraft == null ? (
-                  <button
-                    type="button"
-                    className="mt-2 text-[12px] text-gic-muted hover:text-gic-ink inline-flex items-center gap-1"
-                    onClick={() => setRemarkDraft(detail.remark || '')}
-                  >
-                    <Pencil size={11} /> {detail.remark || t('pointageMgmt.addRemark')}
-                  </button>
-                ) : (
-                  <div className="mt-2 flex items-center gap-2">
-                    <input
-                      className="rounded-lg border border-gic-border px-2 py-1 text-[12px] w-72 max-w-full"
-                      value={remarkDraft}
-                      autoFocus
-                      onChange={(e) => setRemarkDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') void saveRemark();
-                        if (e.key === 'Escape') setRemarkDraft(null);
-                      }}
-                    />
-                    <MacActionBtn icon={Save} tone="blue" title={t('common.save')} onClick={saveRemark} />
-                    <MacActionBtn icon={X} tone="gray" title={t('common.cancel')} onClick={() => setRemarkDraft(null)} />
-                  </div>
-                )}
-              </div>
-              {sessionNav}
-            </div>
-          </Card>
-
+          {detail && (
           <div className="mac-kpi-grid mac-kpi-grid-4">
             <KpiCard title={t('pointageMgmt.workers')} value={rows.length} icon={Users} tone="violet" compact />
             <KpiCard title={t('kpi.eqDays')} value={fmtDays(totals.days)} icon={Clock} tone="amber" compact />
@@ -922,7 +1128,32 @@ export default function PointageSessionManager({
               deltaTone="muted"
             />
           </div>
+          )}
 
+          <Card className="!p-4 overflow-visible">
+            {pointageCalendar}
+          </Card>
+
+          {sessions.length === 0 || visibleSessions.length === 0 || !detail ? (
+            <Card>
+              <div className="py-10 text-center">
+                {loading ? (
+                  <p className="text-[12px] text-gic-muted">{t('common.loading')}</p>
+                ) : sessions.length === 0 ? (
+                  <>
+                    <p className="text-[13px] font-medium text-gic-ink">{hideSiteSelect ? t('pointageMgmt.noWorkersThatDay') : t('pointageMgmt.emptySessions')}</p>
+                    {!hideSiteSelect && <p className="text-[12px] text-gic-muted mt-1 mb-4">{t('pointageMgmt.emptySessionsHint')}</p>}
+                    {!hideSiteSelect && <Btn icon={CalendarPlus} onClick={openNew}>{t('pointageMgmt.newPointage')}</Btn>}
+                  </>
+                ) : visibleSessions.length === 0 ? (
+                  <p className="text-[13px] text-gic-muted">{t('pointageMgmt.emptyPeriod')}</p>
+                ) : (
+                  <p className="text-[12px] text-gic-muted">{t('common.loading')}</p>
+                )}
+              </div>
+            </Card>
+          ) : (
+            <>
           <SelectionBar selection={selection} onPrint={printList} />
 
           <Card padding={false}>
@@ -986,6 +1217,7 @@ export default function PointageSessionManager({
                               className={cellClass(locked)}
                               type="number"
                               min={0}
+                              max={1}
                               step={DAY_STEP}
                               readOnly={locked}
                               value={e.days}
@@ -1078,6 +1310,8 @@ export default function PointageSessionManager({
                 </TableWrap>
             )}
           </Card>
+            </>
+          )}
         </>
       )}
 
@@ -1102,6 +1336,7 @@ export default function PointageSessionManager({
             label={`${t('common.date')} *`}
             type="date"
             required
+            max={todayIso()}
             value={newForm.date}
             onChange={(e) => { setNewForm({ ...newForm, date: e.target.value }); setNewError(''); }}
           />

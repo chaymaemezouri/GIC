@@ -56,6 +56,12 @@ function date(v: unknown) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function addUtcDays(d: Date, n: number) {
+  const x = utcDay(d);
+  x.setUTCDate(x.getUTCDate() + n);
+  return x;
+}
+
 function queryDate(req: Request, key: string) {
   return date(req.query[key]);
 }
@@ -362,7 +368,7 @@ router.put('/assignments/:id', async (req, res) => {
   res.json(serializeAssignment(updated, shares.get(id) || 0));
 });
 
-/** Déplace une affectation vers un autre chantier ou une autre tranche, et fixe l'état de l'outil. */
+/** Déplace une affectation : clôture ici à la date de transfert et ouvre le débit sur le chantier d’arrivée. */
 router.post('/assignments/:id/transfer', async (req, res) => {
   const id = String(req.params.id);
   const existing = await prisma.enginAssignment.findUnique({ where: { id }, include: { engin: true, chantier: { select: { name: true } } } });
@@ -372,44 +378,132 @@ router.post('/assignments/:id/transfer', async (req, res) => {
   const chantierId = text(req.body.chantierId) || existing.chantierId;
   const tranche = req.body.tranche !== undefined ? text(req.body.tranche) : existing.tranche;
   const siteStatus = text(req.body.siteStatus);
-  const input: AssignmentInput = {
+  const transferDate = date(req.body.date) || todayUtc();
+  if (utcDay(transferDate) < utcDay(existing.startDate)) {
+    return fail(res, 'La date de transfert précède le début de l\'affectation');
+  }
+  if (existing.endDate && utcDay(transferDate) > utcDay(existing.endDate)) {
+    return fail(res, 'La date de transfert dépasse la fin prévue de l\'affectation');
+  }
+  const samePlace = chantierId === existing.chantierId && (tranche || '') === (existing.tranche || '');
+  if (samePlace) return fail(res, 'Choisissez un autre chantier ou une autre tranche');
+
+  const from = locationLabel(existing.chantier?.name, existing.tranche) || '—';
+  const sameDayStart = utcDay(transferDate).getTime() === utcDay(existing.startDate).getTime();
+
+  if (sameDayStart) {
+    const input: AssignmentInput = {
+      enginId: existing.enginId,
+      chantierId,
+      projectId: existing.projectId,
+      tranche,
+      startDate: existing.startDate,
+      endDate: existing.endDate,
+    };
+    const v = await validateAssignment(input, id);
+    if ('error' in v) return fail(res, v.error!);
+    const updated = await prisma.enginAssignment.update({
+      where: { id },
+      data: {
+        chantierId: input.chantierId,
+        projectId: v.chantier?.projectId || input.projectId,
+        tranche: input.tranche,
+      },
+      include: assignmentInclude,
+    });
+    if (siteStatus && (ENGIN_STATUSES as readonly string[]).includes(siteStatus)) {
+      await prisma.engin.update({
+        where: { id: existing.enginId },
+        data: { status: siteStatus, location: locationLabel(v.chantier?.name, input.tranche) || existing.engin.location },
+      });
+    } else if (isAssignmentActive(updated)) {
+      await prisma.engin.update({
+        where: { id: existing.enginId },
+        data: { location: locationLabel(v.chantier?.name, input.tranche) || existing.engin.location },
+      });
+    }
+    await refreshEnginStatus(existing.enginId);
+    await ensureExploitationUsage(updated);
+    const to = locationLabel(v.chantier?.name, input.tranche) || '—';
+    await audit(req, 'affectation', 'EnginAssignment', id, `${enginLabel(existing.engin)} : ${from} → ${to}`);
+    const shares = await expenseSharesByAssignment([existing.enginId]);
+    return res.json(serializeAssignment(updated, shares.get(id) || 0));
+  }
+
+  const prevEnd = addUtcDays(transferDate, -1);
+  const newEnd = existing.endDate && utcDay(existing.endDate) >= utcDay(transferDate) ? existing.endDate : null;
+  const destInput: AssignmentInput = {
     enginId: existing.enginId,
     chantierId,
     projectId: existing.projectId,
     tranche,
-    startDate: existing.startDate,
-    endDate: existing.endDate,
+    startDate: transferDate,
+    endDate: newEnd,
   };
-  const v = await validateAssignment(input, id);
-  if ('error' in v) return fail(res, v.error!);
 
-  const updated = await prisma.enginAssignment.update({
+  const snapshot = {
+    endDate: existing.endDate,
+    returnedAt: existing.returnedAt,
+    returnRemark: existing.returnRemark,
+  };
+  await prisma.enginAssignment.update({
     where: { id },
     data: {
-      chantierId: input.chantierId,
-      projectId: v.chantier?.projectId || input.projectId,
-      tranche: input.tranche,
+      endDate: prevEnd,
+      returnedAt: transferDate,
+      returnRemark: `Transfert ${transferDate.toISOString().slice(0, 10)}`,
     },
-    include: assignmentInclude,
   });
+  const v = await validateAssignment(destInput, id);
+  if ('error' in v) {
+    await prisma.enginAssignment.update({ where: { id }, data: snapshot });
+    return fail(res, v.error!);
+  }
+
+  const createdData = {
+    enginId: existing.enginId,
+    chantierId: destInput.chantierId,
+    projectId: v.chantier?.projectId || destInput.projectId,
+    tranche: destInput.tranche,
+    startDate: destInput.startDate,
+    endDate: destInput.endDate,
+    responsible: existing.responsible,
+    mode: existing.mode,
+    costMethod: existing.costMethod,
+    dailyCost: existing.dailyCost,
+    hourlyCost: existing.hourlyCost,
+    flatAmount: existing.flatAmount,
+    extraCost: 0,
+    plannedCost: 0,
+    remark: existing.remark,
+    createdBy: await userDisplayName(req),
+  };
+  createdData.plannedCost = plannedCostOf(createdData);
+  const created = await prisma.enginAssignment.create({ data: createdData, include: assignmentInclude });
+
   if (siteStatus && (ENGIN_STATUSES as readonly string[]).includes(siteStatus)) {
     await prisma.engin.update({
       where: { id: existing.enginId },
-      data: { status: siteStatus, location: locationLabel(v.chantier?.name, input.tranche) || existing.engin.location },
+      data: { status: siteStatus, location: locationLabel(v.chantier?.name, destInput.tranche) || existing.engin.location },
     });
-  } else if (isAssignmentActive(updated)) {
+  } else if (isAssignmentActive(created)) {
     await prisma.engin.update({
       where: { id: existing.enginId },
-      data: { location: locationLabel(v.chantier?.name, input.tranche) || existing.engin.location },
+      data: { location: locationLabel(v.chantier?.name, destInput.tranche) || existing.engin.location },
     });
   }
   await refreshEnginStatus(existing.enginId);
-  await ensureExploitationUsage(updated);
-  const from = locationLabel(existing.chantier?.name, existing.tranche) || '—';
-  const to = locationLabel(v.chantier?.name, input.tranche) || '—';
-  await audit(req, 'affectation', 'EnginAssignment', id, `${enginLabel(existing.engin)} : ${from} → ${to}`);
+  await ensureExploitationUsage(created);
+  const to = locationLabel(v.chantier?.name, destInput.tranche) || '—';
+  await audit(
+    req,
+    'affectation',
+    'EnginAssignment',
+    created.id,
+    `${enginLabel(existing.engin)} : ${from} → ${to} (débit ${transferDate.toISOString().slice(0, 10)})`,
+  );
   const shares = await expenseSharesByAssignment([existing.enginId]);
-  res.json(serializeAssignment(updated, shares.get(id) || 0));
+  res.status(201).json(serializeAssignment(created, shares.get(created.id) || 0));
 });
 
 /** Retour / désaffectation : clôture l'affectation et libère l'équipement. */

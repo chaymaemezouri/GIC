@@ -48,6 +48,14 @@ type AssignmentForm = {
 
 type Suggestion = { mode: string; costMethod: string; dailyCost: number; hourlyCost: number | null; flatAmount: number | null; extraCost: number };
 
+function nextIsoDay(value?: string | null) {
+  const iso = isoDate(value);
+  if (!iso) return '';
+  const t = Date.parse(`${iso}T00:00:00Z`);
+  if (!Number.isFinite(t)) return iso;
+  return new Date(t + 86_400_000).toISOString().slice(0, 10);
+}
+
 function emptyForm(defaults?: Partial<AssignmentForm>): AssignmentForm {
   return {
     enginId: '',
@@ -399,12 +407,14 @@ export function TransferAssignmentModal({
   const { chantiers } = useFleetRefs();
   const [chantierId, setChantierId] = useState('');
   const [tranche, setTranche] = useState('');
+  const [transferDate, setTransferDate] = useState(todayISO());
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!assignment) return;
     setChantierId(assignment.chantierId || '');
     setTranche(assignment.tranche || '');
+    setTransferDate(todayISO());
   }, [assignment]);
 
   if (!assignment) return null;
@@ -416,7 +426,7 @@ export function TransferAssignmentModal({
     try {
       await api(`/engins/assignments/${assignment.id}/transfer`, {
         method: 'POST',
-        body: JSON.stringify({ chantierId, tranche: tranche || null }),
+        body: JSON.stringify({ chantierId, tranche: tranche || null, date: transferDate }),
       });
       onSaved();
       onClose();
@@ -445,6 +455,11 @@ export function TransferAssignmentModal({
           {assignment.tranche ? ` / ${assignment.tranche}` : ''}
         </p>
         <FormGrid>
+          <div>
+            <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fleet.fields.transferDate')}</p>
+            <MacDateInput value={transferDate} onChange={setTransferDate} placeholder={t('fleet.fields.transferDate')} />
+            <p className="mt-1 text-[11px] text-gic-muted">{t('fleet.hints.transferDebit')}</p>
+          </div>
           <div className="sm:col-span-2">
             <ChantierTrancheFields
               required
@@ -513,10 +528,12 @@ export function AssignmentsPanel({
   const [siteStatus, setSiteStatus] = useState('');
   const [siteTranche, setSiteTranche] = useState('');
   const [siteTranches, setSiteTranches] = useState<string[]>([]);
+  const [presenceDate, setPresenceDate] = useState(todayISO());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
   const selection = useRowSelection<Assignment>();
 
+  const onSiteDate = site && !returnFocus;
   const query = useMemo(
     () =>
       queryString({
@@ -524,13 +541,13 @@ export function AssignmentsPanel({
         chantierId: fixed.chantierId || chantierId,
         tranche: fixed.tranche,
         projectId: fixed.projectId,
-        status,
+        status: onSiteDate ? '' : status,
         q,
-        dateFrom,
-        dateTo,
+        dateFrom: onSiteDate ? presenceDate : dateFrom,
+        dateTo: onSiteDate ? presenceDate : dateTo,
         kind: lockKind,
       }),
-    [fixed.enginId, fixed.chantierId, fixed.tranche, fixed.projectId, enginId, chantierId, status, q, dateFrom, dateTo, lockKind],
+    [fixed.enginId, fixed.chantierId, fixed.tranche, fixed.projectId, enginId, chantierId, status, q, dateFrom, dateTo, lockKind, onSiteDate, presenceDate],
   );
 
   function load() {
@@ -670,6 +687,9 @@ export function AssignmentsPanel({
           {site && (
             <>
               <MacSearch value={siteQuery} onChange={setSiteQuery} placeholder={t('fleet.filters.searchEngin')} className="w-full max-w-sm" />
+              {!returnFocus && (
+                <MacDateInput value={presenceDate} onChange={setPresenceDate} placeholder={t('fleet.fields.presenceDate')} className="w-36 shrink-0" />
+              )}
               <div ref={filterRef} className="relative">
                 <Btn
                   variant="secondary"
@@ -776,7 +796,7 @@ export function AssignmentsPanel({
         {loading && !data ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
         ) : items.length === 0 ? (
-          <EmptyState title={returnFocus ? t('fleet.empty.toReturn') : t('fleet.empty.assignments')} />
+          <EmptyState title={onSiteDate ? t('fleet.empty.noneOnDate') : returnFocus ? t('fleet.empty.toReturn') : t('fleet.empty.assignments')} />
         ) : (
           <TableWrap mac>
             <thead>
@@ -821,6 +841,13 @@ export function AssignmentsPanel({
                       {a.elapsedDays ? ` · ${t('fleet.hints.daysElapsed', { days: a.elapsedDays })}` : ''}
                       {a.hours ? ` · ${a.hours} h` : ''}
                     </span>
+                    {site && (
+                      <span className="block text-[10px] text-[#248a3d]">
+                        {a.endDate || a.returnedAt
+                          ? t('fleet.hints.availableOn', { date: formatDate(nextIsoDay(a.returnedAt || a.endDate)) })
+                          : t('fleet.hints.stillAssigned')}
+                      </span>
+                    )}
                     {a.responsible && <span className="block text-[10px] mac-table-muted">{a.responsible}</span>}
                   </Td>
                   <Td mac className="whitespace-nowrap text-[11px]">

@@ -595,6 +595,21 @@ function parsePointageDate(dateStr: string) {
   return d;
 }
 
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function isFuturePointageDate(date: Date) {
+  return date.getTime() > startOfToday().getTime();
+}
+
+function parseExcludedWorkforceIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((id) => String(id || '').trim()).filter(Boolean))];
+}
+
 async function pointageTrancheClause(chantierId: string, tranche: string) {
   const name = tranche.trim();
   if (!name || !chantierId) return null;
@@ -1075,6 +1090,15 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
   });
 
   await syncWorkforcePayrollMovement(record, req);
+  await prisma.workforcePayrollPayment.create({
+    data: {
+      recordId: record.id,
+      amount,
+      paymentMode,
+      paidAt: paymentInstant(req.body.paidAt),
+      remark,
+    },
+  });
   await audit(
     req,
     'décaissement',
@@ -1259,6 +1283,7 @@ router.get('/:id/payroll-lines', async (req, res) => {
   const records = ids.length
     ? await prisma.workforcePayrollRecord.findMany({
         where: { workforceId: { in: ids }, periodYear: py, periodMonth: pm },
+        include: { payments: { orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }] } },
       })
     : [];
 
@@ -1278,6 +1303,24 @@ router.get('/:id/payroll-lines', async (req, res) => {
       const paid = (record && String(record.tranche || '') ? record.amountPaid : 0) + share;
       const remaining = Math.max(0, lineDue - paid);
       const status = netDue <= 0 ? 'none' : remaining <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
+      const ledger = (record?.payments || []).map((p) => ({
+        amount: p.amount,
+        paidAt: p.paidAt,
+        paymentMode: p.paymentMode,
+        tranche: record?.tranche,
+        remark: p.remark,
+      }));
+      const payments = ledger.length
+        ? ledger
+        : own
+          .filter((r) => r.amountPaid > 0 && (!String(r.tranche || '') || String(r.tranche || '') === (b.monthly ? '' : b.tranche)))
+          .map((r) => ({
+            amount: r.amountPaid,
+            paidAt: r.paidAt,
+            paymentMode: r.paymentMode,
+            tranche: r.tranche,
+            remark: r.remark,
+          }));
       return {
         id: `${b.workforceId}::${b.tranche}`,
         workforceId: b.workforceId,
@@ -1290,6 +1333,7 @@ router.get('/:id/payroll-lines', async (req, res) => {
         task: b.task,
         totalDays: b.totalDays,
         advances: b.advances,
+        bonuses: b.bonuses,
         brut: b.brut,
         netDue,
         amountPaid: paid,
@@ -1297,6 +1341,8 @@ router.get('/:id/payroll-lines', async (req, res) => {
         status,
         paymentMode: record?.paymentMode || null,
         paidAt: record?.paidAt || null,
+        remark: record?.remark || null,
+        payments,
         days: b.days
           .slice()
           .sort((a, c) => c.date.getTime() - a.date.getTime()),
@@ -1594,6 +1640,9 @@ router.post('/pointage/sessions/ensure', async (req, res) => {
   } catch {
     return res.status(400).json({ message: 'Date invalide' });
   }
+  if (isFuturePointageDate(date)) {
+    return res.status(400).json({ message: 'On ne peut pointer que jusqu’à aujourd’hui.' });
+  }
   const category = String(req.body.category || '').trim();
   const excludeCategory = String(req.body.excludeCategory || '').trim();
   const trancheSpecified = Object.prototype.hasOwnProperty.call(req.body, 'tranche');
@@ -1626,9 +1675,15 @@ router.post('/pointage/sessions/ensure', async (req, res) => {
   dayEnd.setHours(23, 59, 59, 999);
   const dayWhere = { chantierId, date: { gte: dayStart, lte: dayEnd } };
 
-  let session = onlyTranche != null
-    ? await prisma.pointageSession.findFirst({ where: { ...dayWhere, tranche: onlyTranche } })
-    : await prisma.pointageSession.findFirst({ where: dayWhere, orderBy: { createdAt: 'desc' } });
+  let session;
+  try {
+    session = onlyTranche != null
+      ? await prisma.pointageSession.findFirst({ where: { ...dayWhere, tranche: onlyTranche } })
+      : await prisma.pointageSession.findFirst({ where: dayWhere, orderBy: { createdAt: 'desc' } });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: err instanceof Error ? err.message : 'Erreur serveur' });
+  }
 
   if (!session && active.length) {
     const names = [...new Set(active.map((row) => String(row.tranche || '').trim()))];
@@ -1646,6 +1701,7 @@ router.post('/pointage/sessions/ensure', async (req, res) => {
   }
   if (!session) return res.json({ id: null });
 
+  const excluded = new Set(parseExcludedWorkforceIds(session.excludedWorkforceIds));
   const already = new Set(
     (await prisma.pointage.findMany({
       where: { chantierId, date: { gte: dayStart, lte: dayEnd } },
@@ -1653,7 +1709,7 @@ router.post('/pointage/sessions/ensure', async (req, res) => {
     })).map((row) => row.workforceId),
   );
   for (const row of active) {
-    if (already.has(row.workforceId)) continue;
+    if (already.has(row.workforceId) || excluded.has(row.workforceId)) continue;
     await prisma.pointage.create({
       data: {
         date: session.date,
@@ -1696,6 +1752,9 @@ router.post('/pointage/sessions', async (req, res) => {
     date = parsePointageDate(String(req.body.date));
   } catch {
     return res.status(400).json({ message: 'Date invalide' });
+  }
+  if (isFuturePointageDate(date)) {
+    return res.status(400).json({ message: 'On ne peut pointer que jusqu’à aujourd’hui.' });
   }
   const conflict = await findSessionConflict(chantierId, tranche, date);
   if (conflict) return res.status(409).json(conflict);
@@ -1824,7 +1883,12 @@ router.post('/pointage/sessions/:id/lines', async (req, res) => {
     await syncWorkforceDailyRateFromPointage(req, workforceId, rate);
     saved++;
   }
-  await prisma.pointageSession.update({ where: { id }, data: { updatedAt: new Date() } });
+  const remainingExcluded = parseExcludedWorkforceIds(session.excludedWorkforceIds)
+    .filter((id) => !lines.some((raw: { workforceId?: string }) => String(raw?.workforceId || '').trim() === id));
+  await prisma.pointageSession.update({
+    where: { id },
+    data: { updatedAt: new Date(), excludedWorkforceIds: remainingExcluded },
+  });
   if (saved) {
     await audit(req, 'pointage', 'PointageSession', id, `${saved} ligne(s) enregistrée(s)`);
   }
@@ -2058,7 +2122,7 @@ router.get('/pointage', async (req, res) => {
 function parseDayValue(raw: unknown) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return 0;
-  return n;
+  return Math.min(1, n);
 }
 
 router.post('/pointage', async (req, res) => {
@@ -2094,6 +2158,9 @@ router.post('/pointage', async (req, res) => {
     });
   }
   const pointageDate = parsePointageDate(String(date));
+  if (isFuturePointageDate(pointageDate)) {
+    return res.status(400).json({ message: 'On ne peut pointer que jusqu’à aujourd’hui.' });
+  }
   const dv = parseDayValue(dayValue);
   const hours = dv * 8;
   const totalDay = dv;
@@ -2229,6 +2296,25 @@ router.delete('/pointage/:id', async (req, res) => {
   const motif = String(req.body?.motif || '').trim();
   if (!motif) return res.status(400).json({ message: 'Motif de suppression obligatoire' });
 
+  const existing = await prisma.pointage.findUnique({
+    where: { id },
+    select: { sessionId: true, workforceId: true },
+  });
+  if (!existing) return res.status(404).json({ message: 'Pointage introuvable' });
+  if (existing.sessionId) {
+    const session = await prisma.pointageSession.findUnique({
+      where: { id: existing.sessionId },
+      select: { excludedWorkforceIds: true },
+    });
+    if (session) {
+      const excluded = parseExcludedWorkforceIds(session.excludedWorkforceIds);
+      if (!excluded.includes(existing.workforceId)) excluded.push(existing.workforceId);
+      await prisma.pointageSession.update({
+        where: { id: existing.sessionId },
+        data: { excludedWorkforceIds: excluded },
+      });
+    }
+  }
   await prisma.pointage.delete({ where: { id } });
   await audit(req, 'suppression', 'Pointage', id, motif);
   res.json({ ok: true });
@@ -3560,7 +3646,13 @@ router.post('/:id/subcontractors/:subId/payments', async (req, res) => {
       kind: req.body.kind === 'solde' || req.body.kind === 'situation' ? String(req.body.kind) : 'avance',
       paymentMode: req.body.paymentMode ? String(req.body.paymentMode) : null,
       date: req.body.date ? new Date(String(req.body.date)) : new Date(),
-      remark: req.body.remark ? String(req.body.remark).trim() : null,
+      remark: (() => {
+        const phaseLabel = req.body.phaseLabel ? String(req.body.phaseLabel).trim() : '';
+        const note = req.body.remark ? String(req.body.remark).trim() : '';
+        if (phaseLabel && note) return `[phase:${phaseLabel}] ${note}`;
+        if (phaseLabel) return `[phase:${phaseLabel}]`;
+        return note || null;
+      })(),
     },
   });
   res.status(201).json(await refreshSubcontract(sub.id));

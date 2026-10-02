@@ -38,6 +38,7 @@ export const navbarGroups: NavGroup[] = [
       { to: '/mandants', label: 'nav.mandants', icon: UserCircle },
       { to: '/agents', label: 'nav.agents', icon: UserCog },
       { to: '/reconnus', label: 'nav.reconnus', icon: Contact },
+      { to: '/entreprises', label: 'nav.companies', icon: Building2 },
       { to: '/fournisseurs', label: 'nav.suppliers', icon: Truck },
       { to: '/equipe-interne', label: 'nav.internalTeam', icon: Shield },
       { to: '/main-oeuvre', label: 'nav.workforce', icon: HardHat },

@@ -64,6 +64,7 @@ const PATH_RULES: { prefix: string; module: PermissionModule }[] = [
   { prefix: '/fournisseurs', module: 'achats' },
   { prefix: '/chantiers', module: 'ops' },
   { prefix: '/avancement', module: 'ops' },
+  { prefix: '/entreprises', module: 'ops' },
   { prefix: '/main-oeuvre', module: 'ops' },
   { prefix: '/chauffeurs', module: 'ops' },
   { prefix: '/pointage', module: 'ops' },

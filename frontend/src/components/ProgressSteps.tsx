@@ -504,6 +504,7 @@ function PhaseSubcontractPanel({
     current?.companyName || '',
   ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
   const stOn = choice !== NONE;
+  const companyName = choice === NEW ? newName.trim() : choice === NONE ? '' : choice;
 
   async function save() {
     if (!task.progressId) return;
@@ -513,15 +514,53 @@ function PhaseSubcontractPanel({
     }
     setSaving(true);
     try {
-      const others = existing.filter((item) => item.scope === 'phase' && item.phaseLabel !== phaseLabel);
-      const phases = others.map((item) => ({
-        label: item.phaseLabel,
+      const whole = existing.find((item) => item.scope !== 'phase');
+      const otherPhases = existing.filter((item) => item.scope === 'phase' && item.phaseLabel !== phaseLabel);
+      const allLabels = (task.phases || []).map((phase) => String(phase.label || '').trim()).filter(Boolean);
+      const shareOf = (label: string, total: number) => {
+        const pct = Number((task.phases || []).find((phase) => phase.label === label)?.percent || 0);
+        const weight = allLabels.reduce((sum, name) => sum + Number((task.phases || []).find((phase) => phase.label === name)?.percent || 0), 0);
+        if (weight > 0 && pct > 0) return Math.round((total * pct) / weight * 100) / 100;
+        return allLabels.length ? Math.round((total / allLabels.length) * 100) / 100 : total;
+      };
+      const phases = otherPhases.map((item) => ({
+        label: String(item.phaseLabel || ''),
         companyName: item.companyName,
         phone: item.phone || '',
         amount: Number(item.amount || 0),
         startDate: item.startDate || null,
         endDate: item.endDate || null,
       }));
+      if (whole && Number(whole.paidAmount || 0) > 0 && otherPhases.length === 0) {
+        if (!stOn) {
+          await appAlert(t('detail.stCannotDropPaidTask'));
+          return;
+        }
+        const updated = await api<TaskSubcontract[]>(`/chantiers/progress/${task.progressId}/subcontract`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            mode: 'task',
+            task: { companyName, phone, amount: Number(amount || 0), startDate: startDate || null, endDate: endDate || null },
+          }),
+        });
+        const saved = updated.find((item) => item.scope !== 'phase') || updated[0];
+        setContract(saved ? toContract(saved, task.chantierId) : null);
+        onSaved?.();
+        return;
+      }
+      if (whole && otherPhases.length === 0) {
+        for (const label of allLabels) {
+          if (label === phaseLabel) continue;
+          phases.push({
+            label,
+            companyName: whole.companyName,
+            phone: whole.phone || '',
+            amount: shareOf(label, Number(whole.amount || 0)),
+            startDate: whole.startDate || null,
+            endDate: whole.endDate || null,
+          });
+        }
+      }
       if (stOn) {
         phases.push({
           label: phaseLabel,
@@ -532,21 +571,10 @@ function PhaseSubcontractPanel({
           endDate: endDate || null,
         });
       }
-      const whole = existing.find((item) => item.scope !== 'phase');
-      let updated: TaskSubcontract[];
-      if (whole && !others.length) {
-        updated = await api<TaskSubcontract[]>(`/chantiers/progress/${task.progressId}/subcontract`, {
-          method: 'PUT',
-          body: JSON.stringify(stOn
-            ? { mode: 'task', task: { companyName, phone, amount: Number(amount || 0), startDate: startDate || null, endDate: endDate || null } }
-            : { mode: 'none' }),
-        });
-      } else {
-        updated = await api<TaskSubcontract[]>(`/chantiers/progress/${task.progressId}/subcontract`, {
-          method: 'PUT',
-          body: JSON.stringify(phases.length ? { mode: 'phases', phases } : { mode: 'none' }),
-        });
-      }
+      const updated = await api<TaskSubcontract[]>(`/chantiers/progress/${task.progressId}/subcontract`, {
+        method: 'PUT',
+        body: JSON.stringify(phases.length ? { mode: 'phases', phases } : { mode: 'none' }),
+      });
       const saved = updated.find((item) => item.scope === 'phase' && item.phaseLabel === phaseLabel)
         || updated.find((item) => item.scope !== 'phase');
       setContract(saved ? toContract(saved, task.chantierId) : null);
@@ -592,7 +620,11 @@ function PhaseSubcontractPanel({
         <Btn type="button" onClick={save} disabled={saving}>{t('detail.stSaveContract')}</Btn>
       )}
       {contract?.id && contract.chantierId && (
-        <PaymentBox contract={contract} onPaid={(updated) => { setContract(updated); onSaved?.(); }} />
+        <PaymentBox
+          contract={contract}
+          phaseLabel={contract.scope === 'phase' ? undefined : phaseLabel}
+          onPaid={(updated) => { setContract(updated); onSaved?.(); }}
+        />
       )}
     </div>
   );

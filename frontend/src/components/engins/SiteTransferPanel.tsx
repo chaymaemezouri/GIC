@@ -4,7 +4,7 @@ import { api } from '../../lib/api';
 import { appAlert } from '../../lib/dialog';
 import { errorMessage, queryString, todayISO, type Assignment } from '../../lib/engins';
 import { useI18n } from '../../i18n/I18nContext';
-import { Btn, MacSearch, Select } from '../ui';
+import { Btn, MacDateInput, MacSearch, Select } from '../ui';
 
 type ChantierOption = { id: string; name: string };
 type PlaceFilter = 'all' | 'whole' | string;
@@ -61,6 +61,7 @@ export function SiteTransferPanel({
   const [qty, setQty] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [reload, setReload] = useState(0);
+  const [transferDate, setTransferDate] = useState(todayISO());
 
   useEffect(() => {
     api<{ items: ChantierOption[] }>('/chantiers?limit=100&sort=name&order=asc')
@@ -140,7 +141,7 @@ export function SiteTransferPanel({
           if (!row) continue;
           await api(`/engins/assignments/${row.id}/transfer`, {
             method: 'POST',
-            body: JSON.stringify({ chantierId: toId, tranche: destPlace || null }),
+            body: JSON.stringify({ chantierId: toId, tranche: destPlace || null, date: transferDate }),
           });
         } else {
           const row = (pool as MaterielRow[]).find((r) => rowKey(r.enginId, r.tranche) === id);
@@ -152,7 +153,7 @@ export function SiteTransferPanel({
             body: JSON.stringify({
               movementType: 'transfert',
               quantity,
-              date: todayISO(),
+              date: transferDate,
               fromChantierId: fromId,
               fromTranche: row.tranche || null,
               chantierId: toId,
@@ -178,6 +179,11 @@ export function SiteTransferPanel({
   }
 
   return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <MacDateInput value={transferDate} onChange={setTransferDate} placeholder={t('fleet.fields.transferDate')} className="w-36 shrink-0" />
+        <p className="text-[11px] text-gic-muted">{t('fleet.hints.transferDebit')}</p>
+      </div>
     <div className="grid items-stretch gap-3 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
       <TransferColumn
         tone="blue"
@@ -238,6 +244,7 @@ export function SiteTransferPanel({
           <p className="px-3 py-8 text-center text-[12px] text-gic-muted">{t('msg.chooseSite')}</p>
         )}
       </div>
+    </div>
     </div>
   );
 }

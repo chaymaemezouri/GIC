@@ -19,10 +19,10 @@ import documentsRoutes from './routes/documents.js';
 import portalRoutes from './routes/portal.js';
 import messagingRoutes from './routes/messaging.js';
 import equipeInterneRoutes from './routes/equipeInterne.js';
-import reconnusRoutes from './routes/reconnus.js';
+import entreprisesRoutes from './routes/entreprises.js';
 import officeCashRoutes from './routes/officeCash.js';
 import { uploadDir } from './lib/uploadPaths.js';
-import { backfillPointageSessions } from './lib/pointageSessions.js';
+import { backfillPointageSessions, repairPointageSessionExclusions } from './lib/pointageSessions.js';
 import { migrateLegacyPurchases } from './lib/purchaseWorkflow.js';
 import { migrateEnginFleet } from './lib/enginCosts.js';
 
@@ -72,6 +72,7 @@ app.use('/api/portal', portalRoutes);
 app.use('/api/messaging', messagingRoutes);
 app.use('/api/equipe-interne', equipeInterneRoutes);
 app.use('/api/reconnus', reconnusRoutes);
+app.use('/api/entreprises', entreprisesRoutes);
 app.use('/api/caisse-bureau', officeCashRoutes);
 app.use('/api', miscRoutes);
 
@@ -80,10 +81,16 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ message: err.message || 'Erreur serveur' });
 });
 
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection', reason);
+});
+
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {
   console.log(`GIC API prête sur http://localhost:${port}`);
-  backfillPointageSessions()
+  repairPointageSessionExclusions()
+    .catch((err) => console.error('Réparation exclusions pointage', err))
+    .then(() => backfillPointageSessions())
     .then((n) => {
       if (n) console.log(`Pointage : ${n} ligne(s) historiques rattachées à un pointage journalier`);
     })

@@ -73,6 +73,13 @@ export function stockSnapshot(opening: number, moves: StockMove[]): StockSnapsho
       if (repair < -0.001) return { ok: false, message: 'Aucune quantité en réparation' };
       if (move.chantierId) bump(move.chantierId, move.tranche, q);
       else depot += q;
+    } else if (move.movementType === 'desaffectation') {
+      const fromId = move.fromChantierId || move.chantierId;
+      const fromTranche = move.fromTranche ?? move.tranche;
+      if (!fromId) return { ok: false, message: 'Chantier source requis pour la désaffectation' };
+      const left = bump(fromId, fromTranche, -q);
+      if (left != null && left < -0.001) return { ok: false, message: 'Quantité insuffisante sur le chantier' };
+      depot += q;
     } else {
       return { ok: false, message: 'Type de mouvement invalide' };
     }

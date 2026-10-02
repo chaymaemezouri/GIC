@@ -93,6 +93,11 @@ export function extractWorkPhases(phases: TaskPhaseInput[]): TaskPhaseInput[] {
   return sorted.filter((p) => !(Math.round(Number(p.percent) || 0) === 100 && isValidationLabel(p.label)));
 }
 
+/** Libellés cochables pour la sous-traitance (phase sans nom → Phase 1, 2…). */
+export function workPhaseLabels(phases: TaskPhaseInput[]): string[] {
+  return extractWorkPhases(phases).map((phase, index) => String(phase.label || '').trim() || `Phase ${index + 1}`);
+}
+
 /** Garantit : phases milieu + dernière = Validation 100 %. */
 export function ensureAnchoredPhases(phases: TaskPhaseInput[]): TaskPhaseInput[] {
   const work = extractWorkPhases(phases).map((p) => ({

@@ -19,6 +19,7 @@ export const CREATE_GROUPS: CreateNavGroup[] = [
       { to: '/mandants?create=1', label: 'create.mandant', icon: UserCircle },
       { to: '/agents?create=1', label: 'create.agent', icon: UserCog },
       { to: '/reconnus?create=1', label: 'create.reconnu', icon: UserCircle },
+      { to: '/entreprises?create=1', label: 'create.company', icon: Building2 },
       { to: '/equipe-interne?create=1', label: 'create.collaborator', icon: Shield },
       { to: '/main-oeuvre?create=1', label: 'create.workforce', icon: HardHat },
       { to: '/chauffeurs?create=1', label: 'create.driver', icon: HardHat },

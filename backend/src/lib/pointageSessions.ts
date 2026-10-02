@@ -1,5 +1,12 @@
 import { prisma } from './prisma.js';
 
+/** SQLite peut laisser excludedWorkforceIds vide après db push — Prisma plante alors (P2023). */
+export async function repairPointageSessionExclusions() {
+  await prisma.$executeRawUnsafe(
+    `UPDATE PointageSession SET excludedWorkforceIds = '[]' WHERE excludedWorkforceIds IS NULL OR TRIM(CAST(excludedWorkforceIds AS TEXT)) = '' OR CAST(excludedWorkforceIds AS TEXT) = 'null'`,
+  );
+}
+
 export function normalizeTranche(raw: unknown) {
   return String(raw ?? '').trim();
 }

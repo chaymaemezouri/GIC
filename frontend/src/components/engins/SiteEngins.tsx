@@ -6,7 +6,7 @@ import { COST_CATEGORIES, type CostBucket, type CostLine } from '../../lib/engin
 import { useI18n } from '../../i18n/I18nContext';
 import { Btn, KpiCard, MacSearch, Modal, TableWrap, Tabs, Td, Th } from '../ui';
 import { AssignmentsPanel } from './Assignments';
-import { UsagePanel } from './Logs';
+import { ExpensePanel, FuelPanel, UsagePanel } from './Logs';
 import { SiteTransferPanel } from './SiteTransferPanel';
 
 export type SiteEnginCosts = {
@@ -23,7 +23,7 @@ type CostsPayload = {
   lines: CostLine[];
 };
 
-type Section = 'affectation' | 'transfer' | 'retours' | 'utilisation' | 'missions' | 'synthese';
+type Section = 'affectation' | 'transfer' | 'retours' | 'utilisation' | 'depenses' | 'carburant' | 'missions' | 'synthese';
 
 /** Onglet chantier : affectation, missions et synthèse des coûts des engins uniquement. */
 export function SiteEnginsPanel({
@@ -81,6 +81,8 @@ export function SiteEnginsPanel({
           { id: 'transfer', label: t('siteOps.transfer') },
           { id: 'retours', label: t('fleet.nav.retours') },
           { id: 'utilisation', label: t('fleet.nav.utilisation') },
+          { id: 'depenses', label: t('fleet.nav.depenses') },
+          { id: 'carburant', label: t('fleet.nav.carburant') },
           { id: 'missions', label: missionsCount ? `${t('msg.equipmentMissionsTitle')} (${missionsCount})` : t('msg.equipmentMissionsTitle') },
           { id: 'synthese', label: t('siteOps.synthesis') },
         ]}
@@ -124,6 +126,26 @@ export function SiteEnginsPanel({
 
       {section === 'utilisation' && (
         <UsagePanel
+          toolbar
+          showKpis
+          fixed={{ chantierId, tranche }}
+          reloadKey={reloadKey}
+          onChanged={() => { setReloadKey((k) => k + 1); onChanged?.(); }}
+        />
+      )}
+
+      {section === 'depenses' && (
+        <ExpensePanel
+          toolbar
+          showKpis
+          fixed={{ chantierId, tranche }}
+          reloadKey={reloadKey}
+          onChanged={() => { setReloadKey((k) => k + 1); onChanged?.(); }}
+        />
+      )}
+
+      {section === 'carburant' && (
+        <FuelPanel
           toolbar
           showKpis
           fixed={{ chantierId, tranche }}

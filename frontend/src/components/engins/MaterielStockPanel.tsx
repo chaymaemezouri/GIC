@@ -24,7 +24,7 @@ type Chantier = { id: string; name: string };
 type Item = { id: string; code?: string | null; designation?: string | null };
 type Position = { enginId: string; code?: string | null; designation?: string | null; chantierId?: string; chantierName?: string; tranche?: string | null; quantity: number };
 
-const TYPES = ['entree', 'sortie', 'affectation', 'transfert', 'maintenance', 'retour'] as const;
+const TYPES = ['entree', 'sortie', 'affectation', 'transfert', 'desaffectation', 'maintenance', 'retour'] as const;
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -35,11 +35,13 @@ export function MaterielStockPanel({
   chantierId,
   tranche: fixedTranche,
   onOpenDetail,
+  hideMovementForm = false,
 }: {
   enginId?: string;
   chantierId?: string;
   tranche?: string;
   onOpenDetail?: (id: string, label: string) => void;
+  hideMovementForm?: boolean;
 }) {
   const { t } = useI18n();
   const [stock, setStock] = useState<Stock | null>(null);
@@ -100,7 +102,7 @@ export function MaterielStockPanel({
   }, [destId]);
 
   const needsDest = movementType === 'affectation' || movementType === 'transfert' || movementType === 'entree' || movementType === 'retour';
-  const needsSource = movementType === 'sortie' || movementType === 'transfert' || movementType === 'maintenance';
+  const needsSource = movementType === 'sortie' || movementType === 'transfert' || movementType === 'maintenance' || movementType === 'desaffectation';
   const sources = [
     { id: 'depot', label: t('fleet.stock.depot') },
     ...((stock?.sites || []).map((site) => ({
@@ -130,6 +132,9 @@ export function MaterielStockPanel({
       body.fromTranche = fromSite?.[1] || null;
       body.chantierId = destId || null;
       body.tranche = tranche || null;
+    } else if (movementType === 'desaffectation') {
+      body.fromChantierId = fromSite?.[0] || chantierId || null;
+      body.fromTranche = fromSite?.[1] || tranche || null;
     } else if (movementType === 'sortie' || movementType === 'maintenance') {
       if (fromSite) {
         body.fromChantierId = movementType === 'maintenance' ? fromSite[0] : null;
@@ -161,6 +166,7 @@ export function MaterielStockPanel({
     if (move.movementType === 'maintenance') return place(move.fromChantier?.name, move.fromTranche) || t('fleet.stock.depot');
     if (move.movementType === 'retour') return t('fleet.stock.repair');
     if (move.movementType === 'transfert') return place(move.fromChantier?.name, move.fromTranche) || '—';
+    if (move.movementType === 'desaffectation') return place(move.fromChantier?.name || move.chantier?.name, move.fromTranche || move.tranche) || '—';
     if (move.movementType === 'affectation') return t('fleet.stock.depot');
     return '—';
   }
@@ -168,6 +174,7 @@ export function MaterielStockPanel({
     if (move.movementType === 'sortie') return '—';
     if (move.movementType === 'maintenance') return t('fleet.stock.repair');
     if (move.movementType === 'retour') return place(move.chantier?.name, move.tranche) || t('fleet.stock.depot');
+    if (move.movementType === 'desaffectation') return t('fleet.stock.depot');
     return place(move.chantier?.name, move.tranche) || t('fleet.stock.depot');
   }
 
@@ -184,7 +191,9 @@ export function MaterielStockPanel({
 
       <div className="flex items-center justify-between gap-2">
         <p className="text-[13px] font-medium text-gic-ink">{fixedTranche ? t('fleet.stock.onTranche') : chantierId ? t('fleet.stock.onSite') : t('fleet.stock.title')}</p>
-        <Btn onClick={() => { setOpen(true); if (activeId) refreshPickedStock(activeId).catch(() => {}); }}>{t('fleet.stock.newMovement')}</Btn>
+        {!hideMovementForm && (
+          <Btn onClick={() => { setOpen(true); if (activeId) refreshPickedStock(activeId).catch(() => {}); }}>{t('fleet.stock.newMovement')}</Btn>
+        )}
       </div>
 
       {!enginId && positions.length > 0 && (
@@ -287,7 +296,7 @@ export function MaterielStockPanel({
         </TableWrap>
       )}
 
-      {open && (
+      {open && !hideMovementForm && (
         <form onSubmit={save} className="grid gap-3 rounded-lg border border-black/[0.06] p-3 sm:grid-cols-2">
           {!enginId && (
             <Select label={t('fleet.kind.materiel')} value={picked} onChange={(e) => { setPicked(e.target.value); refreshPickedStock(e.target.value).catch(() => {}); }}>
