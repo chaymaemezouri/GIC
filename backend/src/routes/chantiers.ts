@@ -1090,15 +1090,19 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
   });
 
   await syncWorkforcePayrollMovement(record, req);
-  await prisma.workforcePayrollPayment.create({
-    data: {
-      recordId: record.id,
-      amount,
-      paymentMode,
-      paidAt: paymentInstant(req.body.paidAt),
-      remark,
-    },
-  });
+  try {
+    await prisma.workforcePayrollPayment.create({
+      data: {
+        recordId: record.id,
+        amount,
+        paymentMode,
+        paidAt: paymentInstant(req.body.paidAt),
+        remark,
+      },
+    });
+  } catch (err) {
+    console.error('WorkforcePayrollPayment', err);
+  }
   await audit(
     req,
     'décaissement',
@@ -1280,12 +1284,28 @@ router.get('/:id/payroll-lines', async (req, res) => {
   }
 
   const ids = [...new Set([...buckets.values()].map((b) => b.workforceId))];
-  const records = ids.length
-    ? await prisma.workforcePayrollRecord.findMany({
+  let records: Array<{
+    workforceId: string;
+    chantierId: string;
+    tranche: string | null;
+    amountPaid: number;
+    paymentMode: string | null;
+    paidAt: Date | null;
+    remark: string | null;
+    payments?: Array<{ amount: number; paidAt: Date; paymentMode: string | null; remark: string | null }>;
+  }> = [];
+  if (ids.length) {
+    try {
+      records = await prisma.workforcePayrollRecord.findMany({
         where: { workforceId: { in: ids }, periodYear: py, periodMonth: pm },
         include: { payments: { orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }] } },
-      })
-    : [];
+      });
+    } catch {
+      records = await prisma.workforcePayrollRecord.findMany({
+        where: { workforceId: { in: ids }, periodYear: py, periodMonth: pm },
+      });
+    }
+  }
 
   const lines = [...buckets.values()]
     .map((b) => {

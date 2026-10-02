@@ -19,6 +19,7 @@ import documentsRoutes from './routes/documents.js';
 import portalRoutes from './routes/portal.js';
 import messagingRoutes from './routes/messaging.js';
 import equipeInterneRoutes from './routes/equipeInterne.js';
+import reconnusRoutes from './routes/reconnus.js';
 import entreprisesRoutes from './routes/entreprises.js';
 import officeCashRoutes from './routes/officeCash.js';
 import { uploadDir } from './lib/uploadPaths.js';
