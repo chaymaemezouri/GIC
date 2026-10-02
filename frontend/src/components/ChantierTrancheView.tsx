@@ -2,7 +2,7 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Plus, Users, Truck, HardHat, Layers, ShoppingCart, Pencil, Trash2, Clock, ChevronRight, FileText,
+  Plus, Users, Truck, HardHat, Layers, ShoppingCart, Pencil, Trash2, Clock, ChevronRight, FileText, Package,
 } from 'lucide-react';
 import { api, fetchSupplierList, formatDate, formatMad } from '../lib/api';
 import { chantierDateError } from './ChantierFormFields';
@@ -17,10 +17,11 @@ import { PurchaseFormFields, emptyPurchaseForm, purchaseFormToBody, validatePurc
 import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from './PurchaseBadges';
 import { EntityPickerPanel, enginToPickerItem } from './EntityPickerPanel';
 import { SiteEnginsPanel, type SiteEnginCosts } from './engins/SiteEngins';
+import { SiteMaterielPanel } from './engins/SiteMaterielPanel';
 import { useI18n } from '../i18n/I18nContext';
 import { ChantierWorkersPanel } from './ChantierWorkersPanel';
 import { EntityDocChecklist } from './EntityDocChecklist';
-import { PaymentBox, TaskSubcontractEditor, draftFromContracts, type SubDraft, type TaskSubcontract } from './TaskSubcontractEditor';
+import { PaymentBox, TaskSubcontractEditor, draftFromContracts, subcontractTotals, type SubDraft, type TaskSubcontract } from './TaskSubcontractEditor';
 
 export type TrancheListItem = {
   id: string;
@@ -85,7 +86,7 @@ export type TrancheDetail = TrancheListItem & {
   }>;
 };
 
-type TrancheTab = 'avancement' | 'ouvriers' | 'engins' | 'achats' | 'pointage' | 'documents';
+type TrancheTab = 'avancement' | 'ouvriers' | 'engins' | 'materiel' | 'achats' | 'pointage' | 'documents';
 
 export function ChantierTranchesList({
   chantierId,
@@ -234,7 +235,6 @@ export function ChantierTrancheView({
   const [subDraft, setSubDraft] = useState<SubDraft>(draftFromContracts([], []));
   const [subContracts, setSubContracts] = useState<TaskSubcontract[]>([]);
   const [stTask, setStTask] = useState<TrancheDetail['progress'][number] | null>(null);
-  const [autoSeedDone, setAutoSeedDone] = useState(false);
   const [taskRef, setTaskRef] = useState<string[]>([]);
   const [standardLots, setStandardLots] = useState<{ name: string; phases: TaskPhaseInput[] }[]>([]);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
@@ -259,7 +259,6 @@ export function ChantierTrancheView({
   }
 
   useEffect(() => {
-    setAutoSeedDone(false);
     load();
     fetchSupplierList().then(setSuppliers).catch(() => {});
     api('/achats/families').then(setFamilies).catch(() => {});
@@ -275,10 +274,7 @@ export function ChantierTrancheView({
     const task = detail.progress.find((row) => row.id === focus.focusTaskId);
     if (!task) return;
     setTab('avancement');
-    const phaseOnly = focus.focusPhase
-      ? (task.subcontractors || []).filter((row) => row.scope === 'phase' && row.phaseLabel === focus.focusPhase)
-      : [];
-    setStTask(phaseOnly.length ? { ...task, subcontractors: phaseOnly } : task);
+    openEditPhases(task);
     window.setTimeout(() => {
       document.getElementById(`task-${task.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }, 50);
@@ -289,21 +285,6 @@ export function ChantierTrancheView({
     if (tab !== 'pointage' || !detail) return;
     loadTranchePointages();
   }, [tab, detail?.id]);
-
-  /** Filet de sécurité : tranche vide → lots standards + phases à 0 %. */
-  useEffect(() => {
-    if (!detail || autoSeedDone || detail.progress.length > 0) return;
-    setAutoSeedDone(true);
-    api(`/chantiers/${chantierId}/progress/init`, {
-      method: 'POST',
-      body: JSON.stringify({ trancheId }),
-    })
-      .then(() => {
-        load();
-        onRefresh();
-      })
-      .catch(() => {});
-  }, [detail?.id, detail?.progress.length, autoSeedDone]);
 
   function loadTranchePointages() {
     if (!detail) return;
@@ -341,20 +322,6 @@ export function ChantierTrancheView({
       load();
     } finally {
       setSavingProgress(null);
-    }
-  }
-
-  async function initTasks() {
-    try {
-      await api(`/chantiers/${chantierId}/progress/init`, {
-        method: 'POST',
-        body: JSON.stringify({ trancheId }),
-      });
-      load();
-      onRefresh();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-      throw err;
     }
   }
 
@@ -416,29 +383,36 @@ export function ChantierTrancheView({
   }
 
   function subcontractPayload(draft: SubDraft, labels: string[]) {
-    if (draft.mode === 'task') {
+    if (draft.mode !== 'phases') return { mode: 'none' };
+    const selected = labels.filter((label) => draft.phases[label]?.on);
+    if (!selected.length) return { mode: 'none' };
+    const first = draft.phases[selected[0]];
+    const sameContract = selected.length === labels.length && selected.every((label) => {
+      const row = draft.phases[label];
+      return row.companyName.trim() === first.companyName.trim()
+        && row.amount === first.amount
+        && row.phone === first.phone;
+    });
+    if (sameContract) {
       return {
         mode: 'task',
         task: {
-          companyName: draft.companyName,
-          phone: draft.phone,
-          amount: Number(draft.amount),
-          startDate: draft.startDate || null,
-          endDate: draft.endDate || null,
+          companyName: first.companyName,
+          phone: first.phone,
+          amount: Number(first.amount),
+          startDate: first.startDate || null,
+          endDate: first.endDate || null,
         },
       };
     }
-    if (draft.mode === 'phases') {
-      return {
-        mode: 'phases',
-        phases: labels.filter((label) => draft.phases[label]?.on).map((label) => ({
-          label,
-          ...draft.phases[label],
-          amount: Number(draft.phases[label].amount),
-        })),
-      };
-    }
-    return { mode: 'none' };
+    return {
+      mode: 'phases',
+      phases: selected.map((label) => ({
+        label,
+        ...draft.phases[label],
+        amount: Number(draft.phases[label].amount),
+      })),
+    };
   }
 
   function keepPhaseChoices(draft: SubDraft, labels: string[]): SubDraft {
@@ -496,6 +470,9 @@ export function ChantierTrancheView({
   }
 
   function openEditPhases(item: TrancheDetail['progress'][number]) {
+    const contractPhaseLabels = [...new Set(
+      (item.subcontractors || []).map((row) => String(row.phaseLabel || '').trim()).filter(Boolean),
+    )];
     const phases =
       item.phases?.length && item.phases.some((p) => p.label?.trim())
         ? ensureAnchoredPhases(
@@ -505,7 +482,9 @@ export function ChantierTrancheView({
               description: p.description || '',
             })),
           )
-        : emptyPhaseForm(1);
+        : contractPhaseLabels.length
+          ? ensureAnchoredPhases(contractPhaseLabels.map((label) => ({ percent: 50, label, description: '' })))
+          : emptyPhaseForm(1);
     setEditPhasesItem(item);
     setEditPhasesForm(phases);
     const labels = extractWorkPhases(phases).map((phase) => phase.label).filter(Boolean);
@@ -562,15 +541,6 @@ export function ChantierTrancheView({
       onRefresh();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
-  async function openInitTasks() {
-    if (!await appConfirm(t('msg.init19TasksHint'))) return;
-    try {
-      await initTasks();
-    } catch {
-      /* alert déjà affiché */
     }
   }
 
@@ -650,6 +620,7 @@ export function ChantierTrancheView({
     { id: 'ouvriers', label: t('tabs.workers'), icon: Users, badge: detail.assignments.length || undefined },
     { id: 'pointage', label: t('tabs.attendance'), icon: Clock, badge: detail.workersCount },
     { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: detail.enginCosts?.byEngin?.length || detail.missionsCount },
+    { id: 'materiel', label: t('tabs.materiel'), icon: Package },
     { id: 'achats', label: t('tabs.purchases'), icon: ShoppingCart, badge: detail.purchasesCount },
     { id: 'documents', label: t('tabs.documents'), icon: FileText },
   ];
@@ -785,7 +756,6 @@ export function ChantierTrancheView({
             </div>
             <div className="flex flex-wrap gap-2">
               <Btn icon={Plus} size="sm" onClick={openAddTask}>{t('actions.addTask')}</Btn>
-              <Btn variant="secondary" size="sm" onClick={openInitTasks}>{t('actions.init19Tasks')}</Btn>
             </div>
           </div>
 
@@ -796,7 +766,6 @@ export function ChantierTrancheView({
               <p className="text-[12px] text-gic-muted mt-1">{t('msg.emptyTasksHint')}</p>
               <div className="flex flex-wrap justify-center gap-2 mt-4">
                 <Btn icon={Plus} size="sm" onClick={openAddTask}>{t('actions.addTask')}</Btn>
-                <Btn variant="secondary" size="sm" onClick={openInitTasks}>{t('actions.init19Tasks')}</Btn>
               </div>
             </div>
           ) : (
@@ -807,18 +776,28 @@ export function ChantierTrancheView({
                 const phaseOnes = contracts.filter((item) => item.scope === 'phase');
                 return (
                 <div key={p.id} id={`task-${p.id}`} className="mac-task-row items-center">
-                  <div className="mac-task-meta !w-[200px]">
+                  <div className="mac-task-meta !w-[280px]">
                     <p className="mac-task-name truncate flex items-center gap-1.5">
                       <span className="truncate">{p.taskName}</span>
                       {contracts.length > 0 && (
-                        <button type="button" className="mac-chip mac-chip-violet shrink-0" onClick={() => setStTask(p)}>{t('detail.stBadge')}</button>
+                        <button type="button" className="mac-chip mac-chip-violet shrink-0" onClick={() => openEditPhases(p)}>{t('detail.stBadge')}</button>
                       )}
                     </p>
+                    {contracts.length > 0 && (() => {
+                      const money = subcontractTotals(contracts);
+                      return (
+                        <p className="mac-task-sub leading-snug whitespace-normal">
+                          {t('detail.stPrice')} {formatMad(money.prix)}
+                          {' · '}{t('detail.stAdvanceTotal')} {formatMad(money.avance)}
+                          {' · '}{t('detail.stRemaining')} {formatMad(money.reste)}
+                        </p>
+                      );
+                    })()}
                     <p className="mac-task-sub truncate">
                       {whole
-                        ? `${t('detail.subcontractWhole')} · ${whole.companyName}`
+                        ? `${t('detail.stCompletePhases')} · ${whole.companyName}`
                         : phaseOnes.length
-                          ? `${t('detail.stBadge')} · ${phaseOnes.map((item) => item.phaseLabel).filter(Boolean).join(', ')}`
+                          ? `${t('detail.stCompletePhases')} · ${phaseOnes.map((item) => item.phaseLabel).filter(Boolean).join(', ')}`
                           : p.phases?.length
                             ? t('detail.phasesCount', { count: p.phases.length })
                             : t('detail.noPhasesShort')}
@@ -829,6 +808,8 @@ export function ChantierTrancheView({
                       percent={p.percent}
                       onChange={(pct) => savePercent(p.id, pct)}
                       task={{
+                        progressId: p.id,
+                        chantierId,
                         taskName: p.taskName,
                         tranche: p.tranche,
                         remark: p.remark,
@@ -836,6 +817,7 @@ export function ChantierTrancheView({
                         phases: p.phases,
                         subcontracts: contracts,
                       }}
+                      onTaskUpdated={load}
                     />
                   </div>
                   <MacActionBtn icon={Pencil} tone="orange" title={t('actions.editLotPhases')} onClick={() => openEditPhases(p)} />
@@ -908,6 +890,10 @@ export function ChantierTrancheView({
         </div>
           }
         />
+      )}
+
+      {tab === 'materiel' && (
+        <SiteMaterielPanel chantierId={chantierId} tranche={detail.name} onChanged={() => { load(); onRefresh(); }} />
       )}
 
       {tab === 'achats' && (
@@ -1090,33 +1076,58 @@ export function ChantierTrancheView({
 
       <Modal
         open={editPhasesOpen}
-        title={editPhasesItem ? t('detail.phasesForTask', { name: editPhasesItem.taskName }) : t('detail.lotPhasesTitle')}
+        title={editPhasesItem ? t('detail.stEditTitle', { name: editPhasesItem.taskName }) : t('detail.lotPhasesTitle')}
         onClose={() => setEditPhasesOpen(false)}
         size="xl"
         footer={<><Btn variant="secondary" onClick={() => setEditPhasesOpen(false)}>{t('common.cancel')}</Btn><Btn form="edit-phases-form" type="submit">{t('common.save')}</Btn></>}
       >
-        <form id="edit-phases-form" onSubmit={saveEditPhases} className="grid gap-3">
+        <form id="edit-phases-form" onSubmit={saveEditPhases} className="grid gap-4">
           {editPhasesItem && (
             <p className="text-[12px] text-gic-muted">{detail.name}</p>
           )}
-          <TaskPhaseFields phases={editPhasesForm} onChange={(phases) => {
-            setEditPhasesForm(phases);
-            const labels = extractWorkPhases(phases).map((phase) => phase.label).filter(Boolean);
-            setSubDraft((prev) => {
-              if (prev.mode !== 'phases') return prev;
-              return {
-                ...prev,
-                phases: Object.fromEntries(labels.map((label) => [label, prev.phases[label] || { on: false, companyName: '', phone: '', amount: '', startDate: '', endDate: '' }])),
-              };
-            });
-          }} />
-          <TaskSubcontractEditor
-            draft={subDraft}
-            labels={extractWorkPhases(editPhasesForm).map((phase) => phase.label).filter(Boolean)}
-            contracts={subContracts}
-            onChange={setSubDraft}
-            onPaid={(updated) => setSubContracts((rows) => rows.map((row) => row.id === updated.id ? updated : row))}
-          />
+          <section className="space-y-2">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-gic-muted">{t('detail.stEditStepContract')}</p>
+            <TaskSubcontractEditor
+              draft={subDraft}
+              labels={extractWorkPhases(editPhasesForm).map((phase) => phase.label).filter(Boolean)}
+              contracts={subContracts}
+              onChange={setSubDraft}
+              hidePayments
+            />
+          </section>
+          <section className="space-y-2">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-gic-muted">{t('detail.stEditStepAdvances')}</p>
+            {subContracts.length === 0 ? (
+              <p className="text-[12px] text-gic-muted">{t('detail.stEditAdvancesHint')}</p>
+            ) : (
+              subContracts.map((contract) => (
+                <div key={contract.id} className="rounded-lg border border-black/[0.08] p-3">
+                  <p className="text-[12px] font-medium mb-2">
+                    {contract.scope === 'phase' ? contract.phaseLabel : t('detail.stCompletePhases')}
+                    {' · '}{contract.companyName}
+                  </p>
+                  <PaymentBox
+                    contract={contract}
+                    onPaid={(updated) => setSubContracts((rows) => rows.map((row) => row.id === updated.id ? updated : row))}
+                  />
+                </div>
+              ))
+            )}
+          </section>
+          <section className="space-y-2">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-gic-muted">{t('detail.stEditStepPhases')}</p>
+            <TaskPhaseFields phases={editPhasesForm} onChange={(phases) => {
+              setEditPhasesForm(phases);
+              const labels = extractWorkPhases(phases).map((phase) => phase.label).filter(Boolean);
+              setSubDraft((prev) => {
+                if (prev.mode !== 'phases') return prev;
+                return {
+                  ...prev,
+                  phases: Object.fromEntries(labels.map((label) => [label, prev.phases[label] || { on: false, companyName: '', phone: '', amount: '', startDate: '', endDate: '' }])),
+                };
+              });
+            }} />
+          </section>
         </form>
       </Modal>
 
@@ -1166,10 +1177,19 @@ export function ChantierTrancheView({
               <div key={contract.id} className="rounded-lg border border-black/[0.06] p-3">
                 <p className="text-[13px] font-medium">
                   <span className="mac-chip mac-chip-violet mr-2">{t('detail.stBadge')}</span>
-                  {contract.scope === 'phase' ? contract.phaseLabel : t('detail.subcontractWhole')}
+                  {contract.scope === 'phase' ? contract.phaseLabel : t('detail.stCompletePhases')}
                   {' · '}{contract.companyName}
                 </p>
-                <p className="text-[12px] text-gic-muted mt-1">{formatMad(contract.amount || 0)}</p>
+                {(() => {
+                  const money = subcontractTotals([contract]);
+                  return (
+                    <p className="text-[12px] text-gic-muted mt-1">
+                      {t('detail.stPrice')} {formatMad(money.prix)}
+                      {' · '}{t('detail.stAdvanceTotal')} {formatMad(money.avance)}
+                      {' · '}{t('detail.stRemaining')} {formatMad(money.reste)}
+                    </p>
+                  );
+                })()}
                 <div className="mt-2">
                   <PaymentBox
                     contract={contract}

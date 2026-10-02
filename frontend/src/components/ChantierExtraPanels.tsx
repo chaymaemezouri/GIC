@@ -35,7 +35,7 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
   const navigate = useNavigate();
   const [items, setItems] = useState<Subcontractor[]>([]);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ companyName: '', phone: '', amount: '', remark: '', workProgressId: '', scope: 'task', phaseLabel: '' });
+  const [form, setForm] = useState({ companyName: '', phone: '', amount: '', remark: '', workProgressId: '', scope: 'phase', phaseLabel: '' });
   const [tasks, setTasks] = useState<Task[]>([]);
   const [standardPhases, setStandardPhases] = useState<{ name: string; phases: { label?: string; percent?: number }[] }[]>([]);
   const [detail, setDetail] = useState<Subcontractor | null>(null);
@@ -54,7 +54,7 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
   useEffect(() => { load(); }, [chantierId]);
 
   function openCreate() {
-    setForm({ companyName: '', phone: '', amount: '', remark: '', workProgressId: '', scope: 'task', phaseLabel: '' });
+    setForm({ companyName: '', phone: '', amount: '', remark: '', workProgressId: '', scope: 'phase', phaseLabel: '' });
     setOpen(true);
   }
 
@@ -252,8 +252,8 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
             ))}
           </Select>
           <Select label={t('detail.subcontractScope')} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value, phaseLabel: '' })}>
-            <option value="task">{t('detail.subcontractWhole')}</option>
             <option value="phase">{t('detail.subcontractOnePhase')}</option>
+            <option value="task">{t('detail.subcontractWhole')}</option>
           </Select>
           {form.scope === 'phase' && (
             <Select label={t('detail.subcontractPhase')} value={form.phaseLabel} onChange={(e) => setForm({ ...form, phaseLabel: e.target.value })}>

@@ -1,14 +1,14 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, Info, Layers, ShoppingCart, Briefcase,
-  Images, FileText, Video, History, Truck, Users, Car,
+  Images, FileText, Video, History, Truck, Users, Car, Package,
 } from 'lucide-react';
 import DetailSectionNav, { type DetailNavGroup } from './DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 
 export type ChantierTab =
-  | 'vue' | 'infos' | 'tranches' | 'galerie' | 'engins' | 'ouvriers' | 'chauffeurs' | 'pointage'
+  | 'vue' | 'infos' | 'tranches' | 'galerie' | 'engins' | 'materiel' | 'ouvriers' | 'chauffeurs' | 'pointage'
   | 'achats' | 'subcontractors' | 'documents' | 'cameras' | 'historique';
 
 export type ChantierNavItem = {
@@ -32,6 +32,7 @@ export function buildChantierNavGroups(
     drivers: number;
     galerie: number;
     engins: number;
+    materiel?: number;
     achats: number;
     documents: number;
     cameras: number;
@@ -55,6 +56,7 @@ export function buildChantierNavGroups(
         { id: 'ouvriers', label: t('tabs.workers'), icon: Users, badge: counts.workers || undefined },
         { id: 'chauffeurs', label: t('pages.drivers'), icon: Car, badge: counts.drivers || undefined },
         { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: counts.engins || undefined },
+        { id: 'materiel', label: t('tabs.materiel'), icon: Package, badge: counts.materiel || undefined },
       ],
     },
     {

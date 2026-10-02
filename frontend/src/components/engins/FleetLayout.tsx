@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, Truck, CalendarRange, Wrench, FolderOpen,
   PieChart, Calculator, Package, Landmark, KeyRound, GanttChartSquare,
-  Gauge, Undo2, Cog, Hammer, Fuel, Receipt, FileText, History,
+  Gauge, Undo2, Cog, Hammer, Fuel, Receipt, FileText, History, Warehouse,
 } from 'lucide-react';
 import { useI18n } from '../../i18n/I18nContext';
 
@@ -25,9 +25,16 @@ const FLEET_GROUPS: FleetGroup[] = [
     icon: Truck,
     items: [
       { to: '/engins?kind=engin', label: 'referentielEngins', icon: Truck },
-      { to: '/engins?kind=materiel', label: 'referentielMateriels', icon: Package },
       { to: '/engins?view=acquisitions', label: 'acquisitions', icon: Landmark },
       { to: '/engins?view=locations', label: 'locations', icon: KeyRound },
+    ],
+  },
+  {
+    id: 'materiel',
+    icon: Package,
+    items: [
+      { to: '/engins?kind=materiel', label: 'referentielMateriels', icon: Package },
+      { to: '/engins/stock', label: 'stock', icon: Warehouse },
     ],
   },
   {
@@ -68,7 +75,7 @@ function currentSection(pathname: string, search: string) {
   return `/engins?kind=${params.get('kind') === 'materiel' ? 'materiel' : 'engin'}`;
 }
 
-/** Barre de navigation du module Engins & Matériels : rubriques puis pages de la rubrique. */
+/** Barre de navigation du module Engins, avec une rubrique Matériel séparée. */
 export default function FleetLayout() {
   const { t } = useI18n();
   const location = useLocation();

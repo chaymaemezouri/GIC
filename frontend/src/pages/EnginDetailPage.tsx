@@ -645,7 +645,7 @@ export default function EnginDetailPage() {
                           <tr key={a.id}>
                             <Td mac>
                               {a.chantierId ? (
-                                <Link to={`/chantiers/${a.chantierId}?tab=engins`} className="mac-table-ref">{chantierTrancheLabel(a.chantierName, a.tranche)}</Link>
+                                <Link to={`/chantiers/${a.chantierId}?tab=${isMateriel ? 'materiel' : 'engins'}`} className="mac-table-ref">{chantierTrancheLabel(a.chantierName, a.tranche)}</Link>
                               ) : a.projectName || '—'}
                             </Td>
                             <Td mac className="text-[11px]">{formatDate(a.startDate)} → {a.endDate ? formatDate(a.endDate) : '…'}</Td>

@@ -9,6 +9,7 @@ const fleetAr: Dict = {
     materielGroupDesc: 'تسيير بالكمية : تخصيص، نقل، دخول، خروج وسجل حسب الورش',
     referentielEngins: 'مرجع الآليات',
     referentielMateriels: 'مرجع المعدات',
+    stock: 'المخزون والحركات',
     acquisitions: 'الممتلكات / الاقتناءات',
     locations: 'الكراء',
     affectations: 'التخصيصات',
@@ -30,9 +31,11 @@ const fleetAr: Dict = {
     exploitation: 'الاستغلال',
     maintenance: 'الصيانة والمصاريف',
     suivi: 'التتبع',
+    materiel: 'المعدات',
   },
   pages: {
-    affectationsSubtitle: 'تخصيص الآليات والمعدات للمشاريع والأوراش والأشطر، مع التكلفة المتوقعة والتكلفة الفعلية.',
+    affectationsSubtitle: 'تخصيص الآليات للمشاريع والأوراش والأشطر، مع التكلفة المتوقعة والتكلفة الفعلية.',
+    stockSubtitle: 'الكميات، المواقع في الأوراش، الدخول، الخروج، التحويل والسجل.',
     retoursSubtitle: 'الآليات الواجب إرجاعها أو فك تخصيصها: تاريخ الإرجاع، الحالة، العداد وإعادة الإتاحة.',
     utilisationSubtitle: 'تسجيل الاستعمال: الساعات والكيلومترات والعدادات حسب الآلية والورش والشطر.',
     carburantSubtitle: 'تعبئات الوقود والمستهلكات، محمّلة على الورش أو موزعة تلقائيًا.',
@@ -166,6 +169,7 @@ const fleetAr: Dict = {
     release: 'إعادة إلى الخدمة',
     resetSuggested: 'استرجاع التكلفة المقترحة',
     returnEquipment: 'إرجاع / فك التخصيص',
+    transferAssignment: 'نقل',
     today: 'اليوم',
   },
   calc: {
@@ -487,6 +491,7 @@ const fleetAr: Dict = {
     maintenance: 'إصلاح',
     retour: 'عودة من الإصلاح',
     onSite: 'في هذا الورش',
+    onTranche: 'في هذا الشطر',
     empty: 'لا توجد حركات كميات.',
   },
 };

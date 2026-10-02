@@ -24,14 +24,20 @@ export type TaskPhaseContext = {
   updatedAt?: string | null;
   phases?: TaskPhaseInput[] | null;
   subcontracts?: Array<{
+    id?: string;
+    chantierId?: string;
     scope?: string;
     phaseLabel?: string | null;
     companyName: string;
+    phone?: string | null;
     amount?: number | null;
     paidAmount?: number | null;
     startDate?: string | null;
     endDate?: string | null;
+    payments?: Array<{ id: string; amount: number; kind: string; paymentMode?: string | null; date: string }>;
   }>;
+  progressId?: string;
+  chantierId?: string;
 };
 
 export type TrackStepKind = 'start' | 'phase' | 'validation';

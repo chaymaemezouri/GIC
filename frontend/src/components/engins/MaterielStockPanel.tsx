@@ -22,6 +22,7 @@ type Move = {
 type Stock = { owned: number; depot: number; repair: number; sites: Site[]; movements: Move[] };
 type Chantier = { id: string; name: string };
 type Item = { id: string; code?: string | null; designation?: string | null };
+type Position = { enginId: string; code?: string | null; designation?: string | null; chantierId?: string; chantierName?: string; tranche?: string | null; quantity: number };
 
 const TYPES = ['entree', 'sortie', 'affectation', 'transfert', 'maintenance', 'retour'] as const;
 
@@ -32,13 +33,17 @@ function today() {
 export function MaterielStockPanel({
   enginId,
   chantierId,
+  tranche: fixedTranche,
+  onOpenDetail,
 }: {
   enginId?: string;
   chantierId?: string;
+  tranche?: string;
+  onOpenDetail?: (id: string, label: string) => void;
 }) {
   const { t } = useI18n();
   const [stock, setStock] = useState<Stock | null>(null);
-  const [positions, setPositions] = useState<{ enginId: string; code?: string | null; designation?: string | null; tranche?: string | null; quantity: number }[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [history, setHistory] = useState<Move[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [chantiers, setChantiers] = useState<Chantier[]>([]);
@@ -48,7 +53,7 @@ export function MaterielStockPanel({
   const [movementType, setMovementType] = useState<(typeof TYPES)[number]>('affectation');
   const [quantity, setQuantity] = useState('1');
   const [destId, setDestId] = useState(chantierId || '');
-  const [tranche, setTranche] = useState('');
+  const [tranche, setTranche] = useState(fixedTranche || '');
   const [source, setSource] = useState('depot');
   const [date, setDate] = useState(today());
   const [remark, setRemark] = useState('');
@@ -59,8 +64,11 @@ export function MaterielStockPanel({
     if (enginId) {
       api<Stock>(`/engins/${enginId}/mouvements`).then(setStock).catch(() => setStock(null));
     }
-    if (chantierId) {
-      api<{ rows: typeof positions; movements: Move[] }>(`/engins/materiel/positions?chantierId=${chantierId}`)
+    if (!enginId) {
+      const qs = new URLSearchParams();
+      if (chantierId) qs.set('chantierId', chantierId);
+      if (fixedTranche) qs.set('tranche', fixedTranche);
+      api<{ rows: Position[]; movements: Move[] }>(`/engins/materiel/positions${qs.toString() ? `?${qs}` : ''}`)
         .then((data) => {
           setPositions(data.rows || []);
           setHistory(data.movements || []);
@@ -69,7 +77,7 @@ export function MaterielStockPanel({
     }
   }
 
-  useEffect(() => { load(); }, [enginId, chantierId]);
+  useEffect(() => { load(); }, [enginId, chantierId, fixedTranche]);
 
   useEffect(() => {
     if (enginId) return;
@@ -175,11 +183,19 @@ export function MaterielStockPanel({
       )}
 
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[13px] font-medium text-gic-ink">{chantierId ? t('fleet.stock.onSite') : t('fleet.stock.title')}</p>
+        <p className="text-[13px] font-medium text-gic-ink">{fixedTranche ? t('fleet.stock.onTranche') : chantierId ? t('fleet.stock.onSite') : t('fleet.stock.title')}</p>
         <Btn onClick={() => { setOpen(true); if (activeId) refreshPickedStock(activeId).catch(() => {}); }}>{t('fleet.stock.newMovement')}</Btn>
       </div>
 
-      {chantierId && (
+      {!enginId && positions.length > 0 && (
+        <div className="mac-kpi-grid mac-kpi-grid-4">
+          <KpiCard title={t('fleet.kindPlural.materiel')} value={String(new Set(positions.map((row) => row.enginId)).size)} icon={Package} tone="violet" compact />
+          <KpiCard title={t('fleet.fields.quantity')} value={String(positions.reduce((s, row) => s + row.quantity, 0))} icon={Warehouse} tone="emerald" compact />
+          <KpiCard title={t('fleet.stock.history')} value={String(history.length)} icon={Wrench} compact />
+        </div>
+      )}
+
+      {!enginId && (
         positions.length === 0 ? (
           <p className="py-4 text-center text-[12px] text-gic-muted">{t('fleet.stock.empty')}</p>
         ) : (
@@ -187,16 +203,28 @@ export function MaterielStockPanel({
             <thead>
               <tr>
                 <Th mac>{t('fleet.fields.designation')}</Th>
+                {!chantierId && <Th mac>{t('fleet.fields.chantier')}</Th>}
                 <Th mac>{t('fleet.stock.tranche')}</Th>
                 <Th mac>{t('fleet.fields.quantity')}</Th>
               </tr>
             </thead>
             <tbody>
               {positions.map((row) => (
-                <tr key={`${row.enginId}-${row.tranche || ''}`}>
+                <tr
+                  key={`${row.enginId}-${row.chantierId || ''}-${row.tranche || ''}`}
+                  className={onOpenDetail ? 'cursor-pointer hover:bg-black/[0.02]' : undefined}
+                  onClick={() => onOpenDetail?.(row.enginId, row.designation || row.code || t('fleet.kind.materiel'))}
+                >
                   <Td mac>
-                    <Link to={`/engins/${row.enginId}`} className="mac-table-ref">{row.designation || row.code || '—'}</Link>
+                    <Link to={`/engins/${row.enginId}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{row.designation || row.code || '—'}</Link>
                   </Td>
+                  {!chantierId && (
+                    <Td mac>
+                      {row.chantierId ? (
+                        <Link to={`/chantiers/${row.chantierId}?tab=materiel`} className="hover:text-[#007aff]">{row.chantierName || row.chantierId}</Link>
+                      ) : '—'}
+                    </Td>
+                  )}
                   <Td mac>{row.tranche || '—'}</Td>
                   <Td mac className="font-medium">{row.quantity}</Td>
                 </tr>
@@ -219,7 +247,7 @@ export function MaterielStockPanel({
             {stock.sites.map((site) => (
               <tr key={`${site.chantierId}-${site.tranche || ''}`}>
                 <Td mac>
-                  <Link to={`/chantiers/${site.chantierId}?tab=engins`} className="hover:text-[#007aff]">{site.chantierName || site.chantierId}</Link>
+                  <Link to={`/chantiers/${site.chantierId}?tab=materiel`} className="hover:text-[#007aff]">{site.chantierName || site.chantierId}</Link>
                 </Td>
                 <Td mac>{site.tranche || '—'}</Td>
                 <Td mac className="font-medium">{site.quantity}</Td>
@@ -285,7 +313,7 @@ export function MaterielStockPanel({
                 <option value="">{t('common.choose')}</option>
                 {chantiers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
-              <Select label={t('fleet.stock.tranche')} value={tranche} onChange={(e) => setTranche(e.target.value)}>
+              <Select label={t('fleet.stock.tranche')} value={tranche} onChange={(e) => setTranche(e.target.value)} disabled={!!fixedTranche}>
                 <option value="">{t('common.choose')}</option>
                 {tranches.map((name) => <option key={name} value={name}>{name}</option>)}
               </Select>
@@ -297,7 +325,7 @@ export function MaterielStockPanel({
                 {chantiers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
               {destId && (
-                <Select label={t('fleet.stock.tranche')} value={tranche} onChange={(e) => setTranche(e.target.value)}>
+                <Select label={t('fleet.stock.tranche')} value={tranche} onChange={(e) => setTranche(e.target.value)} disabled={!!fixedTranche}>
                   <option value="">{t('common.choose')}</option>
                   {tranches.map((name) => <option key={name} value={name}>{name}</option>)}
                 </Select>

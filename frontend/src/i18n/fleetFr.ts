@@ -8,7 +8,8 @@ const fleetFr: Dict = {
     materielGroup: 'Matériel',
     materielGroupDesc: 'Gestion par quantité : affectation, transfert, entrées, sorties et historique par chantier',
     referentielEngins: 'Référentiel Engins',
-    referentielMateriels: 'Référentiel Matériels',
+    referentielMateriels: 'Référentiel Matériel',
+    stock: 'Stock & mouvements',
     acquisitions: 'Propriétés / Acquisitions',
     locations: 'Locations',
     affectations: 'Affectations',
@@ -30,9 +31,11 @@ const fleetFr: Dict = {
     exploitation: 'Exploitation',
     maintenance: 'Maintenance & dépenses',
     suivi: 'Suivi',
+    materiel: 'Matériel',
   },
   pages: {
-    affectationsSubtitle: 'Affectation des engins et matériels aux projets, chantiers et tranches, avec coût prévu et coût réel.',
+    affectationsSubtitle: 'Affectation des engins aux projets, chantiers et tranches, avec coût prévu et coût réel.',
+    stockSubtitle: 'Quantités, positions sur chantiers, entrées, sorties, transferts et historique.',
     retoursSubtitle: 'Engins à restituer ou à désaffecter : date de retour, état, compteur et remise à disposition.',
     utilisationSubtitle: 'Pointage d’utilisation : heures, kilomètres et compteurs par engin, chantier et tranche.',
     carburantSubtitle: 'Pleins de carburant et consommables, imputés au chantier ou répartis automatiquement.',
@@ -166,6 +169,7 @@ const fleetFr: Dict = {
     release: 'Remettre en service',
     resetSuggested: 'Reprendre le coût suggéré',
     returnEquipment: 'Retour / désaffectation',
+    transferAssignment: 'Transférer',
     today: 'Aujourd’hui',
   },
   calc: {
@@ -487,6 +491,7 @@ const fleetFr: Dict = {
     maintenance: 'Réparation',
     retour: 'Retour de réparation',
     onSite: 'Sur ce chantier',
+    onTranche: 'Sur cette tranche',
     empty: 'Aucun mouvement de quantité.',
   },
 };

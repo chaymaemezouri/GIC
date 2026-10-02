@@ -31,6 +31,7 @@ import {
   ChantierTranchesList, ChantierTrancheView, type TrancheListItem,
 } from '../components/ChantierTrancheView';
 import { SiteEnginsPanel } from '../components/engins/SiteEngins';
+import { SiteMaterielPanel } from '../components/engins/SiteMaterielPanel';
 import { EntityPickerPanel, enginToPickerItem } from '../components/EntityPickerPanel';
 import { PurchaseFormFields, emptyPurchaseForm, purchaseFormToBody, validatePurchaseForm, type PurchaseFormData } from '../components/PurchaseFormFields';
 import { MediaGallery } from '../components/MediaGallery';
@@ -786,7 +787,7 @@ export default function ChantierDetailPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Btn icon={Plus} size="sm" onClick={openMission}>{t('actions.newMission')}</Btn>
-                <Link to="/engins"><Btn variant="secondary" size="sm">{t('pages.equipment')}</Btn></Link>
+                <Link to="/engins?kind=engin"><Btn variant="secondary" size="sm">{t('pages.equipment')}</Btn></Link>
               </div>
             </div>
             {missions.length === 0 ? (
@@ -827,6 +828,10 @@ export default function ChantierDetailPage() {
           </div>
             }
           />
+        )}
+
+        {tab === 'materiel' && id && (
+          <SiteMaterielPanel chantierId={id} onChanged={load} />
         )}
 
         {tab === 'ouvriers' && id && (

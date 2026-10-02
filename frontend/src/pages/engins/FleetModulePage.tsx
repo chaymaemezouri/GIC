@@ -22,8 +22,8 @@ export default function FleetModulePage({ section }: { section: FleetSection }) 
   return (
     <div className="space-y-3">
       <PageHeader mac title={t(`fleet.nav.${section}`)} subtitle={t(`fleet.pages.${section}Subtitle`)} backTo={false} />
-      {section === 'affectations' && <AssignmentsPanel toolbar showKpis />}
-      {section === 'retours' && <AssignmentsPanel toolbar showKpis initialStatus="actifs" returnFocus />}
+      {section === 'affectations' && <AssignmentsPanel toolbar showKpis lockKind="engin" />}
+      {section === 'retours' && <AssignmentsPanel toolbar showKpis initialStatus="actifs" returnFocus lockKind="engin" />}
       {section === 'utilisation' && <UsagePanel toolbar showKpis />}
       {section === 'carburant' && <FuelPanel toolbar showKpis />}
       {section === 'depenses' && <ExpensePanel toolbar showKpis />}

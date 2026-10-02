@@ -33,6 +33,12 @@ function day(value?: string | null) {
   return value ? String(value).slice(0, 10) : '';
 }
 
+export function subcontractTotals(contracts: Array<{ amount?: number | null; paidAmount?: number | null }>) {
+  const prix = contracts.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const avance = contracts.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
+  return { prix, avance, reste: Math.max(0, prix - avance) };
+}
+
 export function draftFromContracts(contracts: TaskSubcontract[], labels: string[]): SubDraft {
   const whole = contracts.find((item) => item.scope !== 'phase');
   const phases: SubDraft['phases'] = {};
@@ -48,8 +54,18 @@ export function draftFromContracts(contracts: TaskSubcontract[], labels: string[
     };
   }
   if (whole) {
+    for (const label of labels) {
+      phases[label] = {
+        on: true,
+        companyName: whole.companyName,
+        phone: whole.phone || '',
+        amount: whole.amount != null ? String(whole.amount) : '',
+        startDate: day(whole.startDate),
+        endDate: day(whole.endDate),
+      };
+    }
     return {
-      mode: 'task',
+      mode: 'phases',
       companyName: whole.companyName,
       phone: whole.phone || '',
       amount: whole.amount != null ? String(whole.amount) : '',
@@ -68,12 +84,14 @@ export function TaskSubcontractEditor({
   contracts,
   onChange,
   onPaid,
+  hidePayments,
 }: {
   draft: SubDraft;
   labels: string[];
   contracts: TaskSubcontract[];
   onChange: (draft: SubDraft) => void;
   onPaid?: (updated: TaskSubcontract) => void;
+  hidePayments?: boolean;
 }) {
   const { t } = useI18n();
   const set = (patch: Partial<SubDraft>) => onChange({ ...draft, ...patch });
@@ -86,23 +104,15 @@ export function TaskSubcontractEditor({
       </div>
       <Select label={t('detail.subcontractScope')} value={draft.mode} onChange={(e) => set({ mode: e.target.value as SubDraft['mode'] })}>
         <option value="none">{t('detail.stStandard')}</option>
-        <option value="task">{t('detail.stWholeTask')}</option>
-        <option value="phases">{t('detail.stSomePhases')}</option>
+        <option value="phases">{t('detail.stCompletePhases')}</option>
       </Select>
-      {draft.mode === 'task' && (
-        <ContractFields
-          companyName={draft.companyName}
-          phone={draft.phone}
-          amount={draft.amount}
-          startDate={draft.startDate}
-          endDate={draft.endDate}
-          onChange={(patch) => set(patch)}
-          contract={contracts.find((item) => item.scope !== 'phase')}
-          onPaid={onPaid}
-        />
+      {draft.mode === 'phases' && labels.length === 0 && (
+        <p className="text-[12px] text-gic-muted">{t('detail.stNeedPhases')}</p>
       )}
-      {draft.mode === 'phases' && labels.map((label) => {
+      {draft.mode === 'phases' && labels.map((label, index) => {
         const row = draft.phases[label] || { on: false, companyName: '', phone: '', amount: '', startDate: '', endDate: '' };
+        const phaseContract = contracts.find((item) => item.scope === 'phase' && item.phaseLabel === label);
+        const wholeContract = contracts.find((item) => item.scope !== 'phase');
         return (
           <div key={label} className="rounded-md border border-black/[0.06] p-2 space-y-2">
             <label className="flex items-center gap-2 text-[12px] font-medium">
@@ -126,7 +136,7 @@ export function TaskSubcontractEditor({
                 startDate={row.startDate}
                 endDate={row.endDate}
                 onChange={(patch) => set({ phases: { ...draft.phases, [label]: { ...row, ...patch } } })}
-                contract={contracts.find((item) => item.scope === 'phase' && item.phaseLabel === label)}
+                contract={hidePayments ? undefined : (phaseContract || (index === 0 ? wholeContract : undefined))}
                 onPaid={onPaid}
               />
             )}

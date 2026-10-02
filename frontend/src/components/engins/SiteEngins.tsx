@@ -6,7 +6,8 @@ import { COST_CATEGORIES, type CostBucket, type CostLine } from '../../lib/engin
 import { useI18n } from '../../i18n/I18nContext';
 import { Btn, KpiCard, MacSearch, Modal, TableWrap, Tabs, Td, Th } from '../ui';
 import { AssignmentsPanel } from './Assignments';
-import { MaterielStockPanel } from './MaterielStockPanel';
+import { UsagePanel } from './Logs';
+import { SiteTransferPanel } from './SiteTransferPanel';
 
 export type SiteEnginCosts = {
   total: number;
@@ -22,9 +23,9 @@ type CostsPayload = {
   lines: CostLine[];
 };
 
-type Section = 'affectation' | 'materiel' | 'missions' | 'synthese';
+type Section = 'affectation' | 'transfer' | 'retours' | 'utilisation' | 'missions' | 'synthese';
 
-/** Onglet chantier : affectation, missions et synthèse des coûts, avec le fonctionnement propre aux engins. */
+/** Onglet chantier : affectation, missions et synthèse des coûts des engins uniquement. */
 export function SiteEnginsPanel({
   chantierId,
   tranche,
@@ -44,7 +45,6 @@ export function SiteEnginsPanel({
   const [reloadKey, setReloadKey] = useState(0);
   const [costs, setCosts] = useState<CostsPayload | null>(null);
   const [openEnginId, setOpenEnginId] = useState<string | null>(null);
-  const [kind, setKind] = useState('');
   const [query, setQuery] = useState('');
 
   useEffect(() => {
@@ -59,11 +59,11 @@ export function SiteEnginsPanel({
   const synthesisRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (costs?.byEngin || []).filter((row) => {
-      if (kind && row.enginKind !== kind) return false;
+      if (row.enginKind === 'materiel') return false;
       if (needle && !row.enginLabel.toLowerCase().includes(needle)) return false;
       return true;
     });
-  }, [costs, kind, query]);
+  }, [costs, query]);
   const openEngin = costs?.byEngin.find((row) => row.enginId === openEnginId) || null;
   const openLines = useMemo(
     () => (costs?.lines || []).filter((line) => line.enginId === openEnginId),
@@ -78,7 +78,9 @@ export function SiteEnginsPanel({
         onChange={(id) => setSection(id as Section)}
         tabs={[
           { id: 'affectation', label: t('siteOps.affectation') },
-          { id: 'materiel', label: t('fleet.nav.materielGroup') },
+          { id: 'transfer', label: t('siteOps.transfer') },
+          { id: 'retours', label: t('fleet.nav.retours') },
+          { id: 'utilisation', label: t('fleet.nav.utilisation') },
           { id: 'missions', label: missionsCount ? `${t('msg.equipmentMissionsTitle')} (${missionsCount})` : t('msg.equipmentMissionsTitle') },
           { id: 'synthese', label: t('siteOps.synthesis') },
         ]}
@@ -87,6 +89,7 @@ export function SiteEnginsPanel({
       {section === 'affectation' && (
         <AssignmentsPanel
           site
+          lockKind="engin"
           initialStatus="actifs"
           fixed={{ chantierId, tranche }}
           defaults={{ chantierId, tranche: tranche || '' }}
@@ -96,7 +99,38 @@ export function SiteEnginsPanel({
         />
       )}
 
-      {section === 'materiel' && <MaterielStockPanel chantierId={chantierId} />}
+      {section === 'transfer' && (
+        <SiteTransferPanel
+          kind="engin"
+          chantierId={chantierId}
+          tranche={tranche}
+          onChanged={() => { setReloadKey((k) => k + 1); onChanged?.(); }}
+        />
+      )}
+
+      {section === 'retours' && (
+        <AssignmentsPanel
+          site
+          lockKind="engin"
+          initialStatus="actifs"
+          returnFocus
+          fixed={{ chantierId, tranche }}
+          defaults={{ chantierId, tranche: tranche || '' }}
+          lock={{ chantier: true, tranche: !!tranche }}
+          reloadKey={reloadKey}
+          onChanged={() => { setReloadKey((k) => k + 1); onChanged?.(); }}
+        />
+      )}
+
+      {section === 'utilisation' && (
+        <UsagePanel
+          toolbar
+          showKpis
+          fixed={{ chantierId, tranche }}
+          reloadKey={reloadKey}
+          onChanged={() => { setReloadKey((k) => k + 1); onChanged?.(); }}
+        />
+      )}
 
       {section === 'missions' && missions}
 
@@ -104,22 +138,6 @@ export function SiteEnginsPanel({
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <MacSearch value={query} onChange={setQuery} placeholder={t('fleet.filters.searchEngin')} className="w-56" />
-            <div className="flex gap-1">
-              {[
-                { id: '', label: t('fleet.filters.allKinds') },
-                { id: 'engin', label: t('fleet.kind.engin') },
-                { id: 'materiel', label: t('fleet.kind.materiel') },
-              ].map((option) => (
-                <button
-                  key={option.id || 'all'}
-                  type="button"
-                  className={`rounded-full px-3 py-1 text-[12px] ${kind === option.id ? 'bg-[#007aff] text-white' : 'bg-black/[0.04] text-gic-ink'}`}
-                  onClick={() => setKind(option.id)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
           </div>
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
             <KpiCard title={t('fleet.fields.engin')} value={synthesisRows.length} icon={Truck} compact />
@@ -133,7 +151,6 @@ export function SiteEnginsPanel({
               <thead>
                 <tr>
                   <Th mac>{t('fleet.fields.engin')}</Th>
-                  <Th mac>{t('fleet.fields.kind')}</Th>
                   <Th mac>{t('columns.workDays')}</Th>
                   <Th mac>{t('columns.hours')}</Th>
                   {COST_CATEGORIES.map((cat) => <Th mac key={cat} className="text-right">{t(`fleet.costCat.${cat}`)}</Th>)}
@@ -144,7 +161,6 @@ export function SiteEnginsPanel({
                 {synthesisRows.map((row) => (
                   <tr key={row.enginId} className="cursor-pointer hover:bg-black/[0.02]" onClick={() => setOpenEnginId(row.enginId)}>
                     <Td mac><span className="mac-table-ref">{row.enginLabel}</span></Td>
-                    <Td mac className="mac-table-muted">{row.enginKind ? t(`fleet.kind.${row.enginKind}`) : '—'}</Td>
                     <Td mac>{row.days.toFixed(1)}</Td>
                     <Td mac>{row.hours.toFixed(1)} h</Td>
                     {COST_CATEGORIES.map((cat) => <Td mac key={cat} className="text-right">{row[cat] ? formatMad(row[cat]) : '—'}</Td>)}

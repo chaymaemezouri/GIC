@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, Circle, Flag, Play, ShieldCheck } from 'lucide-react';
-import { formatDate, formatMad } from '../lib/api';
+import { api, formatDate, formatMad } from '../lib/api';
+import { appAlert } from '../lib/dialog';
 import {
   getPhaseDefinition,
   nearestStage,
@@ -10,7 +11,9 @@ import {
   type TaskPhaseContext,
   type TrackStep,
 } from '../lib/progressPhases';
-import { Btn, Modal } from './ui';
+import { Btn, Input, Modal, Select } from './ui';
+import { PaymentBox, type TaskSubcontract } from './TaskSubcontractEditor';
+import { useI18n } from '../i18n/I18nContext';
 
 export { resolveStages, nearestStage, progressStatus, DEFAULT_PROGRESS_STAGES as PROGRESS_STAGES } from '../lib/progressPhases';
 
@@ -20,6 +23,7 @@ type Props = {
   size?: 'sm' | 'md';
   showLabel?: boolean;
   task?: TaskPhaseContext;
+  onTaskUpdated?: () => void;
 };
 
 const STATUS_LABEL = {
@@ -38,7 +42,7 @@ function workDoneCount(percent: number, workSteps: TrackStep[]) {
   return workSteps.filter((s) => percent >= s.percent).length;
 }
 
-export default function ProgressSteps({ percent, onChange, size = 'md', showLabel = true, task }: Props) {
+export default function ProgressSteps({ percent, onChange, size = 'md', showLabel = true, task, onTaskUpdated }: Props) {
   const p = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
   const status = progressStatus(p);
   const interactive = typeof onChange === 'function';
@@ -116,6 +120,10 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
                     interactive || task ? 'mac-steps-dot-interactive' : '',
                   ].filter(Boolean).join(' ')}
                   onClick={() => {
+                    if (task && step.kind === 'phase') {
+                      openPhasePopup(stage);
+                      return;
+                    }
                     if (interactive && onChange) {
                       if (isStart) {
                         onChange(0);
@@ -137,9 +145,25 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
                     <Check size={sm ? 9 : 11} strokeWidth={3} />
                   ) : null}
                 </button>
-                {step.kind === 'phase' && task?.subcontracts?.some((item) => item.scope !== 'phase' || item.phaseLabel === step.label) && (
-                  <span className="mac-steps-st">ST</span>
-                )}
+                {step.kind === 'phase' && (() => {
+                  const phaseSt = task?.subcontracts?.find((item) => item.scope === 'phase' && item.phaseLabel === step.label);
+                  const taskSt = task?.subcontracts?.find((item) => item.scope !== 'phase');
+                  const st = phaseSt || taskSt;
+                  if (!st) return null;
+                  const prix = Number(st.amount || 0);
+                  const avance = Number(st.paidAmount || 0);
+                  const reste = Math.max(0, prix - avance);
+                  return (
+                    <span className="mac-steps-st">
+                      ST
+                      {phaseSt && (
+                        <span className="mac-steps-st-fig">
+                          {formatMad(prix)} · {formatMad(avance)} · {formatMad(reste)}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })()}
                 </div>
               </div>
             );
@@ -224,16 +248,26 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
               {selectedPhase.description && (
                 <p className="text-[12px] text-gic-muted leading-relaxed mt-2">{selectedPhase.description}</p>
               )}
-              {task.subcontracts?.filter((item) => item.scope !== 'phase' || item.phaseLabel === selectedPhase.label).map((item) => (
-                <div key={`${item.companyName}-${item.phaseLabel || 'task'}`} className="mt-3 rounded-lg border border-[#6d28d9]/20 bg-[rgba(124,58,237,0.06)] p-3 text-[12px]">
-                  <p className="font-semibold text-[#6d28d9]">ST · {item.scope === 'phase' ? item.phaseLabel : 'Tâche entière'}</p>
-                  <p className="mt-1">{item.companyName} · {formatMad(item.amount || 0)}</p>
-                  <p className="text-gic-muted">Payé {formatMad(item.paidAmount || 0)} · Reste {formatMad(Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)))}</p>
-                  {(item.startDate || item.endDate) && (
-                    <p className="text-gic-muted">{item.startDate ? formatDate(item.startDate) : '…'} → {item.endDate ? formatDate(item.endDate) : '…'}</p>
+              {selectedStatus && onChange && !selectedIsStart && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedStatus !== 'done' && (
+                    <Btn type="button" onClick={() => onChange(popupStage!)}>Marquer la phase</Btn>
+                  )}
+                  {selectedStatus === 'done' && (
+                    <Btn type="button" variant="secondary" onClick={() => {
+                      const i = track.findIndex((s) => s.percent === popupStage);
+                      onChange(track[i - 1]?.percent ?? 0);
+                    }}>Revenir en arrière</Btn>
                   )}
                 </div>
-              ))}
+              )}
+              {selectedStep?.kind === 'phase' && (
+                <PhaseSubcontractPanel
+                  task={task}
+                  phaseLabel={selectedPhase.label}
+                  onSaved={onTaskUpdated}
+                />
+              )}
               {selectedStatus === 'done' && task.updatedAt && (
                 <p className="text-[10px] text-gic-muted mt-3 pt-3 border-t border-black/[0.06]">
                   Dernière mise à jour : {formatDate(task.updatedAt)}
@@ -262,7 +296,7 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
               {/* 2. Phases */}
               <section>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-gic-muted mb-1.5 px-0.5">
-                  2 · Phases de travail ({workDone}/{workSteps.length})
+                  2 · Phases du lot ({workDone}/{workSteps.length})
                 </p>
                 <div className="space-y-1 rounded-xl border border-black/[0.06] overflow-hidden divide-y divide-black/[0.05]">
                   {workSteps.length === 0 ? (
@@ -395,5 +429,171 @@ function StepRow({
         <p className="text-[10px] text-gic-muted">{STATUS_LABEL[status]}</p>
       </div>
     </button>
+  );
+}
+
+function toContract(item: NonNullable<TaskPhaseContext['subcontracts']>[number], chantierId?: string): TaskSubcontract {
+  return {
+    id: item.id || '',
+    chantierId: item.chantierId || chantierId,
+    companyName: item.companyName,
+    phone: item.phone,
+    amount: item.amount,
+    paidAmount: item.paidAmount,
+    scope: item.scope,
+    phaseLabel: item.phaseLabel,
+    startDate: item.startDate,
+    endDate: item.endDate,
+    payments: item.payments,
+  };
+}
+
+function PhaseSubcontractPanel({
+  task,
+  phaseLabel,
+  onSaved,
+}: {
+  task: TaskPhaseContext;
+  phaseLabel: string;
+  onSaved?: () => void;
+}) {
+  const { t } = useI18n();
+  const NEW = '__new__';
+  const NONE = '__none__';
+  const existing = task.subcontracts || [];
+  const current = existing.find((item) => item.scope === 'phase' && item.phaseLabel === phaseLabel)
+    || existing.find((item) => item.scope !== 'phase');
+  const [companies, setCompanies] = useState<string[]>([]);
+  const [choice, setChoice] = useState(current ? current.companyName : NONE);
+  const [newName, setNewName] = useState('');
+  const [amount, setAmount] = useState(current?.amount != null ? String(current.amount) : '');
+  const [phone, setPhone] = useState(current?.phone || '');
+  const [startDate, setStartDate] = useState(current?.startDate ? String(current.startDate).slice(0, 10) : '');
+  const [endDate, setEndDate] = useState(current?.endDate ? String(current.endDate).slice(0, 10) : '');
+  const [saving, setSaving] = useState(false);
+  const [contract, setContract] = useState<TaskSubcontract | null>(current?.id ? toContract(current, task.chantierId) : null);
+
+  useEffect(() => {
+    if (!task.chantierId) return;
+    api<{ companyName: string }[]>(`/chantiers/${task.chantierId}/subcontractors`)
+      .then((rows) => {
+        const names = [...new Set([
+          ...rows.map((row) => row.companyName),
+          ...existing.map((row) => row.companyName),
+        ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+        setCompanies(names);
+      })
+      .catch(() => setCompanies([...new Set(existing.map((row) => row.companyName).filter(Boolean))]));
+  }, [task.chantierId, phaseLabel]);
+
+  useEffect(() => {
+    const found = existing.find((item) => item.scope === 'phase' && item.phaseLabel === phaseLabel)
+      || existing.find((item) => item.scope !== 'phase');
+    setChoice(found ? found.companyName : NONE);
+    setNewName('');
+    setAmount(found?.amount != null ? String(found.amount) : '');
+    setPhone(found?.phone || '');
+    setStartDate(found?.startDate ? String(found.startDate).slice(0, 10) : '');
+    setEndDate(found?.endDate ? String(found.endDate).slice(0, 10) : '');
+    setContract(found?.id ? toContract(found, task.chantierId) : null);
+  }, [phaseLabel, task.progressId]);
+
+  const optionNames = [...new Set([
+    ...companies,
+    ...existing.map((row) => row.companyName),
+    current?.companyName || '',
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const stOn = choice !== NONE;
+
+  async function save() {
+    if (!task.progressId) return;
+    if (stOn && !companyName) {
+      await appAlert(t('fields.companyRequired'));
+      return;
+    }
+    setSaving(true);
+    try {
+      const others = existing.filter((item) => item.scope === 'phase' && item.phaseLabel !== phaseLabel);
+      const phases = others.map((item) => ({
+        label: item.phaseLabel,
+        companyName: item.companyName,
+        phone: item.phone || '',
+        amount: Number(item.amount || 0),
+        startDate: item.startDate || null,
+        endDate: item.endDate || null,
+      }));
+      if (stOn) {
+        phases.push({
+          label: phaseLabel,
+          companyName,
+          phone,
+          amount: Number(amount || 0),
+          startDate: startDate || null,
+          endDate: endDate || null,
+        });
+      }
+      const whole = existing.find((item) => item.scope !== 'phase');
+      let updated: TaskSubcontract[];
+      if (whole && !others.length) {
+        updated = await api<TaskSubcontract[]>(`/chantiers/progress/${task.progressId}/subcontract`, {
+          method: 'PUT',
+          body: JSON.stringify(stOn
+            ? { mode: 'task', task: { companyName, phone, amount: Number(amount || 0), startDate: startDate || null, endDate: endDate || null } }
+            : { mode: 'none' }),
+        });
+      } else {
+        updated = await api<TaskSubcontract[]>(`/chantiers/progress/${task.progressId}/subcontract`, {
+          method: 'PUT',
+          body: JSON.stringify(phases.length ? { mode: 'phases', phases } : { mode: 'none' }),
+        });
+      }
+      const saved = updated.find((item) => item.scope === 'phase' && item.phaseLabel === phaseLabel)
+        || updated.find((item) => item.scope !== 'phase');
+      setContract(saved ? toContract(saved, task.chantierId) : null);
+      onSaved?.();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-[#6d28d9]/20 bg-[rgba(124,58,237,0.06)] p-3 space-y-2">
+      <p className="text-[12px] font-semibold text-[#6d28d9]">{t('detail.stPickCompany')}</p>
+      <Select
+        label={t('detail.stExistingCompany')}
+        value={choice}
+        onChange={(e) => setChoice(e.target.value)}
+      >
+        <option value={NONE}>{t('detail.stStandard')}</option>
+        {optionNames.map((name) => (
+          <option key={name} value={name}>{name}</option>
+        ))}
+        <option value={NEW}>{t('detail.stNewCompany')}</option>
+      </Select>
+      {choice === NEW && (
+        <Input
+          label={t('fields.companyRequired')}
+          required
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+        />
+      )}
+      {stOn && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input label={t('fields.phone')} value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <Input label={t('detail.stAmount')} type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <Input label={t('detail.stFrom')} type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          <Input label={t('detail.stTo')} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+      )}
+      {task.progressId && (
+        <Btn type="button" onClick={save} disabled={saving}>{t('detail.stSaveContract')}</Btn>
+      )}
+      {contract?.id && contract.chantierId && (
+        <PaymentBox contract={contract} onPaid={(updated) => { setContract(updated); onSaved?.(); }} />
+      )}
+    </div>
   );
 }

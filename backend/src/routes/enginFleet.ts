@@ -157,6 +157,7 @@ router.get('/assignments', async (req, res) => {
   const tranche = text(req.query.tranche);
   const projectId = text(req.query.projectId);
   const status = text(req.query.status);
+  const kind = text(req.query.kind);
   const q = text(req.query.q);
   const from = queryDate(req, 'dateFrom');
   const to = queryDate(req, 'dateTo');
@@ -166,6 +167,7 @@ router.get('/assignments', async (req, res) => {
       enginId ? { enginId } : {},
       chantierId ? { chantierId } : {},
       tranche ? { tranche } : {},
+      kind ? { engin: { kind } } : {},
       projectId ? { OR: [{ projectId }, { chantier: { projectId } }] } : {},
       to ? { startDate: { lte: to } } : {},
       from ? { OR: [{ endDate: null }, { endDate: { gte: from } }] } : {},

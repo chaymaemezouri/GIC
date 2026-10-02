@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, Check, Download, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Truck, Undo, Undo2, Wallet } from 'lucide-react';
+import { ArrowLeftRight, CalendarClock, Check, Download, Pencil, Plus, Printer, SlidersHorizontal, Trash2, Truck, Undo, Undo2, Wallet } from 'lucide-react';
 import { api, formatDate, formatMad } from '../../lib/api';
 import { appAlert } from '../../lib/dialog';
 import { printRows, type PrintColumn } from '../../lib/listPrint';
@@ -101,6 +101,7 @@ export function AssignmentModal({
   assignment,
   defaults,
   lock,
+  lockKind,
 }: {
   open: boolean;
   onClose: () => void;
@@ -108,6 +109,7 @@ export function AssignmentModal({
   assignment?: Assignment | null;
   defaults?: Partial<AssignmentForm>;
   lock?: { engin?: boolean; chantier?: boolean; tranche?: boolean };
+  lockKind?: 'engin' | 'materiel';
 }) {
   const { t } = useI18n();
   const { engins, chantiers } = useFleetRefs();
@@ -210,7 +212,11 @@ export function AssignmentModal({
               value={form.enginId}
               disabled={isEdit || lock?.engin}
               onChange={(enginId) => { setCostTouched(false); setForm((f) => ({ ...f, enginId })); }}
-              filter={(x: EnginRef) => x.status !== 'hors_service' && x.status !== 'restitue'}
+              filter={(x: EnginRef) =>
+                x.status !== 'hors_service'
+                && x.status !== 'restitue'
+                && (!lockKind || x.kind === lockKind)
+              }
             />
           </div>
           <ChantierTrancheFields
@@ -380,6 +386,80 @@ export function ReturnModal({
   );
 }
 
+export function TransferAssignmentModal({
+  assignment,
+  onClose,
+  onSaved,
+}: {
+  assignment: Assignment | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { t } = useI18n();
+  const { chantiers } = useFleetRefs();
+  const [chantierId, setChantierId] = useState('');
+  const [tranche, setTranche] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!assignment) return;
+    setChantierId(assignment.chantierId || '');
+    setTranche(assignment.tranche || '');
+  }, [assignment]);
+
+  if (!assignment) return null;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!chantierId) return;
+    setSaving(true);
+    try {
+      await api(`/engins/assignments/${assignment.id}/transfer`, {
+        method: 'POST',
+        body: JSON.stringify({ chantierId, tranche: tranche || null }),
+      });
+      onSaved();
+      onClose();
+    } catch (err) {
+      await appAlert(errorMessage(err, t('common.error')));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      title={t('fleet.actions.transferAssignment')}
+      onClose={onClose}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>{t('common.cancel')}</Btn>
+          <Btn form="fleet-transfer-form" type="submit" disabled={saving || !chantierId}>{t('siteOps.transferMove')}</Btn>
+        </>
+      }
+    >
+      <form id="fleet-transfer-form" onSubmit={submit}>
+        <p className="mb-3 text-[12px] text-gic-muted">
+          {assignment.enginLabel} — {assignment.chantier?.name || '—'}
+          {assignment.tranche ? ` / ${assignment.tranche}` : ''}
+        </p>
+        <FormGrid>
+          <div className="sm:col-span-2">
+            <ChantierTrancheFields
+              required
+              chantierId={chantierId}
+              tranche={tranche}
+              chantiers={chantiers}
+              onChange={(n) => { setChantierId(n.chantierId); setTranche(n.tranche); }}
+            />
+          </div>
+        </FormGrid>
+      </form>
+    </Modal>
+  );
+}
+
 type ListResponse = {
   items: Assignment[];
   totals: { planned: number; actual: number; total: number };
@@ -397,6 +477,7 @@ export function AssignmentsPanel({
   defaults,
   lock,
   reloadKey,
+  lockKind,
 }: {
   fixed?: { enginId?: string; chantierId?: string; tranche?: string; projectId?: string };
   initialStatus?: string;
@@ -409,6 +490,7 @@ export function AssignmentsPanel({
   defaults?: Partial<AssignmentForm>;
   lock?: { engin?: boolean; chantier?: boolean; tranche?: boolean };
   reloadKey?: number;
+  lockKind?: 'engin' | 'materiel';
 }) {
   const { t } = useI18n();
   const { engins, chantiers } = useFleetRefs();
@@ -423,9 +505,10 @@ export function AssignmentsPanel({
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Assignment | null>(null);
   const [returning, setReturning] = useState<Assignment | null>(null);
+  const [transferring, setTransferring] = useState<Assignment | null>(null);
   const [deleting, setDeleting] = useState<Assignment | null>(null);
   const [siteQuery, setSiteQuery] = useState('');
-  const [siteKind, setSiteKind] = useState('');
+  const [siteKind, setSiteKind] = useState(lockKind || '');
   const [siteMode, setSiteMode] = useState('');
   const [siteStatus, setSiteStatus] = useState('');
   const [siteTranche, setSiteTranche] = useState('');
@@ -445,8 +528,9 @@ export function AssignmentsPanel({
         q,
         dateFrom,
         dateTo,
+        kind: lockKind,
       }),
-    [fixed.enginId, fixed.chantierId, fixed.tranche, fixed.projectId, enginId, chantierId, status, q, dateFrom, dateTo],
+    [fixed.enginId, fixed.chantierId, fixed.tranche, fixed.projectId, enginId, chantierId, status, q, dateFrom, dateTo, lockKind],
   );
 
   function load() {
@@ -515,6 +599,7 @@ export function AssignmentsPanel({
     if (!site) return items;
     const needle = siteQuery.trim().toLowerCase();
     return items.filter((a) => {
+      if (lockKind && a.engin?.kind && a.engin.kind !== lockKind) return false;
       if (needle && !`${a.enginLabel} ${a.responsible || ''} ${a.tranche || ''}`.toLowerCase().includes(needle)) return false;
       if (siteKind && a.engin?.kind !== siteKind) return false;
       if (siteMode && a.mode !== siteMode) return false;
@@ -523,7 +608,7 @@ export function AssignmentsPanel({
       if (siteTranche && siteTranche !== '__whole' && a.tranche !== siteTranche) return false;
       return true;
     });
-  }, [site, items, siteQuery, siteKind, siteMode, siteStatus, siteTranche]);
+  }, [site, items, siteQuery, siteKind, siteMode, siteStatus, siteTranche, lockKind]);
   const showEngin = !fixed.enginId;
   const showChantier = !fixed.chantierId;
 
@@ -600,11 +685,11 @@ export function AssignmentsPanel({
                 {filtersOpen && (
                   <div className="mac-filter-menu" role="menu">
                     <p className="mac-filter-menu-section">{t('fleet.fields.kind')}</p>
-                    {[
-                      { id: '', label: t('fleet.filters.allKinds') },
+                    {([
+                      ...(lockKind ? [] : [{ id: '', label: t('fleet.filters.allKinds') }]),
                       { id: 'engin', label: t('fleet.kind.engin') },
-                      { id: 'materiel', label: t('fleet.kind.materiel') },
-                    ].map((option) => (
+                      ...(lockKind === 'engin' ? [] : [{ id: 'materiel', label: t('fleet.kind.materiel') }]),
+                    ] as { id: string; label: string }[]).map((option) => (
                       <button key={option.id || 'all-kind'} type="button" className={`mac-filter-menu-item${siteKind === option.id ? ' mac-filter-menu-item-active' : ''}`} onClick={() => setSiteKind(option.id)}>
                         <span>{option.label}</span>
                         {siteKind === option.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
@@ -699,7 +784,7 @@ export function AssignmentsPanel({
                 {!site && <SelectAllTh selection={selection} rows={items} />}
                 {showEngin && <Th mac>{t('fleet.fields.engin')}</Th>}
                 {showChantier && !site && <Th mac>{t('fleet.fields.chantierTranche')}</Th>}
-                {site && <Th mac>{t('fleet.fields.kind')}</Th>}
+                {site && !lockKind && <Th mac>{t('fleet.fields.kind')}</Th>}
                 {!showChantier && <Th mac>{t('fleet.fields.tranche')}</Th>}
                 <Th mac>{t('fleet.fields.period')}</Th>
                 <Th mac>{t('fleet.fields.costMethod')}</Th>
@@ -727,7 +812,7 @@ export function AssignmentsPanel({
                       {a.tranche && <span className="block text-[10px] mac-table-muted">{a.tranche}</span>}
                     </Td>
                   )}
-                  {site && <Td mac className="mac-table-muted">{a.engin?.kind ? t(`fleet.kind.${a.engin.kind}`) : '—'}</Td>}
+                  {site && !lockKind && <Td mac className="mac-table-muted">{a.engin?.kind ? t(`fleet.kind.${a.engin.kind}`) : '—'}</Td>}
                   {!showChantier && <Td mac>{a.tranche || <span className="mac-table-muted">{t('fleet.hints.wholeChantier')}</span>}</Td>}
                   <Td mac className="text-[11px] whitespace-nowrap">
                     {formatDate(a.startDate)} → {a.endDate ? formatDate(a.endDate) : '…'}
@@ -752,7 +837,10 @@ export function AssignmentsPanel({
                   <Td mac className="mac-td-actions">
                     <div className="mac-actions">
                       {!a.returnedAt && (
-                        <MacActionBtn icon={Undo2} tone={a.status === 'a_retourner' || returnFocus ? 'red' : 'teal'} title={t('fleet.actions.returnEquipment')} onClick={() => setReturning(a)} />
+                        <>
+                          <MacActionBtn icon={ArrowLeftRight} tone="blue" title={t('fleet.actions.transferAssignment')} onClick={() => setTransferring(a)} />
+                          <MacActionBtn icon={Undo2} tone={a.status === 'a_retourner' || returnFocus ? 'red' : 'teal'} title={t('fleet.actions.returnEquipment')} onClick={() => setReturning(a)} />
+                        </>
                       )}
                       <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => { setEditing(a); setModalOpen(true); }} />
                       <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => setDeleting(a)} />
@@ -789,10 +877,12 @@ export function AssignmentsPanel({
         assignment={editing}
         defaults={{ ...defaults, enginId: fixed.enginId || defaults?.enginId || '', chantierId: fixed.chantierId || defaults?.chantierId || '', tranche: fixed.tranche || defaults?.tranche || '' }}
         lock={lock ?? { engin: !!fixed.enginId, chantier: !!fixed.chantierId, tranche: !!fixed.tranche }}
+        lockKind={lockKind}
         onClose={() => setModalOpen(false)}
         onSaved={changed}
       />
       <ReturnModal assignment={returning} onClose={() => setReturning(null)} onSaved={changed} />
+      <TransferAssignmentModal assignment={transferring} onClose={() => setTransferring(null)} onSaved={changed} />
       <DeleteMotifModal
         open={!!deleting}
         title={t('fleet.actions.deleteAssignment')}

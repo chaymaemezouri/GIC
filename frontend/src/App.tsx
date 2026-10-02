@@ -29,6 +29,7 @@ const FleetModulePage = lazy(() => import('./pages/engins/FleetModulePage'));
 const FleetPlanningPage = lazy(() => import('./pages/engins/FleetPlanningPage'));
 const FleetCostsPage = lazy(() => import('./pages/engins/FleetCostsPage'));
 const FleetDashboardPage = lazy(() => import('./pages/engins/FleetDashboardPage'));
+const MaterielStockPage = lazy(() => import('./pages/engins/MaterielStockPage'));
 const FleetLayout = lazy(() => import('./components/engins/FleetLayout'));
 const DocumentsPage = lazy(() => import('./pages/DocumentsPage'));
 const DocumentDetailPage = lazy(() => import('./pages/DocumentDetailPage'));
@@ -180,6 +181,7 @@ export default function App() {
                 <Route path="engins/planning" element={<FleetPlanningPage />} />
                 <Route path="engins/couts" element={<FleetCostsPage />} />
                 <Route path="engins/tableau-de-bord" element={<FleetDashboardPage />} />
+                <Route path="engins/stock" element={<MaterielStockPage />} />
               </Route>
               <Route path="engins/:id" element={<EnginDetailPage />} />
               <Route path="documents" element={<DocumentsPage />} />

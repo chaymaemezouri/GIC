@@ -4,7 +4,7 @@ import {
   Wallet, CreditCard, Calculator, Truck, ShoppingCart, HardHat, Cog,
   Clock, Banknote, TrendingUp, TrendingDown, FolderOpen, Settings, Shield,
   BookOpen, UserCog, FileSearch, Bell, Car, Coins, Contact,
-  Package, CalendarRange, PieChart,
+  Package, CalendarRange, PieChart, Warehouse, Undo2, Gauge,
 } from 'lucide-react';
 import { isNavPathVisible } from './featureFlags';
 
@@ -90,6 +90,8 @@ export const navbarGroups: NavGroup[] = [
       { to: '/engins/tableau-de-bord', label: 'fleet.nav.dashboard', icon: PieChart },
       { to: '/engins?kind=engin', label: 'fleet.nav.referentielEngins', icon: Truck },
       { to: '/engins/affectations', label: 'fleet.nav.affectations', icon: CalendarRange },
+      { to: '/engins/retours', label: 'fleet.nav.retours', icon: Undo2 },
+      { to: '/engins/utilisation', label: 'fleet.nav.utilisation', icon: Gauge },
       { to: '/engins/entretien', label: 'fleet.nav.entretien', icon: Cog },
       { to: '/engins/couts', label: 'fleet.nav.couts', icon: Calculator },
     ],
@@ -101,6 +103,7 @@ export const navbarGroups: NavGroup[] = [
     icon: Package,
     items: [
       { to: '/engins?kind=materiel', label: 'fleet.nav.referentielMateriels', icon: Package },
+      { to: '/engins/stock', label: 'fleet.nav.stock', icon: Warehouse },
     ],
   },
   {

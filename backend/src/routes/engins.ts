@@ -1512,25 +1512,43 @@ async function stockOf(enginId: string) {
 
 router.get('/materiel/positions', async (req, res) => {
   const chantierId = req.query.chantierId ? String(req.query.chantierId) : '';
+  const tranche = req.query.tranche ? String(req.query.tranche) : '';
   const engins = await prisma.engin.findMany({
     where: { kind: 'materiel' },
     select: { id: true, code: true, designation: true, quantity: true },
     orderBy: { designation: 'asc' },
   });
-  const rows: Array<{ enginId: string; code: string | null; designation: string | null; tranche: string | null; quantity: number }> = [];
+  const rows: Array<{ enginId: string; code: string | null; designation: string | null; chantierId: string; chantierName: string; tranche: string | null; quantity: number }> = [];
   const movements = [];
   for (const engin of engins) {
     const stock = await stockOf(engin.id);
     if (!stock || !stock.snap.ok) continue;
-    const sites = chantierId ? stock.snap.sites.filter((site) => site.chantierId === chantierId) : stock.snap.sites;
+    let sites = chantierId ? stock.snap.sites.filter((site) => site.chantierId === chantierId) : stock.snap.sites;
+    if (tranche) sites = sites.filter((site) => (site.tranche || '') === tranche);
     for (const site of sites) {
-      rows.push({ enginId: engin.id, code: engin.code, designation: engin.designation, tranche: site.tranche, quantity: site.quantity });
+      rows.push({
+        enginId: engin.id,
+        code: engin.code,
+        designation: engin.designation,
+        chantierId: site.chantierId,
+        chantierName: site.chantierId,
+        tranche: site.tranche,
+        quantity: site.quantity,
+      });
     }
-    const related = chantierId
-      ? stock.movements.filter((move) => move.chantierId === chantierId || move.fromChantierId === chantierId)
-      : stock.movements;
+    const related = stock.movements.filter((move) => {
+      if (chantierId && move.chantierId !== chantierId && move.fromChantierId !== chantierId) return false;
+      if (tranche && (move.tranche || '') !== tranche && (move.fromTranche || '') !== tranche) return false;
+      return true;
+    });
     movements.push(...related.map((move) => ({ ...move, engin: { id: engin.id, code: engin.code, designation: engin.designation } })));
   }
+  const names = await prisma.chantier.findMany({
+    where: { id: { in: [...new Set(rows.map((row) => row.chantierId))] } },
+    select: { id: true, name: true },
+  });
+  const nameOf = new Map(names.map((row) => [row.id, row.name]));
+  for (const row of rows) row.chantierName = nameOf.get(row.chantierId) || row.chantierId;
   movements.sort((a, b) => +new Date(b.date) - +new Date(a.date));
   res.json({ rows, movements });
 });
