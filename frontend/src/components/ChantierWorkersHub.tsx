@@ -106,6 +106,7 @@ export function ChantierWorkersHub({
   scope = 'workers',
   fixedTranche,
   onChanged,
+  onlySection,
 }: {
   chantierId: string;
   assignments: SiteAssignment[];
