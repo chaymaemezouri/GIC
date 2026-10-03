@@ -1,23 +1,60 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Package, Wallet } from 'lucide-react';
+import { ArrowRightLeft, Eye, Package, Plus, Undo2, Wallet, Warehouse } from 'lucide-react';
 import { api, formatDate, formatMad } from '../../lib/api';
 import { appAlert } from '../../lib/dialog';
-import { COST_CATEGORIES, todayISO, type CostBucket, type CostLine } from '../../lib/engins';
+import { COST_CATEGORIES, formatQty, parseIntQty, todayISO, type CostBucket, type CostLine } from '../../lib/engins';
 import { useI18n } from '../../i18n/I18nContext';
-import { Btn, Input, KpiCard, MacDateInput, MacSearch, Modal, Select, TableWrap, Tabs, Td, Th } from '../ui';
+import { Btn, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, Modal, Select, TableWrap, Tabs, Td, Th } from '../ui';
 import { MaterielStockPanel } from './MaterielStockPanel';
 import { SiteTransferPanel } from './SiteTransferPanel';
 
-type Section = 'quantite' | 'affectation' | 'repartition' | 'transfer' | 'desaffectation' | 'synthese';
-type Position = { enginId: string; code?: string | null; designation?: string | null; chantierId?: string; chantierName?: string; tranche?: string | null; quantity: number };
-type Item = { id: string; code?: string | null; designation?: string | null };
-type Stock = { depot: number; sites: { chantierId: string; tranche?: string | null; quantity: number }[] };
+type Position = {
+  enginId: string;
+  code?: string | null;
+  designation?: string | null;
+  chantierId?: string;
+  chantierName?: string;
+  tranche?: string | null;
+  quantity: number;
+  depot?: number;
+  owned?: number;
+  repair?: number;
+};
+type Catalog = {
+  id: string;
+  code?: string | null;
+  designation?: string | null;
+  depot: number;
+  owned: number;
+  repair: number;
+  onSite: number;
+};
+type Move = {
+  id: string;
+  movementType: string;
+  quantity: number;
+  date: string;
+  tranche?: string | null;
+  fromTranche?: string | null;
+  remark?: string | null;
+  engin?: { id: string; code?: string | null; designation?: string | null };
+  chantier?: { id: string; name: string } | null;
+  fromChantier?: { id: string; name: string } | null;
+};
+type Chantier = { id: string; name: string };
+type Section = 'affectation' | 'transfer' | 'retours' | 'synthese';
+type ActionKind = 'assign' | 'return' | 'split' | 'transfer';
 type CostsPayload = {
   totals: CostBucket;
   byEngin: (CostBucket & { enginId: string; enginLabel: string; enginKind: string; days: number; hours: number })[];
   lines: CostLine[];
 };
+
+function intField(raw: string) {
+  const n = parseInt(String(raw).replace(',', '.'), 10);
+  return Number.isFinite(n) && n > 0 ? String(n) : '';
+}
 
 function labelOf(row: { designation?: string | null; code?: string | null }) {
   return row.designation || row.code || '—';
@@ -37,25 +74,30 @@ export function SiteMaterielPanel({
   onChanged?: () => void;
 }) {
   const { t } = useI18n();
-  const [section, setSection] = useState<Section>('quantite');
+  const [section, setSection] = useState<Section>('affectation');
   const [reload, setReload] = useState(0);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [catalog, setCatalog] = useState<Catalog[]>([]);
+  const [history, setHistory] = useState<Move[]>([]);
+  const [tranches, setTranches] = useState<string[]>([]);
+  const [destTranches, setDestTranches] = useState<string[]>([]);
+  const [chantiers, setChantiers] = useState<Chantier[]>([]);
+  const [query, setQuery] = useState('');
+  const [saving, setSaving] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailLabel, setDetailLabel] = useState('');
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [items, setItems] = useState<Item[]>([]);
-  const [tranches, setTranches] = useState<string[]>([]);
+  const [action, setAction] = useState<ActionKind | null>(null);
+  const [row, setRow] = useState<Position | null>(null);
   const [picked, setPicked] = useState('');
   const [qty, setQty] = useState('1');
   const [destTranche, setDestTranche] = useState(tranche || '');
   const [fromPlace, setFromPlace] = useState(tranche || '');
+  const [destChantierId, setDestChantierId] = useState('');
   const [date, setDate] = useState(todayISO());
   const [remark, setRemark] = useState('');
-  const [stock, setStock] = useState<Stock | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [returnQty, setReturnQty] = useState<Record<string, string>>({});
   const [costs, setCosts] = useState<CostsPayload | null>(null);
   const [openEnginId, setOpenEnginId] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [returnQty, setReturnQty] = useState<Record<string, string>>({});
 
   function bump() {
     setReload((n) => n + 1);
@@ -65,26 +107,37 @@ export function SiteMaterielPanel({
   useEffect(() => {
     const qs = new URLSearchParams({ chantierId });
     if (tranche) qs.set('tranche', tranche);
-    api<{ rows: Position[] }>(`/engins/materiel/positions?${qs}`)
-      .then((data) => setPositions(data.rows || []))
-      .catch(() => setPositions([]));
+    api<{ rows: Position[]; movements: Move[]; catalog?: Catalog[] }>(`/engins/materiel/positions?${qs}`)
+      .then((data) => {
+        setPositions(data.rows || []);
+        setHistory(data.movements || []);
+        setCatalog(data.catalog || []);
+      })
+      .catch(() => {
+        setPositions([]);
+        setHistory([]);
+        setCatalog([]);
+      });
   }, [chantierId, tranche, reload]);
 
   useEffect(() => {
-    api<{ items: Item[] }>('/engins?kind=materiel&limit=200&sort=designation')
-      .then((data) => setItems(data.items || []))
-      .catch(() => setItems([]));
     api<{ name: string }[]>(`/chantiers/${chantierId}/tranches`)
-      .then((rows) => setTranches((rows || []).map((row) => row.name)))
+      .then((rows) => setTranches((rows || []).map((r) => r.name)))
       .catch(() => setTranches([]));
+    api<{ items: Chantier[] }>('/chantiers?limit=200&sort=name&order=asc')
+      .then((data) => setChantiers((data.items || []).filter((c) => c.id !== chantierId)))
+      .catch(() => setChantiers([]));
   }, [chantierId]);
 
   useEffect(() => {
-    if (!picked) { setStock(null); return; }
-    api<Stock>(`/engins/${picked}/mouvements`)
-      .then((data) => setStock({ depot: data.depot, sites: data.sites || [] }))
-      .catch(() => setStock(null));
-  }, [picked, reload]);
+    if (action !== 'transfer' || !destChantierId) {
+      setDestTranches([]);
+      return;
+    }
+    api<{ name: string }[]>(`/chantiers/${destChantierId}/tranches`)
+      .then((rows) => setDestTranches((rows || []).map((r) => r.name)))
+      .catch(() => setDestTranches([]));
+  }, [destChantierId, action]);
 
   useEffect(() => {
     if (section !== 'synthese') return;
@@ -95,17 +148,22 @@ export function SiteMaterielPanel({
       .catch(() => setCosts(null));
   }, [section, chantierId, tranche, reload]);
 
-  const onSiteForPicked = useMemo(
-    () => (stock?.sites || []).filter((row) => row.chantierId === chantierId && (!tranche || (row.tranche || '') === tranche)),
-    [stock, chantierId, tranche],
-  );
-  const onSiteQty = onSiteForPicked.reduce((s, row) => s + row.quantity, 0);
-  const placeOptions = useMemo(() => {
-    const names = new Set<string>(['']);
-    for (const name of tranches) names.add(name);
-    for (const row of positions) names.add(placeKey(row.tranche));
-    return [...names];
-  }, [tranches, positions]);
+  const pickedStock = catalog.find((item) => item.id === picked);
+  const totalQty = positions.reduce((s, p) => s + p.quantity, 0);
+  const articleCount = new Set(positions.map((p) => p.enginId)).size;
+  const depotAvailable = catalog.reduce((s, item) => s + (item.depot || 0), 0);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return positions;
+    return positions.filter((p) => `${labelOf(p)} ${p.code || ''} ${p.tranche || ''}`.toLowerCase().includes(needle));
+  }, [positions, query]);
+
+  const filteredHistory = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return history;
+    return history.filter((m) => `${m.engin?.designation || ''} ${m.movementType} ${m.remark || ''}`.toLowerCase().includes(needle));
+  }, [history, query]);
 
   const synthesisRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -121,52 +179,91 @@ export function SiteMaterielPanel({
     [costs, openEnginId],
   );
 
+  function openAssign() {
+    setAction('assign');
+    setRow(null);
+    setPicked('');
+    setQty('1');
+    setDestTranche(tranche || '');
+    setDate(todayISO());
+    setRemark('');
+  }
+
+  function openRow(kind: ActionKind, target: Position) {
+    setAction(kind);
+    setRow(target);
+    setPicked(target.enginId);
+    setQty(kind === 'return' || kind === 'transfer' || kind === 'split' ? String(target.quantity) : '1');
+    setFromPlace(placeKey(target.tranche));
+    setDestTranche(kind === 'split' ? (tranche || '') : kind === 'transfer' ? '' : (target.tranche || tranche || ''));
+    setDestChantierId('');
+    setDate(todayISO());
+    setRemark('');
+  }
+
   async function postMove(enginId: string, body: Record<string, unknown>) {
     await api(`/engins/${enginId}/mouvements`, { method: 'POST', body: JSON.stringify(body) });
   }
 
-  async function assign(e: React.FormEvent) {
-    e.preventDefault();
+  async function saveAction() {
     if (!picked) return;
-    setSaving(true);
-    try {
-      await postMove(picked, {
-        movementType: 'affectation',
-        quantity: Number(qty),
-        date,
-        remark: remark || null,
-        chantierId,
-        tranche: tranche || destTranche || null,
-      });
-      setQty('1');
-      setRemark('');
-      bump();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function split(e: React.FormEvent) {
-    e.preventDefault();
-    if (!picked) return;
-    if (placeKey(fromPlace) === placeKey(destTranche)) {
-      await appAlert(t('siteOps.transferSamePlace'));
+    const n = parseIntQty(qty);
+    if (n == null) {
+      await appAlert(t('fleet.stock.integerQty'));
       return;
     }
     setSaving(true);
     try {
-      await postMove(picked, {
-        movementType: 'transfert',
-        quantity: Number(qty),
-        date,
-        remark: remark || null,
-        fromChantierId: chantierId,
-        fromTranche: fromPlace || null,
-        chantierId,
-        tranche: tranche || destTranche || null,
-      });
+      if (action === 'assign') {
+        await postMove(picked, {
+          movementType: 'affectation',
+          quantity: n,
+          date,
+          remark: remark || null,
+          chantierId,
+          tranche: tranche || destTranche || null,
+        });
+      } else if (action === 'return' && row) {
+        await postMove(row.enginId, {
+          movementType: 'desaffectation',
+          quantity: n,
+          date,
+          remark: remark || null,
+          fromChantierId: chantierId,
+          fromTranche: row.tranche || null,
+        });
+      } else if (action === 'split') {
+        if (placeKey(fromPlace) === placeKey(destTranche)) {
+          await appAlert(t('fleet.stock.samePlace'));
+          return;
+        }
+        await postMove(picked, {
+          movementType: 'transfert',
+          quantity: n,
+          date,
+          remark: remark || null,
+          fromChantierId: chantierId,
+          fromTranche: fromPlace || null,
+          chantierId,
+          tranche: destTranche || null,
+        });
+      } else if (action === 'transfer') {
+        if (!destChantierId) {
+          await appAlert(t('common.error'));
+          return;
+        }
+        await postMove(picked, {
+          movementType: 'transfert',
+          quantity: n,
+          date,
+          remark: remark || null,
+          fromChantierId: chantierId,
+          fromTranche: row?.tranche || fromPlace || null,
+          chantierId: destChantierId,
+          tranche: destTranche || null,
+        });
+      }
+      setAction(null);
       setQty('1');
       setRemark('');
       bump();
@@ -177,18 +274,21 @@ export function SiteMaterielPanel({
     }
   }
 
-  async function unassign(row: Position) {
-    const key = `${row.enginId}::${placeKey(row.tranche)}`;
-    const n = Number(returnQty[key] ?? row.quantity);
-    if (!Number.isFinite(n) || n <= 0) return;
+  async function returnFromRow(target: Position) {
+    const key = `${target.enginId}::${placeKey(target.tranche)}`;
+    const n = parseIntQty(returnQty[key] ?? target.quantity);
+    if (n == null) {
+      await appAlert(t('fleet.stock.integerQty'));
+      return;
+    }
     setSaving(true);
     try {
-      await postMove(row.enginId, {
+      await postMove(target.enginId, {
         movementType: 'desaffectation',
         quantity: n,
         date,
         fromChantierId: chantierId,
-        fromTranche: row.tranche || null,
+        fromTranche: target.tranche || null,
       });
       bump();
     } catch (err) {
@@ -198,158 +298,122 @@ export function SiteMaterielPanel({
     }
   }
 
-  const placeLabel = (value: string) => value || t('fleet.stock.wholeSite');
+  function moveSource(move: Move) {
+    if (move.movementType === 'affectation') return t('fleet.stock.depot');
+    if (move.movementType === 'desaffectation') return move.fromChantier?.name || move.chantier?.name || '—';
+    if (move.movementType === 'transfert') return `${move.fromChantier?.name || '—'}${move.fromTranche ? ` · ${move.fromTranche}` : ''}`;
+    if (move.movementType === 'sortie') return move.chantier?.name || t('fleet.stock.depot');
+    if (move.movementType === 'maintenance') return move.fromChantier?.name || t('fleet.stock.depot');
+    if (move.movementType === 'retour') return t('fleet.stock.repair');
+    return '—';
+  }
+
+  function moveDest(move: Move) {
+    if (move.movementType === 'desaffectation') return t('fleet.stock.depot');
+    if (move.movementType === 'sortie') return '—';
+    if (move.movementType === 'maintenance') return t('fleet.stock.repair');
+    return `${move.chantier?.name || t('fleet.stock.depot')}${move.tranche ? ` · ${move.tranche}` : ''}`;
+  }
+
+  const actionTitle =
+    action === 'assign' ? t('fleet.stock.assignCta')
+    : action === 'return' ? t('fleet.stock.returnQty')
+    : action === 'split' ? t('fleet.stock.changeTranche')
+    : action === 'transfer' ? t('fleet.stock.transferTo')
+    : '';
+
+  const assignChoices = catalog;
 
   return (
-    <div className="mt-2 space-y-3">
+    <div className="mt-2 space-y-4">
       <Tabs
         mac
         active={section}
         onChange={(id) => setSection(id as Section)}
         tabs={[
-          { id: 'quantite', label: t('fleet.stock.title') },
           { id: 'affectation', label: t('siteOps.affectation') },
-          { id: 'repartition', label: t('fleet.stock.repartition') },
           { id: 'transfer', label: t('siteOps.transfer') },
-          { id: 'desaffectation', label: t('fleet.stock.desaffectation') },
+          { id: 'retours', label: t('fleet.nav.retours') },
           { id: 'synthese', label: t('siteOps.synthesis') },
         ]}
       />
 
-      {section === 'quantite' && (
-        <MaterielStockPanel
-          chantierId={chantierId}
-          tranche={tranche}
-          hideMovementForm
-          onOpenDetail={(id, label) => { setDetailId(id); setDetailLabel(label); }}
-        />
-      )}
-
       {section === 'affectation' && (
-        <form onSubmit={assign} className="space-y-3">
-          <p className="text-[12px] text-gic-muted">{t('fleet.stock.assignHint')}</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Select label={t('fleet.kind.materiel')} value={picked} onChange={(e) => setPicked(e.target.value)} required>
-              <option value="">{t('common.choose')}</option>
-              {items.map((item) => <option key={item.id} value={item.id}>{labelOf(item)}</option>)}
-            </Select>
-            <Input label={t('fleet.fields.quantity')} type="number" min="0.01" step="1" required value={qty} onChange={(e) => setQty(e.target.value)} />
-            {!tranche && (
-              <Select label={t('fleet.stock.tranche')} value={destTranche} onChange={(e) => setDestTranche(e.target.value)}>
-                <option value="">{t('fleet.stock.wholeSite')}</option>
-                {tranches.map((name) => <option key={name} value={name}>{name}</option>)}
-              </Select>
-            )}
-            <div>
-              <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('columns.date')}</p>
-              <MacDateInput value={date} onChange={setDate} placeholder={t('columns.date')} />
-            </div>
-            <Input label={t('fields.remark')} value={remark} onChange={(e) => setRemark(e.target.value)} />
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <MacSearch value={query} onChange={setQuery} placeholder={t('fleet.stock.search')} className="w-56" />
+            <Btn type="button" icon={Plus} onClick={openAssign}>{t('fleet.stock.assignCta')}</Btn>
           </div>
-          {stock && (
-            <p className="text-[12px] text-gic-muted">{t('fleet.stock.depotAvailable', { qty: stock.depot })}</p>
-          )}
-          <Btn type="submit" disabled={saving || !picked}>{t('fleet.stock.assignQty')}</Btn>
-        </form>
-      )}
-
-      {section === 'repartition' && (
-        <div className="space-y-3">
-          <p className="text-[12px] text-gic-muted">{t('fleet.stock.splitHint')}</p>
-          {positions.length === 0 ? (
-            <p className="py-6 text-center text-[12px] text-gic-muted">{t('fleet.stock.emptyPositions')}</p>
+          <div className="mac-kpi-grid mac-kpi-grid-4">
+            <KpiCard title={t('fleet.stock.articles')} value={String(articleCount)} icon={Package} tone="violet" compact />
+            <KpiCard title={t('fleet.stock.qtyHere')} value={formatQty(totalQty)} icon={Package} tone="emerald" compact />
+            <KpiCard title={t('fleet.stock.availableDepot')} value={formatQty(depotAvailable)} icon={Warehouse} tone="blue" compact />
+            <KpiCard title={t('fleet.stock.history')} value={String(history.length)} icon={ArrowRightLeft} compact />
+          </div>
+          {filtered.length === 0 ? (
+            <EmptyState
+              title={query ? t('fleet.stock.emptyPositions') : t('fleet.stock.emptyAction')}
+              action={!query ? <Btn type="button" onClick={openAssign}>{t('fleet.stock.assignCta')}</Btn> : undefined}
+            />
           ) : (
             <TableWrap mac>
               <thead>
                 <tr>
                   <Th mac>{t('fleet.fields.designation')}</Th>
-                  <Th mac>{t('fleet.stock.tranche')}</Th>
-                  <Th mac>{t('fleet.fields.quantity')}</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map((row) => (
-                  <tr key={`${row.enginId}-${placeKey(row.tranche)}`}>
-                    <Td mac><Link to={`/engins/${row.enginId}`} className="mac-table-ref">{labelOf(row)}</Link></Td>
-                    <Td mac>{row.tranche || t('fleet.stock.wholeSite')}</Td>
-                    <Td mac className="font-medium">{row.quantity}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </TableWrap>
-          )}
-          <form onSubmit={split} className="grid gap-3 rounded-lg border border-black/[0.06] p-3 sm:grid-cols-2">
-            <Select label={t('fleet.kind.materiel')} value={picked} onChange={(e) => setPicked(e.target.value)} required>
-              <option value="">{t('common.choose')}</option>
-              {[...new Set(positions.map((row) => row.enginId))].map((id) => {
-                const row = positions.find((p) => p.enginId === id)!;
-                return <option key={id} value={id}>{labelOf(row)}</option>;
-              })}
-            </Select>
-            <Input label={t('fleet.fields.quantity')} type="number" min="0.01" step="1" required value={qty} onChange={(e) => setQty(e.target.value)} />
-            <Select label={t('fleet.stock.fromPlace')} value={fromPlace} onChange={(e) => setFromPlace(e.target.value)}>
-              {placeOptions.map((name) => <option key={name || 'whole'} value={name}>{placeLabel(name)}</option>)}
-            </Select>
-            <Select label={t('fleet.stock.toPlace')} value={destTranche} onChange={(e) => setDestTranche(e.target.value)}>
-              {placeOptions.map((name) => <option key={`to-${name || 'whole'}`} value={name}>{placeLabel(name)}</option>)}
-            </Select>
-            <div>
-              <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('columns.date')}</p>
-              <MacDateInput value={date} onChange={setDate} placeholder={t('columns.date')} />
-            </div>
-            <Input label={t('fields.remark')} value={remark} onChange={(e) => setRemark(e.target.value)} />
-            {picked && <p className="sm:col-span-2 text-[12px] text-gic-muted">{t('fleet.stock.onSiteQty', { qty: onSiteQty })}</p>}
-            <div className="sm:col-span-2">
-              <Btn type="submit" disabled={saving || !picked}>{t('fleet.stock.repartition')}</Btn>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {section === 'transfer' && (
-        <SiteTransferPanel kind="materiel" chantierId={chantierId} tranche={tranche} onChanged={bump} />
-      )}
-
-      {section === 'desaffectation' && (
-        <div className="space-y-3">
-          <p className="text-[12px] text-gic-muted">{t('fleet.stock.returnHint')}</p>
-          <div>
-            <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('columns.date')}</p>
-            <MacDateInput value={date} onChange={setDate} placeholder={t('columns.date')} className="w-36" />
-          </div>
-          {positions.length === 0 ? (
-            <p className="py-6 text-center text-[12px] text-gic-muted">{t('fleet.stock.emptyPositions')}</p>
-          ) : (
-            <TableWrap mac>
-              <thead>
-                <tr>
-                  <Th mac>{t('fleet.fields.designation')}</Th>
-                  <Th mac>{t('fleet.stock.tranche')}</Th>
-                  <Th mac>{t('fleet.fields.quantity')}</Th>
-                  <Th mac>{t('fleet.stock.returnQty')}</Th>
+                  <Th mac>{t('fleet.fields.code')}</Th>
+                  {!tranche && <Th mac>{t('fleet.stock.tranche')}</Th>}
+                  <Th mac className="mac-th-num">{t('fleet.stock.qtyHere')}</Th>
+                  <Th mac className="mac-th-num">{t('fleet.stock.qtyDepot')}</Th>
                   <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
                 </tr>
               </thead>
               <tbody>
-                {positions.map((row) => {
-                  const key = `${row.enginId}::${placeKey(row.tranche)}`;
+                {filtered.map((p) => {
+                  const key = `${p.enginId}::${placeKey(p.tranche)}`;
                   return (
                     <tr key={key}>
-                      <Td mac><Link to={`/engins/${row.enginId}`} className="mac-table-ref">{labelOf(row)}</Link></Td>
-                      <Td mac>{row.tranche || t('fleet.stock.wholeSite')}</Td>
-                      <Td mac className="font-medium">{row.quantity}</Td>
                       <Td mac>
-                        <Input
-                          type="number"
-                          min="0.01"
-                          max={row.quantity}
-                          step="1"
-                          value={returnQty[key] ?? String(row.quantity)}
-                          onChange={(e) => setReturnQty((cur) => ({ ...cur, [key]: e.target.value }))}
-                        />
+                        <Link to={`/engins/${p.enginId}`} className="mac-table-ref">{labelOf(p)}</Link>
                       </Td>
+                      <Td mac className="mac-table-muted">{p.code || '—'}</Td>
+                      {!tranche && <Td mac>{p.tranche || t('fleet.stock.wholeSite')}</Td>}
+                      <Td mac className="mac-td-num font-semibold">{formatQty(p.quantity)}</Td>
+                      <Td mac className="mac-td-num mac-table-muted">{p.depot != null ? formatQty(p.depot) : '—'}</Td>
                       <Td mac className="mac-td-actions">
-                        <Btn variant="secondary" disabled={saving} onClick={() => unassign(row)}>{t('fleet.stock.desaffectation')}</Btn>
+                        <div className="flex justify-end gap-1">
+                          <MacActionBtn
+                            icon={Eye}
+                            tone="blue"
+                            title={t('fleet.stock.detail')}
+                            onClick={() => { setDetailId(p.enginId); setDetailLabel(labelOf(p)); }}
+                          />
+                          <MacActionBtn
+                            icon={Plus}
+                            tone="teal"
+                            title={t('fleet.stock.assignMore')}
+                            onClick={() => { openAssign(); setPicked(p.enginId); setDestTranche(p.tranche || tranche || ''); }}
+                          />
+                          <MacActionBtn
+                            icon={Undo2}
+                            tone="orange"
+                            title={t('fleet.stock.returnQty')}
+                            onClick={() => openRow('return', p)}
+                          />
+                          <MacActionBtn
+                            icon={ArrowRightLeft}
+                            tone="gray"
+                            title={t('fleet.stock.transferTo')}
+                            onClick={() => openRow('transfer', p)}
+                          />
+                          {!tranche && (
+                            <MacActionBtn
+                              icon={Package}
+                              tone="gray"
+                              title={t('fleet.stock.changeTranche')}
+                              onClick={() => openRow('split', p)}
+                            />
+                          )}
+                        </div>
                       </Td>
                     </tr>
                   );
@@ -357,17 +421,58 @@ export function SiteMaterielPanel({
               </tbody>
             </TableWrap>
           )}
+          <div className="space-y-2">
+            <p className="text-[13px] font-medium text-gic-ink">{t('fleet.stock.history')}</p>
+            {filteredHistory.length === 0 ? (
+              <p className="py-6 text-center text-[12px] text-gic-muted">{t('fleet.stock.empty')}</p>
+            ) : (
+              <TableWrap mac>
+                <thead>
+                  <tr>
+                    <Th mac>{t('columns.date')}</Th>
+                    <Th mac>{t('fleet.fields.designation')}</Th>
+                    <Th mac>{t('fleet.stock.type')}</Th>
+                    <Th mac className="mac-th-num">{t('fleet.fields.quantity')}</Th>
+                    <Th mac>{t('fleet.stock.source')}</Th>
+                    <Th mac>{t('fleet.stock.destination')}</Th>
+                    <Th mac>{t('fields.remark')}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredHistory.map((move) => (
+                    <tr key={move.id}>
+                      <Td mac>{formatDate(move.date)}</Td>
+                      <Td mac>
+                        {move.engin ? (
+                          <Link to={`/engins/${move.engin.id}`} className="mac-table-ref">{labelOf(move.engin)}</Link>
+                        ) : '—'}
+                      </Td>
+                      <Td mac>{t(`fleet.stock.${move.movementType}`)}</Td>
+                      <Td mac className="mac-td-num font-medium">{formatQty(move.quantity)}</Td>
+                      <Td mac className="mac-table-muted">{moveSource(move)}</Td>
+                      <Td mac className="mac-table-muted">{moveDest(move)}</Td>
+                      <Td mac className="mac-table-muted">{move.remark || '—'}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </TableWrap>
+            )}
+          </div>
         </div>
+      )}
+
+      {section === 'transfer' && (
+        <SiteTransferPanel kind="materiel" chantierId={chantierId} tranche={tranche} onChanged={bump} />
       )}
 
       {section === 'synthese' && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <MacSearch value={query} onChange={setQuery} placeholder={t('fleet.filters.searchEngin')} className="w-56" />
+            <MacSearch value={query} onChange={setQuery} placeholder={t('fleet.stock.search')} className="w-56" />
           </div>
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-            <KpiCard title={t('fleet.kindPlural.materiel')} value={synthesisRows.length} icon={Package} compact />
-            <KpiCard title={t('fleet.fields.quantity')} value={positions.reduce((s, row) => s + row.quantity, 0)} icon={Package} compact />
+          <div className="mac-kpi-grid mac-kpi-grid-4">
+            <KpiCard title={t('fleet.stock.articles')} value={String(synthesisRows.length || articleCount)} icon={Package} tone="violet" compact />
+            <KpiCard title={t('fleet.stock.qtyHere')} value={formatQty(totalQty)} icon={Package} tone="emerald" compact />
             <KpiCard title={t('fleet.costCat.total')} value={formatMad(synthesisRows.reduce((s, row) => s + row.total, 0))} icon={Wallet} compact />
           </div>
           {!costs || synthesisRows.length === 0 ? (
@@ -387,6 +492,28 @@ export function SiteMaterielPanel({
                     <Td mac><span className="mac-table-ref">{row.enginLabel}</span></Td>
                     {COST_CATEGORIES.map((cat) => <Td mac key={cat} className="text-right">{row[cat] ? formatMad(row[cat]) : '—'}</Td>)}
                     <Td mac className="text-right font-medium">{formatMad(row.total)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </TableWrap>
+          )}
+          {filtered.length > 0 && (
+            <TableWrap mac>
+              <thead>
+                <tr>
+                  <Th mac>{t('fleet.fields.designation')}</Th>
+                  {!tranche && <Th mac>{t('fleet.stock.tranche')}</Th>}
+                  <Th mac className="mac-th-num">{t('fleet.stock.qtyHere')}</Th>
+                  <Th mac className="mac-th-num">{t('fleet.stock.qtyDepot')}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((p) => (
+                  <tr key={`${p.enginId}::${placeKey(p.tranche)}`}>
+                    <Td mac><Link to={`/engins/${p.enginId}`} className="mac-table-ref">{labelOf(p)}</Link></Td>
+                    {!tranche && <Td mac>{p.tranche || t('fleet.stock.wholeSite')}</Td>}
+                    <Td mac className="mac-td-num font-semibold">{formatQty(p.quantity)}</Td>
+                    <Td mac className="mac-td-num">{p.depot != null ? formatQty(p.depot) : '—'}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -427,10 +554,150 @@ export function SiteMaterielPanel({
         </div>
       )}
 
+      {section === 'retours' && (
+        <div className="space-y-3">
+          <p className="text-[12px] text-gic-muted">{t('fleet.stock.returnHint')}</p>
+          <div>
+            <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('columns.date')}</p>
+            <MacDateInput value={date} onChange={setDate} placeholder={t('columns.date')} className="w-36" />
+          </div>
+          {filtered.length === 0 ? (
+            <EmptyState title={t('fleet.stock.emptyPositions')} />
+          ) : (
+            <TableWrap mac>
+              <thead>
+                <tr>
+                  <Th mac>{t('fleet.fields.designation')}</Th>
+                  {!tranche && <Th mac>{t('fleet.stock.tranche')}</Th>}
+                  <Th mac className="mac-th-num">{t('fleet.fields.quantity')}</Th>
+                  <Th mac className="mac-th-num">{t('fleet.stock.returnQty')}</Th>
+                  <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((p) => {
+                  const key = `${p.enginId}::${placeKey(p.tranche)}`;
+                  return (
+                    <tr key={key}>
+                      <Td mac>
+                        <Link to={`/engins/${p.enginId}`} className="mac-table-ref">{labelOf(p)}</Link>
+                      </Td>
+                      {!tranche && <Td mac>{p.tranche || t('fleet.stock.wholeSite')}</Td>}
+                      <Td mac className="mac-td-num font-semibold">{formatQty(p.quantity)}</Td>
+                      <Td mac>
+                        <Input
+                          type="number"
+                          min="1"
+                          max={Math.round(p.quantity)}
+                          step="1"
+                          inputMode="numeric"
+                          value={returnQty[key] ?? formatQty(p.quantity)}
+                          onChange={(e) => setReturnQty((cur) => ({ ...cur, [key]: intField(e.target.value) }))}
+                        />
+                      </Td>
+                      <Td mac className="mac-td-actions">
+                        <Btn variant="secondary" icon={Undo2} disabled={saving} onClick={() => void returnFromRow(p)}>
+                          {t('fleet.stock.desaffectation')}
+                        </Btn>
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </TableWrap>
+          )}
+        </div>
+      )}
+
+      <Modal
+        open={!!action}
+        size="lg"
+        title={actionTitle}
+        onClose={() => setAction(null)}
+      >
+        <form
+          id="materiel-site-action"
+          onSubmit={(e) => { e.preventDefault(); void saveAction(); }}
+          className="grid gap-3 sm:grid-cols-2"
+        >
+          {action === 'assign' ? (
+            <Select label={t('fleet.kind.materiel')} value={picked} onChange={(e) => setPicked(e.target.value)} required>
+              <option value="">{t('common.choose')}</option>
+              {assignChoices.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {labelOf(item)} — {t('fleet.stock.depot')} {formatQty(item.depot)}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <div className="sm:col-span-2">
+              <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fleet.kind.materiel')}</p>
+              <p className="text-[13px] font-medium">{row ? labelOf(row) : '—'}</p>
+            </div>
+          )}
+          <Input
+            label={t('fleet.fields.quantity')}
+            type="number"
+            min="1"
+            max={action === 'return' || action === 'split' || action === 'transfer' ? Math.round(row?.quantity || 1) : undefined}
+            step="1"
+            inputMode="numeric"
+            required
+            value={qty}
+            onChange={(e) => setQty(intField(e.target.value) || e.target.value.replace(/\D/g, ''))}
+          />
+          {action === 'assign' && !tranche && (
+            <Select label={t('fleet.stock.tranche')} value={destTranche} onChange={(e) => setDestTranche(e.target.value)}>
+              <option value="">{t('fleet.stock.wholeSite')}</option>
+              {tranches.map((name) => <option key={name} value={name}>{name}</option>)}
+            </Select>
+          )}
+          {action === 'split' && (
+            <>
+              <Select label={t('fleet.stock.fromPlace')} value={fromPlace} onChange={(e) => setFromPlace(e.target.value)}>
+                <option value="">{t('fleet.stock.wholeSite')}</option>
+                {tranches.map((name) => <option key={name} value={name}>{name}</option>)}
+              </Select>
+              <Select label={t('fleet.stock.toPlace')} value={destTranche} onChange={(e) => setDestTranche(e.target.value)}>
+                <option value="">{t('fleet.stock.wholeSite')}</option>
+                {tranches.map((name) => <option key={name} value={name}>{name}</option>)}
+              </Select>
+            </>
+          )}
+          {action === 'transfer' && (
+            <>
+              <Select label={t('fleet.stock.destination')} value={destChantierId} onChange={(e) => setDestChantierId(e.target.value)} required>
+                <option value="">{t('common.choose')}</option>
+                {chantiers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+              <Select label={t('fleet.stock.tranche')} value={destTranche} onChange={(e) => setDestTranche(e.target.value)}>
+                <option value="">{t('fleet.stock.wholeSite')}</option>
+                {destTranches.map((name) => <option key={name} value={name}>{name}</option>)}
+              </Select>
+            </>
+          )}
+          <div>
+            <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('columns.date')}</p>
+            <MacDateInput value={date} onChange={setDate} placeholder={t('columns.date')} />
+          </div>
+          <Input label={t('fields.remark')} value={remark} onChange={(e) => setRemark(e.target.value)} />
+          {action === 'assign' && pickedStock && (
+            <p className="sm:col-span-2 text-[12px] text-gic-muted">{t('fleet.stock.depotAvailable', { qty: formatQty(pickedStock.depot) })}</p>
+          )}
+          {(action === 'return' || action === 'split' || action === 'transfer') && row && (
+            <p className="sm:col-span-2 text-[12px] text-gic-muted">{t('fleet.stock.onSiteQty', { qty: formatQty(row.quantity) })}</p>
+          )}
+          <div className="sm:col-span-2 flex justify-end gap-2 pt-1">
+            <Btn type="button" variant="secondary" onClick={() => setAction(null)}>{t('common.cancel')}</Btn>
+            <Btn type="button" disabled={saving || !picked} onClick={() => void saveAction()}>{t('common.save')}</Btn>
+          </div>
+        </form>
+      </Modal>
+
       <Modal
         open={!!detailId}
         size="xl"
-        title={detailLabel || t('fleet.stock.title')}
+        title={detailLabel || t('fleet.stock.detail')}
         onClose={() => setDetailId(null)}
         footer={<Btn variant="secondary" onClick={() => setDetailId(null)}>{t('common.close')}</Btn>}
       >

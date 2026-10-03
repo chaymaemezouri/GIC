@@ -65,6 +65,7 @@ function readFilters(req: Request) {
     invoiced: String(req.query.invoiced || ''),
     paymentStatus: String(req.query.paymentStatus || ''),
     deliveryStatus: String(req.query.deliveryStatus || ''),
+    purchaseType: String(req.query.purchaseType || ''),
     dateFrom,
     dateTo,
   };
@@ -96,7 +97,12 @@ function buildPurchaseWhere(f: Filters, opts: { ignoreStatus?: boolean } = {}): 
       f.supplierId ? { supplierId: f.supplierId } : {},
       f.chantierId ? { chantierId: f.chantierId } : {},
       f.tranche ? { tranche: f.tranche } : {},
-      f.paymentStatus ? { paymentStatus: f.paymentStatus } : {},
+      f.purchaseType && ['outil', 'materiel', 'marchandise'].includes(f.purchaseType) ? { purchaseType: f.purchaseType } : {},
+      f.paymentStatus === 'a_payer'
+        ? { paymentStatus: { in: ['non_paye', 'partiel'] } }
+        : f.paymentStatus
+          ? { paymentStatus: f.paymentStatus }
+          : {},
       f.deliveryStatus ? { deliveryStatus: f.deliveryStatus } : {},
       f.dateFrom || f.dateTo
         ? { date: { ...(f.dateFrom ? { gte: f.dateFrom } : {}), ...(f.dateTo ? { lte: f.dateTo } : {}) } }
@@ -115,6 +121,65 @@ async function resolveProjectId(chantierId: string | null) {
 function validPaymentMode(mode: unknown) {
   const m = optionalText(mode);
   return m && (PURCHASE_PAYMENT_MODES as readonly string[]).includes(m) ? m : null;
+}
+
+function parsePurchaseType(value: unknown) {
+  const s = String(value || '');
+  return s === 'outil' || s === 'materiel' ? s : 'marchandise';
+}
+
+async function createCatalogFromPurchase(purchase: {
+  id: string;
+  reference: string;
+  purchaseType: string;
+  chantierId: string | null;
+  tranche: string | null;
+  projectId: string | null;
+  date: Date;
+}, lines: { product: string; quantity: number; amountTTC: number }[]) {
+  if (purchase.purchaseType !== 'outil' && purchase.purchaseType !== 'materiel') return;
+  const chantier = purchase.chantierId
+    ? await prisma.chantier.findUnique({ where: { id: purchase.chantierId }, select: { name: true } })
+    : null;
+  for (const line of lines) {
+    const code = await nextReference('MAT');
+    const engin = await prisma.engin.create({
+      data: {
+        code,
+        kind: 'materiel',
+        designation: line.quantity > 1 ? `${line.product} × ${line.quantity}` : line.product,
+        purchasePrice: line.amountTTC,
+        status: purchase.chantierId ? 'en_exploitation' : 'disponible',
+        location: chantier?.name || `Achat ${purchase.reference}`,
+      },
+    });
+    if (purchase.chantierId) {
+      const suggestion = suggestAssignmentCost(engin, purchase.date);
+      const cost = {
+        costMethod: suggestion.costMethod,
+        dailyCost: suggestion.dailyCost,
+        hourlyCost: suggestion.hourlyCost,
+        flatAmount: suggestion.flatAmount,
+        extraCost: suggestion.extraCost ?? 0,
+        plannedCost: 0,
+        startDate: purchase.date,
+        endDate: null as Date | null,
+      };
+      cost.plannedCost = plannedCostOf(cost);
+      const assignment = await prisma.enginAssignment.create({
+        data: {
+          enginId: engin.id,
+          chantierId: purchase.chantierId,
+          tranche: purchase.tranche,
+          projectId: purchase.projectId,
+          startDate: purchase.date,
+          mode: 'propriete',
+          ...cost,
+        },
+      });
+      await ensureExploitationUsage(assignment);
+    }
+  }
 }
 
 function sendDetail(res: import('express').Response, id: string, status = 200) {
@@ -301,6 +366,7 @@ async function exportRows(req: Request) {
   return purchases.map((p) => ({
     Référence: p.reference,
     Date: p.date.toISOString().slice(0, 10),
+    Type: p.purchaseType === 'outil' ? 'Outils' : p.purchaseType === 'materiel' ? 'Matériel' : 'Marchandises',
     Désignation: p.designation,
     Famille: p.family || '',
     Fournisseur: p.supplier?.companyName || '',
@@ -404,55 +470,12 @@ router.post('/', async (req, res) => {
       expectedDeliveryDate: parseDate(req.body.expectedDeliveryDate),
       remark: optionalText(req.body.remark),
       status: 'elabore',
-      purchaseType: req.body.purchaseType === 'outil' ? 'outil' : 'marchandise',
+      purchaseType: parsePurchaseType(req.body.purchaseType),
       lines: { create: lines },
     },
   });
 
-  if (purchase.purchaseType === 'outil') {
-    const chantier = chantierId
-      ? await prisma.chantier.findUnique({ where: { id: chantierId }, select: { name: true } })
-      : null;
-    for (const line of lines) {
-      const code = await nextReference('MAT');
-      const engin = await prisma.engin.create({
-        data: {
-          code,
-          kind: 'materiel',
-          designation: line.quantity > 1 ? `${line.product} × ${line.quantity}` : line.product,
-          purchasePrice: line.amountTTC,
-          status: chantierId ? 'en_exploitation' : 'disponible',
-          location: chantier?.name || `Achat ${reference}`,
-        },
-      });
-      if (chantierId) {
-        const suggestion = suggestAssignmentCost(engin, date);
-        const cost = {
-          costMethod: suggestion.costMethod,
-          dailyCost: suggestion.dailyCost,
-          hourlyCost: suggestion.hourlyCost,
-          flatAmount: suggestion.flatAmount,
-          extraCost: suggestion.extraCost ?? 0,
-          plannedCost: 0,
-          startDate: date,
-          endDate: null as Date | null,
-        };
-        cost.plannedCost = plannedCostOf(cost);
-        const assignment = await prisma.enginAssignment.create({
-          data: {
-            enginId: engin.id,
-            chantierId,
-            tranche: purchase.tranche,
-            projectId: purchase.projectId,
-            startDate: date,
-            mode: 'propriete',
-            ...cost,
-          },
-        });
-        await ensureExploitationUsage(assignment);
-      }
-    }
-  }
+  await createCatalogFromPurchase(purchase, lines);
 
   if (advanceAmount > 0) {
     const payment = await prisma.purchasePayment.create({
@@ -541,6 +564,7 @@ router.put('/:id', async (req, res) => {
     data.projectId = optionalText(req.body.projectId);
   }
   if (req.body.tranche !== undefined) data.tranche = optionalText(req.body.tranche);
+  if (req.body.purchaseType !== undefined) data.purchaseType = parsePurchaseType(req.body.purchaseType);
   if (req.body.date !== undefined) data.date = parseDate(req.body.date) || existing.date;
   if (req.body.author !== undefined) data.author = optionalText(req.body.author);
 

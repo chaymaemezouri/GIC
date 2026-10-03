@@ -16,6 +16,7 @@ import {
   type BienFormData, type FloorOption,
 } from '../components/BienFormFields';
 import MacAvatar from '../components/MacAvatar';
+import { availabilityStatusOf, propertyDealOf } from '../lib/propertyDeal';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
@@ -26,6 +27,7 @@ type Property = {
   name: string;
   city?: string;
   status: string;
+  type?: string;
   surface?: number;
   price?: number;
   photo?: string | null;
@@ -468,6 +470,7 @@ export default function BiensPage() {
                 <Th mac>{t('columns.project')}</Th>
                 <Th mac>{t('columns.surface')}</Th>
                 <Th mac>{t('columns.price')}</Th>
+                <Th mac>{t('columns.type')}</Th>
                 <Th mac>{t('columns.status')}</Th>
                 <Th mac>{t('columns.client')}</Th>
                 <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
@@ -496,7 +499,10 @@ export default function BiensPage() {
                   <Td mac className="mac-table-muted">{p.project?.name || '—'}</Td>
                   <Td mac className="mac-table-muted">{p.surface ? `${p.surface} m²` : '—'}</Td>
                   <Td mac>{p.price ? formatMad(p.price) : '—'}</Td>
-                  <Td mac><StatusPill status={p.status} quiet /></Td>
+                  <Td mac>
+                    <StatusPill status={propertyDealOf(p) === 'location' ? 'loué' : 'vendu'} quiet />
+                  </Td>
+                  <Td mac><StatusPill status={availabilityStatusOf(p.status)} quiet /></Td>
                   <Td mac onClick={(e) => e.stopPropagation()}>
                     {client ? (
                       <>

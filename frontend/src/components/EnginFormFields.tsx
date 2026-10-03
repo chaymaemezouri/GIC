@@ -249,7 +249,10 @@ export function EnginFormFields({
           <Input label={t('fleet.fields.designation')} placeholder={[form.genre, form.brand].filter(Boolean).join(' ')} value={form.designation} onChange={(e) => set({ designation: e.target.value })} />
         </div>
         {form.kind === 'materiel' && (
-          <Input label={t('fleet.fields.quantity')} type="number" min="0" step="1" value={form.quantity} onChange={(e) => set({ quantity: e.target.value })} />
+          <Input label={t('fleet.fields.quantity')} type="number" min="1" step="1" inputMode="numeric" value={form.quantity} onChange={(e) => {
+            const n = parseInt(e.target.value.replace(',', '.'), 10);
+            set({ quantity: Number.isFinite(n) && n > 0 ? String(n) : '' });
+          }} />
         )}
         <Input label={t('fleet.fields.type')} placeholder={t('fleet.hints.typeExample')} value={form.genre} onChange={(e) => set({ genre: e.target.value })} />
         <Input label={t('fleet.fields.category')} placeholder={t('fleet.hints.categoryExample')} value={form.groupe} onChange={(e) => set({ groupe: e.target.value })} />

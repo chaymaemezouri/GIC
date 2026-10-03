@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Calendar, CalendarPlus, CheckCircle, ChevronLeft, ChevronRight, Clock, Lock, Pencil, Printer, RotateCcw, Save, Trash2, UserPlus,
+  CalendarPlus, CheckCircle, ChevronLeft, ChevronRight, Clock, Lock, Pencil, Printer, RotateCcw, Save, Trash2, UserPlus,
   Users, Wallet, X,
 } from 'lucide-react';
 import { api, formatDate, formatMad, type ApiError } from '../lib/api';
@@ -143,6 +142,7 @@ export default function PointageSessionManager({
   onTrancheChange,
   workforce,
   hideSiteSelect = false,
+  hideTrancheSelect = false,
   category,
   excludeCategory,
 }: {
@@ -153,6 +153,7 @@ export default function PointageSessionManager({
   onTrancheChange: (name: string) => void;
   workforce: Worker[];
   hideSiteSelect?: boolean;
+  hideTrancheSelect?: boolean;
   category?: string;
   excludeCategory?: string;
 }) {
@@ -168,21 +169,16 @@ export default function PointageSessionManager({
     t('monthsShort.sep'), t('monthsShort.oct'), t('monthsShort.nov'), t('monthsShort.dec'),
   ];
   const WEEKDAYS = [
-    t('common.weekdayMon'), t('common.weekdayTue'), t('common.weekdayWed'),
-    t('common.weekdayThu'), t('common.weekdayFri'), t('common.weekdaySat'), t('common.weekdaySun'),
+    t('pointageMgmt.weekMon'), t('pointageMgmt.weekTue'), t('pointageMgmt.weekWed'),
+    t('pointageMgmt.weekThu'), t('pointageMgmt.weekFri'), t('pointageMgmt.weekSat'), t('pointageMgmt.weekSun'),
   ];
   const [tranches, setTranches] = useState<{ id: string; name: string }[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [gotoMiss, setGotoMiss] = useState(false);
   const [calCursor, setCalCursor] = useState(() => {
     const d = new Date();
     return { y: d.getFullYear(), m: d.getMonth() };
   });
-  const [calOpen, setCalOpen] = useState(false);
   const [calMode, setCalMode] = useState<'days' | 'months'>('days');
-  const [calPos, setCalPos] = useState({ top: 0, left: 0 });
-  const calRef = useRef<HTMLDivElement>(null);
-  const calPopRef = useRef<HTMLDivElement>(null);
   const [lineQuery, setLineQuery] = useState('');
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -254,54 +250,8 @@ export default function PointageSessionManager({
   useEffect(() => {
     const d = new Date();
     setCalCursor({ y: d.getFullYear(), m: d.getMonth() });
-    setCalOpen(false);
     setCalMode('days');
   }, [chantierId, tranche]);
-
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      const node = e.target as Node;
-      if (calRef.current?.contains(node) || calPopRef.current?.contains(node)) return;
-      setCalOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setCalOpen(false);
-    }
-    document.addEventListener('mousedown', onClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!calOpen) return;
-    function place() {
-      const el = calRef.current;
-      const pop = calPopRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const width = pop?.offsetWidth || 252;
-      const height = pop?.offsetHeight || 310;
-      const tab = 72;
-      const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - width - 8));
-      let top = r.bottom + 4;
-      if (top + height > window.innerHeight - tab) {
-        top = Math.max(8, r.top - height - 4);
-      }
-      setCalPos({ top, left });
-    }
-    place();
-    const id = window.requestAnimationFrame(place);
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.cancelAnimationFrame(id);
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [calOpen, calMode, calCursor]);
 
   useEffect(() => {
     if (!chantierId) {
@@ -423,10 +373,7 @@ export default function PointageSessionManager({
   }
 
   async function jumpToDate(value: string) {
-    if (!value) {
-      setGotoMiss(false);
-      return;
-    }
+    if (!value) return;
     if (isFutureIso(value)) {
       await appAlert(t('pointageMgmt.cannotPointFuture'));
       return;
@@ -441,24 +388,17 @@ export default function PointageSessionManager({
     if (chantierId) {
       try {
         const filled = await fillAssigned(value);
-        if (!filled) {
-          setGotoMiss(true);
+        if (filled) {
+          loadSessions(filled);
+          if (filled === currentId) loadDetail(filled);
           return;
         }
-        setGotoMiss(false);
-        loadSessions(filled);
-        if (filled === currentId) loadDetail(filled);
-        return;
       } catch (err) {
         await appAlert(err instanceof Error ? err.message : t('common.error'));
       }
     }
     const matches = sessionsOnDay(value);
-    if (!matches.length) {
-      setGotoMiss(true);
-      return;
-    }
-    setGotoMiss(false);
+    if (!matches.length) return;
     const target = matches[matches.length - 1];
     if (target.id !== currentId) await goTo(target.id);
   }
@@ -838,123 +778,11 @@ export default function PointageSessionManager({
   const today = todayIso();
 
   const pointageCalendar = (
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <h2 className="text-[17px] font-semibold text-gic-ink">
-            {MONTHS[calCursor.m]} {calCursor.y}
-          </h2>
-          <div ref={calRef} className="pointage-mini">
-            <button
-              type="button"
-              className={`pointage-nav-btn${calOpen ? ' is-open' : ''}`}
-              onClick={() => { setCalMode('days'); setCalOpen((o) => !o); }}
-              aria-label={t('common.calendar')}
-              aria-haspopup="dialog"
-              aria-expanded={calOpen}
-            >
-              <Calendar size={15} />
-            </button>
-            {calOpen && createPortal(
-              <div
-                ref={calPopRef}
-                className="mac-date-picker pointage-mini-picker"
-                role="dialog"
-                aria-label={t('pointageMgmt.dayCalendar')}
-                style={{ top: calPos.top, left: calPos.left }}
-              >
-                <div className="mac-date-picker-header">
-                  <button
-                    type="button"
-                    className="mac-date-picker-nav"
-                    aria-label={calMode === 'months' ? t('pointageMgmt.prevYear') : t('common.prevMonth')}
-                    onClick={() => setCalCursor((c) => (
-                      calMode === 'months'
-                        ? { ...c, y: c.y - 1 }
-                        : c.m === 0 ? { y: c.y - 1, m: 11 } : { ...c, m: c.m - 1 }
-                    ))}
-                  >
-                    <ChevronLeft size={14} strokeWidth={2.25} />
-                  </button>
-                  <button
-                    type="button"
-                    className="mac-date-picker-title pointage-mini-title"
-                    onClick={() => setCalMode((mode) => (mode === 'days' ? 'months' : 'days'))}
-                  >
-                    {calMode === 'months' ? calCursor.y : `${MONTHS[calCursor.m]} ${calCursor.y}`}
-                  </button>
-                  <button
-                    type="button"
-                    className="mac-date-picker-nav"
-                    aria-label={calMode === 'months' ? t('pointageMgmt.nextYear') : t('common.nextMonth')}
-                    onClick={() => setCalCursor((c) => (
-                      calMode === 'months'
-                        ? { ...c, y: c.y + 1 }
-                        : c.m === 11 ? { y: c.y + 1, m: 0 } : { ...c, m: c.m + 1 }
-                    ))}
-                  >
-                    <ChevronRight size={14} strokeWidth={2.25} />
-                  </button>
-                </div>
-                {calMode === 'months' ? (
-                  <div className="pointage-mini-months">
-                    {MONTHS_SHORT.map((label, idx) => (
-                      <button
-                        key={`${label}-${idx}`}
-                        type="button"
-                        className={`pointage-mini-month${calCursor.m === idx ? ' is-active' : ''}`}
-                        onClick={() => { setCalCursor((c) => ({ ...c, m: idx })); setCalMode('days'); }}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <>
-                    <div className="mac-date-picker-weekdays">
-                      {WEEKDAYS.map((d, i) => (
-                        <span key={`${d}-${i}`} className="mac-date-picker-weekday">{d}</span>
-                      ))}
-                    </div>
-                    <div className="mac-date-picker-grid">
-                      {monthDays.map((cell, i) => {
-                        if (!cell.iso || cell.day == null) {
-                          return <span key={`pad-${i}`} className="mac-date-picker-day mac-date-picker-day-empty" />;
-                        }
-                        const tone = toneForIso(cell.iso);
-                        const cls = [
-                          'mac-date-picker-day',
-                          'pointage-mini-day',
-                          `is-${tone}`,
-                          cell.iso === today ? 'mac-date-picker-day-today' : '',
-                          cell.iso === selectedIso ? 'is-selected' : '',
-                        ].filter(Boolean).join(' ');
-                        return (
-                          <button
-                            key={cell.iso}
-                            type="button"
-                            className={cls}
-                                onClick={() => {
-                                  if (tone === 'future') return;
-                                  void jumpToDate(cell.iso!);
-                                  setCalOpen(false);
-                                }}
-                                disabled={tone === 'future'}
-                            aria-label={cell.iso}
-                            aria-current={cell.iso === selectedIso ? 'date' : undefined}
-                          >
-                            {cell.day}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>,
-              document.body,
-            )}
-          </div>
-        </div>
+    <div className="pointage-cal-wrap">
+      <div className="min-w-0 flex-1">
+        <h2 className="text-[17px] font-semibold text-gic-ink">
+          {MONTHS[calCursor.m]} {calCursor.y}
+        </h2>
         {detail && (
           <>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
@@ -997,6 +825,97 @@ export default function PointageSessionManager({
           </>
         )}
       </div>
+      <div className="pointage-cal" role="group" aria-label={t('pointageMgmt.dayCalendar')}>
+        <div className="pointage-cal-header">
+          <button
+            type="button"
+            className="pointage-cal-nav"
+            aria-label={calMode === 'months' ? t('pointageMgmt.prevYear') : t('common.prevMonth')}
+            onClick={() => setCalCursor((c) => (
+              calMode === 'months'
+                ? { ...c, y: c.y - 1 }
+                : c.m === 0 ? { y: c.y - 1, m: 11 } : { ...c, m: c.m - 1 }
+            ))}
+          >
+            <ChevronLeft size={14} strokeWidth={2.25} />
+          </button>
+          <button
+            type="button"
+            className="pointage-cal-title"
+            onClick={() => setCalMode((mode) => (mode === 'days' ? 'months' : 'days'))}
+          >
+            {calMode === 'months' ? calCursor.y : `${MONTHS[calCursor.m]} ${calCursor.y}`}
+          </button>
+          <button
+            type="button"
+            className="pointage-cal-nav"
+            aria-label={calMode === 'months' ? t('pointageMgmt.nextYear') : t('common.nextMonth')}
+            onClick={() => setCalCursor((c) => (
+              calMode === 'months'
+                ? { ...c, y: c.y + 1 }
+                : c.m === 11 ? { y: c.y + 1, m: 0 } : { ...c, m: c.m + 1 }
+            ))}
+          >
+            <ChevronRight size={14} strokeWidth={2.25} />
+          </button>
+        </div>
+        {calMode === 'months' ? (
+          <div className="pointage-mini-months">
+            {MONTHS_SHORT.map((label, idx) => (
+              <button
+                key={`${label}-${idx}`}
+                type="button"
+                className={`pointage-mini-month${calCursor.m === idx ? ' is-active' : ''}`}
+                onClick={() => { setCalCursor((c) => ({ ...c, m: idx })); setCalMode('days'); }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="pointage-cal-weekdays">
+              {WEEKDAYS.map((d, i) => (
+                <span key={`${d}-${i}`}>{d}</span>
+              ))}
+            </div>
+            <div className="pointage-cal-grid">
+              {monthDays.map((cell, i) => {
+                if (!cell.iso || cell.day == null) {
+                  return <span key={`pad-${i}`} className="pointage-cal-day is-empty" />;
+                }
+                const tone = toneForIso(cell.iso);
+                return (
+                  <button
+                    key={cell.iso}
+                    type="button"
+                    className={[
+                      'pointage-cal-day',
+                      `is-${tone}`,
+                      cell.iso === today ? 'is-today' : '',
+                      cell.iso === selectedIso ? 'is-selected' : '',
+                    ].filter(Boolean).join(' ')}
+                    onClick={() => {
+                      if (tone === 'future') return;
+                      void jumpToDate(cell.iso!);
+                    }}
+                    disabled={tone === 'future'}
+                    aria-label={cell.iso}
+                    aria-current={cell.iso === selectedIso ? 'date' : undefined}
+                  >
+                    {cell.day}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+        <div className="pointage-mini-legend">
+          <span><i className="pointage-cal-dot is-ok" aria-hidden />{t('pointageMgmt.legendValidated')}</span>
+          <span><i className="pointage-cal-dot is-partial" aria-hidden />{t('pointageMgmt.legendPartial')}</span>
+          <span><i className="pointage-cal-dot is-miss" aria-hidden />{t('pointageMgmt.legendMissing')}</span>
+        </div>
+      </div>
     </div>
   );
 
@@ -1016,7 +935,7 @@ export default function PointageSessionManager({
           className="w-48 shrink-0"
         />
       )}
-      {chantierId && (
+      {chantierId && !hideTrancheSelect && (
         <MacSelect
           value={tranche}
           onChange={async (v) => {
@@ -1031,7 +950,6 @@ export default function PointageSessionManager({
           className="w-44 shrink-0"
         />
       )}
-      {gotoMiss && <span className="text-[12px] text-gic-coral">{t(hideSiteSelect ? 'pointageMgmt.noWorkersThatDay' : 'pointageMgmt.noPointageThatDay')}</span>}
     </>
   );
 
@@ -1141,7 +1059,7 @@ export default function PointageSessionManager({
                   <p className="text-[12px] text-gic-muted">{t('common.loading')}</p>
                 ) : sessions.length === 0 ? (
                   <>
-                    <p className="text-[13px] font-medium text-gic-ink">{hideSiteSelect ? t('pointageMgmt.noWorkersThatDay') : t('pointageMgmt.emptySessions')}</p>
+                    <p className="text-[13px] font-medium text-gic-ink">{hideSiteSelect ? t('pointageMgmt.emptyLines') : t('pointageMgmt.emptySessions')}</p>
                     {!hideSiteSelect && <p className="text-[12px] text-gic-muted mt-1 mb-4">{t('pointageMgmt.emptySessionsHint')}</p>}
                     {!hideSiteSelect && <Btn icon={CalendarPlus} onClick={openNew}>{t('pointageMgmt.newPointage')}</Btn>}
                   </>

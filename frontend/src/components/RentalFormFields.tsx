@@ -95,12 +95,16 @@ export function RentalFormFields({
   setForm,
   properties,
   editMode,
+  lockPropertyId,
+  lockedPropertyLabel,
 }: {
   form: RentalFormData;
   setForm: (f: RentalFormData) => void;
   clients?: { id: string; reference: string; firstName: string; lastName: string }[];
   properties: { id: string; reference: string; name: string; status: string }[];
   editMode?: boolean;
+  lockPropertyId?: string;
+  lockedPropertyLabel?: string;
 }) {
   const { t } = useI18n();
   return (
@@ -115,12 +119,19 @@ export function RentalFormFields({
               onChange={(clientId) => setForm({ ...form, clientId })}
             />
           </div>
-          <Select className="sm:col-span-2" label={`${t('fields.property')} *`} required value={form.propertyId} onChange={(e) => setForm({ ...form, propertyId: e.target.value })}>
-            <option value="">{t('fields.selectProperty')}</option>
-            {properties.filter((p) => ['disponible', 'réservé'].includes(p.status) || p.id === form.propertyId).map((p) => (
-              <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>
-            ))}
-          </Select>
+          {lockPropertyId ? (
+            <div className="sm:col-span-2">
+              <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.property')}</p>
+              <p className="rounded-xl border border-gic-border bg-gray-50/80 px-3 py-2 text-[12px] font-medium">{lockedPropertyLabel || '—'}</p>
+            </div>
+          ) : (
+            <Select className="sm:col-span-2" label={`${t('fields.property')} *`} required value={form.propertyId} onChange={(e) => setForm({ ...form, propertyId: e.target.value })}>
+              <option value="">{t('fields.selectProperty')}</option>
+              {properties.filter((p) => ['disponible', 'réservé', 'indisponible', 'loué'].includes(p.status) || p.id === form.propertyId).map((p) => (
+                <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>
+              ))}
+            </Select>
+          )}
         </>
       )}
       <Input label={`${t('fields.monthlyRentMad')} *`} required type="number" min="0" value={form.monthlyRent} onChange={(e) => setForm({ ...form, monthlyRent: e.target.value })} />

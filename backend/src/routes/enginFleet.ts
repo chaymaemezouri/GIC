@@ -710,12 +710,14 @@ router.get('/usages', async (req, res) => {
   const enginId = text(req.query.enginId);
   const chantierId = text(req.query.chantierId);
   const tranche = text(req.query.tranche);
+  const kind = text(req.query.kind);
   const q = text(req.query.q);
   const where: Prisma.EnginUsageWhereInput = {
     AND: [
       enginId ? { enginId } : {},
       chantierId ? { chantierId } : {},
       tranche ? { tranche } : {},
+      kind ? { engin: { kind } } : {},
       dateRangeWhere(queryDate(req, 'dateFrom'), queryDate(req, 'dateTo')),
       q ? { OR: [{ driverName: { contains: q } }, { remark: { contains: q } }, { engin: { code: { contains: q } } }, { engin: { designation: { contains: q } } }] } : {},
     ],

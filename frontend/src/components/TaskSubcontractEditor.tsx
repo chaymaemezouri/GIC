@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Pencil, Trash2, X } from 'lucide-react';
 import { api, formatDate, formatMad } from '../lib/api';
-import { appAlert } from '../lib/dialog';
+import { appAlert, appConfirm } from '../lib/dialog';
 import { useI18n } from '../i18n/I18nContext';
-import { Btn, Input, Select } from './ui';
+import { Btn, Input, MacActionBtn, Select } from './ui';
 
 export type SubPayment = { id: string; amount: number; kind: string; paymentMode?: string | null; date: string; remark?: string | null };
 export type TaskSubcontract = {
@@ -100,7 +101,7 @@ export function TaskSubcontractEditor({
   onChange,
   onPaid,
   hidePayments,
-  chantierId: _chantierId,
+  chantierId,
 }: {
   draft: SubDraft;
   labels: string[];
@@ -112,6 +113,8 @@ export function TaskSubcontractEditor({
 }) {
   const { t } = useI18n();
   const set = (patch: Partial<SubDraft>) => onChange({ ...draft, ...patch });
+  const bound = (item?: TaskSubcontract) => (item ? { ...item, chantierId: item.chantierId || chantierId } : undefined);
+  const wholeContract = bound(contracts.find((item) => item.scope !== 'phase'));
 
   function setMode(mode: SubDraft['mode']) {
     if (mode === 'task') {
@@ -179,6 +182,12 @@ export function TaskSubcontractEditor({
               {t('detail.stTaskPhasesList')} : {labels.join(' · ')}
             </p>
           )}
+          {!hidePayments && wholeContract?.id && (
+            <PaymentBox contract={wholeContract} onPaid={onPaid} />
+          )}
+          {!hidePayments && !wholeContract?.id && (
+            <p className="text-[11px] text-gic-muted">{t('detail.stEditAdvancesHint')}</p>
+          )}
         </div>
       )}
       {draft.mode === 'phases' && labels.length === 0 && (
@@ -203,17 +212,22 @@ export function TaskSubcontractEditor({
               {t('detail.stPhaseOn')} · {label}
             </label>
             {row.on && (
-              <ContractFields
-                companyName={row.companyName}
-                phone={row.phone}
-                amount={row.amount}
-                startDate={row.startDate}
-                endDate={row.endDate}
-                extraNames={contracts.map((item) => item.companyName)}
-                onChange={(patch) => set({ phases: { ...draft.phases, [label]: { ...row, ...patch } } })}
-                contract={hidePayments ? undefined : phaseContract}
-                onPaid={onPaid}
-              />
+              <>
+                <ContractFields
+                  companyName={row.companyName}
+                  phone={row.phone}
+                  amount={row.amount}
+                  startDate={row.startDate}
+                  endDate={row.endDate}
+                  extraNames={contracts.map((item) => item.companyName)}
+                  onChange={(patch) => set({ phases: { ...draft.phases, [label]: { ...row, ...patch } } })}
+                />
+                {!hidePayments && bound(phaseContract)?.id ? (
+                  <PaymentBox contract={bound(phaseContract)!} onPaid={onPaid} />
+                ) : !hidePayments ? (
+                  <p className="text-[11px] text-gic-muted">{t('detail.stEditAdvancesHint')}</p>
+                ) : null}
+              </>
             )}
           </div>
         );
@@ -322,8 +336,6 @@ function ContractFields({
   startDate,
   endDate,
   onChange,
-  contract,
-  onPaid,
   extraNames,
 }: {
   companyName: string;
@@ -332,8 +344,6 @@ function ContractFields({
   startDate: string;
   endDate: string;
   onChange: (patch: { companyName?: string; phone?: string; amount?: string; startDate?: string; endDate?: string }) => void;
-  contract?: TaskSubcontract;
-  onPaid?: (updated: TaskSubcontract) => void;
   extraNames?: string[];
 }) {
   const { t } = useI18n();
@@ -346,7 +356,6 @@ function ContractFields({
         <Input label={t('detail.stFrom')} type="date" value={startDate} onChange={(e) => onChange({ startDate: e.target.value })} />
         <Input label={t('detail.stTo')} type="date" value={endDate} onChange={(e) => onChange({ endDate: e.target.value })} />
       </div>
-      {contract && <PaymentBox contract={contract} onPaid={onPaid} />}
     </div>
   );
 }
@@ -361,6 +370,8 @@ export function PaymentBox({
   phaseLabel?: string;
 }) {
   const { t } = useI18n();
+  const [editing, setEditing] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [kind, setKind] = useState('avance');
   const [mode, setMode] = useState('virement');
@@ -369,6 +380,8 @@ export function PaymentBox({
   const left = Math.max(0, cap - paidAll);
   const history = (contract.payments || []).filter((pay) => !phaseLabel || paymentPhaseOf(pay) === phaseLabel || (!paymentPhaseOf(pay) && !phaseLabel));
   const paidOnPhase = history.reduce((sum, pay) => sum + Number(pay.amount || 0), 0);
+  const editingPay = history.find((pay) => pay.id === editId);
+  const room = cap > 0 ? left + Number(editingPay?.amount || 0) : undefined;
 
   function kindText(value: string) {
     if (value === 'situation') return t('siteOps.progress');
@@ -376,32 +389,88 @@ export function PaymentBox({
     return t('columns.advance');
   }
 
-  async function pay() {
+  function resetForm() {
+    setEditId(null);
+    setAmount('');
+    setKind('avance');
+    setMode('virement');
+  }
+
+  function startEdit(pay: SubPayment) {
+    setEditing(true);
+    setEditId(pay.id);
+    setAmount(String(pay.amount));
+    setKind(pay.kind || 'avance');
+    setMode(pay.paymentMode || 'virement');
+  }
+
+  async function savePay() {
     if (!contract.chantierId) return;
     try {
-      const updated = await api<TaskSubcontract>(`/chantiers/${contract.chantierId}/subcontractors/${contract.id}/payments`, {
-        method: 'POST',
-        body: JSON.stringify({
-          amount: Number(amount),
-          kind,
-          paymentMode: mode,
-          phaseLabel: phaseLabel || undefined,
-        }),
-      });
-      setAmount('');
+      const updated = await api<TaskSubcontract>(
+        editId
+          ? `/chantiers/${contract.chantierId}/subcontractors/${contract.id}/payments/${editId}`
+          : `/chantiers/${contract.chantierId}/subcontractors/${contract.id}/payments`,
+        {
+          method: editId ? 'PUT' : 'POST',
+          body: JSON.stringify({
+            amount: Number(amount),
+            kind,
+            paymentMode: mode,
+            phaseLabel: phaseLabel || undefined,
+          }),
+        },
+      );
+      resetForm();
       onPaid?.(updated);
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
+  async function removePay(pay: SubPayment) {
+    if (!contract.chantierId) return;
+    if (!(await appConfirm(t('detail.stDeleteAdvanceConfirm')))) return;
+    try {
+      const updated = await api<TaskSubcontract>(
+        `/chantiers/${contract.chantierId}/subcontractors/${contract.id}/payments/${pay.id}`,
+        { method: 'DELETE' },
+      );
+      if (editId === pay.id) resetForm();
+      onPaid?.(updated);
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  const showForm = editing && !!contract.chantierId;
+
   return (
     <div className="sm:col-span-2 rounded-md bg-black/[0.02] p-2 space-y-2">
-      <p className="text-[12px] font-medium">{t('detail.paymentsTitle')}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[12px] font-medium">{t('detail.paymentsTitle')}</p>
+        {contract.chantierId && (
+          editing ? (
+            <MacActionBtn
+              icon={X}
+              tone="gray"
+              title={t('common.close')}
+              onClick={() => { setEditing(false); resetForm(); }}
+            />
+          ) : (
+            <MacActionBtn
+              icon={Pencil}
+              tone="orange"
+              title={t('common.edit')}
+              onClick={() => setEditing(true)}
+            />
+          )
+        )}
+      </div>
       <p className="text-[11px] text-gic-muted">
         {phaseLabel
-          ? `${t('detail.stPaidOnPhase')} ${formatMad(paidOnPhase)} · ${t('detail.stRemaining')} ${formatMad(left)}`
-          : `${t('siteOps.paid')} ${formatMad(paidAll)} · ${t('siteOps.moneyLeft')} ${formatMad(left)}`}
+          ? `${t('detail.stPaidOnPhase')} ${formatMad(paidOnPhase)}${cap > 0 ? ` · ${t('detail.stRemaining')} ${formatMad(left)}` : ''}`
+          : `${t('siteOps.paid')} ${formatMad(paidAll)}${cap > 0 ? ` · ${t('siteOps.moneyLeft')} ${formatMad(left)}` : ''}`}
         {contract.startDate ? ` · ${formatDate(contract.startDate)}` : ''}
         {contract.endDate ? ` → ${formatDate(contract.endDate)}` : ''}
       </p>
@@ -409,15 +478,31 @@ export function PaymentBox({
         {history.length === 0 ? (
           <li className="text-gic-muted">{t('detail.stNoAdvanceYet')}</li>
         ) : history.map((pay) => (
-          <li key={pay.id} className="flex justify-between gap-2">
+          <li key={pay.id} className="flex items-center justify-between gap-2">
             <span>{formatDate(pay.date)} · {kindText(pay.kind)}{pay.paymentMode ? ` · ${pay.paymentMode}` : ''}</span>
-            <span className="font-medium">{formatMad(pay.amount)}</span>
+            <span className="flex items-center gap-0.5">
+              <span className="font-medium">{formatMad(pay.amount)}</span>
+              {contract.chantierId && (
+                <>
+                  <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => startEdit(pay)} />
+                  <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => removePay(pay)} />
+                </>
+              )}
+            </span>
           </li>
         ))}
       </ul>
-      {left > 0 && contract.chantierId && (
+      {showForm && (
         <div className="grid gap-2 sm:grid-cols-4">
-          <Input label={t('fields.amountMad')} type="number" min="0.01" max={left} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <Input
+            label={t('fields.amountMad')}
+            type="number"
+            min="0.01"
+            max={room}
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
           <Select label={t('fields.mode')} value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="especes">{t('fields.modeCash')}</option>
             <option value="virement">{t('fields.modeTransfer')}</option>
@@ -428,7 +513,9 @@ export function PaymentBox({
             <option value="situation">{t('siteOps.progress')}</option>
             <option value="solde">{t('detail.stKindSolde')}</option>
           </Select>
-          <div className="flex items-end"><Btn type="button" onClick={pay}>{t('detail.addAdvance')}</Btn></div>
+          <div className="flex items-end">
+            <Btn type="button" onClick={savePay}>{editId ? t('common.save') : t('detail.addAdvance')}</Btn>
+          </div>
         </div>
       )}
     </div>

@@ -32,7 +32,7 @@ import {
   type AllocationValue,
 } from './FleetCommon';
 
-type Fixed = { enginId?: string; chantierId?: string; tranche?: string };
+type Fixed = { enginId?: string; chantierId?: string; tranche?: string; kind?: 'engin' | 'materiel' };
 
 type Paged<T> = { items: T[]; total: number; page: number; limit: number; pages: number };
 
@@ -104,7 +104,7 @@ function LogToolbar({
               value={enginId}
               onChange={setEnginId}
               className="w-48 shrink-0"
-              options={[{ value: '', label: t('fleet.filters.allEngins') }, ...engins.map((e) => ({ value: e.id, label: [e.code, e.designation || e.brand].filter(Boolean).join(' — ') }))]}
+              options={[{ value: '', label: t('fleet.filters.allEngins') }, ...engins.filter((e) => !fixed.kind || e.kind === fixed.kind).map((e) => ({ value: e.id, label: [e.code, e.designation || e.brand].filter(Boolean).join(' — ') }))]}
             />
           )}
           {!fixed.chantierId && (
@@ -278,7 +278,13 @@ function UsageModal({ open, onClose, onSaved, usage, fixed }: { open: boolean; o
       <form id="fleet-usage-form" onSubmit={submit}>
         <FormGrid>
           <div className="sm:col-span-2">
-            <EnginSelect engins={engins} value={form.enginId} disabled={!!fixed.enginId || !!usage} onChange={(enginId) => setForm({ ...form, enginId })} />
+            <EnginSelect
+              engins={engins}
+              value={form.enginId}
+              disabled={!!fixed.enginId || !!usage}
+              filter={fixed.kind ? (e) => e.kind === fixed.kind : undefined}
+              onChange={(enginId) => setForm({ ...form, enginId })}
+            />
           </div>
           <Input label={`${t('fleet.fields.date')} *`} type="date" required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
           <Select label={t('fleet.fields.driver')} value={form.driverId} onChange={(e) => setForm({ ...form, driverId: e.target.value })}>
@@ -325,7 +331,7 @@ function UsageModal({ open, onClose, onSaved, usage, fixed }: { open: boolean; o
 export function UsagePanel({ fixed = {}, toolbar = false, showKpis = false, reloadKey, onChanged }: { fixed?: Fixed; toolbar?: boolean; showKpis?: boolean; reloadKey?: number; onChanged?: () => void }) {
   const { t } = useI18n();
   const f = useFilterState(fixed);
-  const params = useMemo(() => ({ ...f.params, tranche: fixed.tranche }), [f.params, fixed.tranche]);
+  const params = useMemo(() => ({ ...f.params, tranche: fixed.tranche, kind: fixed.kind }), [f.params, fixed.tranche, fixed.kind]);
   const list = useLogList<Usage, Paged<Usage> & { totals: { hours: number; km: number; engins: number } }>('/engins/usages', params, reloadKey);
   const [modal, setModal] = useState<{ open: boolean; usage: Usage | null }>({ open: false, usage: null });
   const [deleting, setDeleting] = useState<Usage | null>(null);

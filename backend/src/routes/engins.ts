@@ -1485,9 +1485,10 @@ const movementInclude = {
 } as const;
 
 function movementInput(body: Record<string, unknown>) {
+  const quantity = Number(body.quantity);
   return {
     movementType: String(body.movementType || '').trim(),
-    quantity: Number(body.quantity),
+    quantity: Number.isInteger(quantity) ? quantity : NaN,
     chantierId: body.chantierId ? String(body.chantierId) : null,
     tranche: body.tranche ? String(body.tranche).trim() : null,
     fromChantierId: body.fromChantierId ? String(body.fromChantierId) : null,
@@ -1518,11 +1519,43 @@ router.get('/materiel/positions', async (req, res) => {
     select: { id: true, code: true, designation: true, quantity: true },
     orderBy: { designation: 'asc' },
   });
-  const rows: Array<{ enginId: string; code: string | null; designation: string | null; chantierId: string; chantierName: string; tranche: string | null; quantity: number }> = [];
+  const rows: Array<{
+    enginId: string;
+    code: string | null;
+    designation: string | null;
+    chantierId: string;
+    chantierName: string;
+    tranche: string | null;
+    quantity: number;
+    depot: number;
+    owned: number;
+    repair: number;
+  }> = [];
+  const catalog: Array<{
+    id: string;
+    code: string | null;
+    designation: string | null;
+    depot: number;
+    owned: number;
+    repair: number;
+    onSite: number;
+  }> = [];
   const movements = [];
   for (const engin of engins) {
     const stock = await stockOf(engin.id);
     if (!stock || !stock.snap.ok) continue;
+    const onSite = chantierId
+      ? stock.snap.sites.filter((site) => site.chantierId === chantierId).reduce((s, site) => s + site.quantity, 0)
+      : stock.snap.sites.reduce((s, site) => s + site.quantity, 0);
+    catalog.push({
+      id: engin.id,
+      code: engin.code,
+      designation: engin.designation,
+      depot: stock.snap.depot,
+      owned: stock.snap.owned,
+      repair: stock.snap.repair,
+      onSite,
+    });
     let sites = chantierId ? stock.snap.sites.filter((site) => site.chantierId === chantierId) : stock.snap.sites;
     if (tranche) sites = sites.filter((site) => (site.tranche || '') === tranche);
     for (const site of sites) {
@@ -1534,6 +1567,9 @@ router.get('/materiel/positions', async (req, res) => {
         chantierName: site.chantierId,
         tranche: site.tranche,
         quantity: site.quantity,
+        depot: stock.snap.depot,
+        owned: stock.snap.owned,
+        repair: stock.snap.repair,
       });
     }
     const related = stock.movements.filter((move) => {
@@ -1550,7 +1586,8 @@ router.get('/materiel/positions', async (req, res) => {
   const nameOf = new Map(names.map((row) => [row.id, row.name]));
   for (const row of rows) row.chantierName = nameOf.get(row.chantierId) || row.chantierId;
   movements.sort((a, b) => +new Date(b.date) - +new Date(a.date));
-  res.json({ rows, movements });
+  catalog.sort((a, b) => (a.designation || a.code || '').localeCompare(b.designation || b.code || '', 'fr'));
+  res.json({ rows, movements, catalog });
 });
 
 router.get('/:id/mouvements', async (req, res) => {
@@ -1577,6 +1614,9 @@ router.post('/:id/mouvements', async (req, res) => {
   if (!stock) return res.status(404).json({ message: 'Matériel introuvable' });
   if (stock.engin.kind !== 'materiel') return res.status(400).json({ message: 'Les mouvements de quantité concernent le matériel' });
   const input = movementInput(req.body as Record<string, unknown>);
+  if (!Number.isInteger(input.quantity) || input.quantity <= 0) {
+    return res.status(400).json({ message: 'La quantité doit être un entier (1, 2, 3…)' });
+  }
   const opening = (stock.engin.quantity || 0) - ownedDelta(stock.movements);
   const next = stockSnapshot(opening, [...stock.movements, input]);
   if (!next.ok) return res.status(400).json({ message: next.message });

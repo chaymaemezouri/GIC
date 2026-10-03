@@ -1,3 +1,12 @@
+export const PURCHASE_TYPES = ['outil', 'materiel', 'marchandise'] as const;
+export type PurchaseType = (typeof PURCHASE_TYPES)[number];
+
+export function parsePurchaseType(value: unknown): PurchaseType {
+  const s = String(value || '');
+  if (s === 'outil' || s === 'materiel' || s === 'marchandise') return s;
+  return 'marchandise';
+}
+
 export const PURCHASE_STATUSES = ['elabore', 'soumis', 'livre', 'valide', 'facture', 'paye', 'archive'] as const;
 export type PurchaseStatus = (typeof PURCHASE_STATUSES)[number];
 

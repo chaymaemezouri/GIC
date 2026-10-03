@@ -45,6 +45,20 @@ export const EXPENSE_CATEGORIES = [
   'autres',
 ] as const;
 export const COST_CATEGORIES = ['amortissement', 'location', 'entretien', 'reparation', 'carburant', 'autres'] as const;
+
+/** Quantité matériel : entier strict (1, 2, 3…) — pas 1,1. */
+export function parseIntQty(raw: string | number | null | undefined): number | null {
+  if (raw === '' || raw == null) return null;
+  const n = parseInt(String(raw).replace(',', '.').trim(), 10);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  if (String(raw).replace(',', '.').includes('.') && Number(String(raw).replace(',', '.')) !== n) return null;
+  return n;
+}
+
+export function formatQty(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '0';
+  return String(Math.round(value));
+}
 export const RETURN_CONDITIONS = ['bon', 'usure', 'a_reparer', 'hors_service'] as const;
 export const PAYMENT_MODES = ['especes', 'virement', 'cheque', 'carte'] as const;
 

@@ -32,6 +32,66 @@ function buildPropertyWhere(q: string, status: string, projectId: string) {
   };
 }
 
+function propertyDealType(type: unknown, status?: unknown) {
+  const raw = String(type || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+  if (raw === 'location' || raw === 'loue' || raw === 'louer') return 'location';
+  if (raw === 'vente' || raw === 'vendu' || raw === 'vendre') return 'vente';
+  const st = String(status || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (st === 'loue') return 'location';
+  if (st === 'vendu') return 'vente';
+  return 'vente';
+}
+
+const PROPERTY_LIST_SELECT = {
+  id: true,
+  reference: true,
+  name: true,
+  status: true,
+  price: true,
+  floorId: true,
+} as const;
+
+async function loadPropertyTypes(ids: string[]) {
+  const map = new Map<string, string>();
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return map;
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT id, type FROM Property WHERE id IN (${unique.map(() => '?').join(',')})`,
+      ...unique,
+    ) as Array<{ id: string; type: string | null }>;
+    for (const row of rows) map.set(row.id, row.type || 'vente');
+  } catch {
+    /* Prisma client pas encore régénéré */
+  }
+  return map;
+}
+
+function withPropertyTypes<T extends { id: string; status?: string; type?: string }>(
+  rows: T[],
+  types: Map<string, string>,
+): T[] {
+  return rows.map((row) => ({
+    ...row,
+    type: types.get(row.id) || propertyDealType(row.type, row.status),
+  }));
+}
+
+async function persistPropertyType(id: string, type: string) {
+  try {
+    await prisma.$executeRawUnsafe('UPDATE Property SET type = ? WHERE id = ?', type, id);
+  } catch (err) {
+    console.error('Property.type', err);
+  }
+}
+
 const router = Router();
 router.use(requireAuth);
 router.use(requirePermission);
@@ -340,7 +400,7 @@ router.get('/projects/:id/tree', async (req, res) => {
       },
       properties: {
         orderBy: { name: 'asc' },
-        select: { id: true, reference: true, name: true, status: true, price: true, floorId: true },
+        select: PROPERTY_LIST_SELECT,
       },
       tranches: {
         orderBy: { name: 'asc' },
@@ -356,7 +416,7 @@ router.get('/projects/:id/tree', async (req, res) => {
                     _count: { select: { properties: true } },
                     properties: {
                       orderBy: { name: 'asc' },
-                      select: { id: true, reference: true, name: true, status: true, price: true, floorId: true },
+                      select: PROPERTY_LIST_SELECT,
                     },
                   },
                 } },
@@ -368,6 +428,25 @@ router.get('/projects/:id/tree', async (req, res) => {
     },
   });
   if (!project) return res.status(404).json({ message: 'Projet introuvable' });
+  const propertyIds = [
+    ...(project.properties || []).map((p) => p.id),
+    ...project.tranches.flatMap((tr) =>
+      tr.blocs.flatMap((b) =>
+        b.lots.flatMap((l) => l.floors.flatMap((f) => (f.properties || []).map((p) => p.id))),
+      ),
+    ),
+  ];
+  const types = await loadPropertyTypes(propertyIds);
+  project.properties = withPropertyTypes(project.properties, types);
+  for (const tr of project.tranches) {
+    for (const b of tr.blocs) {
+      for (const l of b.lots) {
+        for (const f of l.floors) {
+          f.properties = withPropertyTypes(f.properties || [], types);
+        }
+      }
+    }
+  }
   res.json(project);
 });
 
@@ -808,7 +887,8 @@ router.get('/properties', async (req, res) => {
     }),
     prisma.property.count({ where }),
   ]);
-  res.json({ items, total, page, limit, pages: Math.ceil(total / limit) || 1 });
+  const types = await loadPropertyTypes(items.map((p) => p.id));
+  res.json({ items: withPropertyTypes(items, types), total, page, limit, pages: Math.ceil(total / limit) || 1 });
 });
 
 router.get('/properties/:id/history', async (req, res) => {
@@ -839,14 +919,18 @@ router.get('/properties/:id', async (req, res) => {
     },
   });
   if (!property) return res.status(404).json({ message: 'Bien introuvable' });
-  res.json(property);
+  const types = await loadPropertyTypes([property.id]);
+  res.json({ ...property, type: types.get(property.id) || propertyDealType((property as { type?: string }).type, property.status) });
 });
 
 router.post('/properties', async (req, res) => {
   const reference = await nextReference('BIEN');
+  const deal = propertyDealType(req.body.type, req.body.status);
+  const body = { ...req.body };
+  delete body.type;
   const property = await prisma.property.create({
     data: {
-      ...req.body,
+      ...body,
       reference,
       price: req.body.price ? Number(req.body.price) : null,
       surface: req.body.surface ? Number(req.body.surface) : null,
@@ -855,22 +939,26 @@ router.post('/properties', async (req, res) => {
       floorId: req.body.floorId || null,
     },
   });
+  await persistPropertyType(property.id, deal);
   await audit(req, 'création', 'Property', property.id, reference);
-  res.status(201).json(property);
+  res.status(201).json({ ...property, type: deal });
 });
 
 router.put('/properties/:id', async (req, res) => {
   const data = { ...req.body };
   delete data.reference;
   delete data.id;
+  const deal = data.type != null && data.type !== '' ? propertyDealType(data.type, data.status) : null;
+  delete data.type;
   if (data.price != null) data.price = Number(data.price);
   if (data.surface != null) data.surface = Number(data.surface);
   if (data.rooms != null) data.rooms = Number(data.rooms);
   if (data.projectId === '') data.projectId = null;
   if (data.floorId === '') data.floorId = null;
   const property = await prisma.property.update({ where: { id: req.params.id }, data });
+  if (deal) await persistPropertyType(property.id, deal);
   await audit(req, 'modification', 'Property', property.id, property.reference);
-  res.json(property);
+  res.json({ ...property, type: deal || propertyDealType(undefined, property.status) });
 });
 
 router.post('/properties/:id/photo', upload.single('file'), async (req, res) => {

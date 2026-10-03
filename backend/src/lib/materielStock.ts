@@ -35,7 +35,7 @@ export function stockSnapshot(opening: number, moves: StockMove[]): StockSnapsho
 
   for (const move of moves) {
     const q = Number(move.quantity);
-    if (!Number.isFinite(q) || q <= 0) return { ok: false, message: 'Quantité invalide' };
+    if (!Number.isInteger(q) || q <= 0) return { ok: false, message: 'La quantité doit être un entier (1, 2, 3…)' };
     if (move.movementType === 'entree') {
       owned += q;
       if (move.chantierId) bump(move.chantierId, move.tranche, q);

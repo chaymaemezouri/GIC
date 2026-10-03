@@ -2,7 +2,7 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Plus, Users, Truck, HardHat, Layers, ShoppingCart, Pencil, Trash2, Clock, ChevronRight, FileText, Package,
+  Plus, Users, Truck, HardHat, Layers, ShoppingCart, Pencil, Trash2, ChevronRight, FileText, Package, Car,
 } from 'lucide-react';
 import { api, fetchSupplierList, formatDate, formatMad } from '../lib/api';
 import { chantierDateError } from './ChantierFormFields';
@@ -12,16 +12,18 @@ import {
 import ProgressSteps from './ProgressSteps';
 import { TaskPhaseFields } from './TaskPhaseFields';
 import { emptyPhaseForm, ensureAnchoredPhases, extractWorkPhases, validatePhaseForm, workPhaseLabels, type TaskPhaseInput } from '../lib/progressPhases';
-import { workforceDetailPathForCategory } from '../lib/workforceScope';
+import { CHAUFFEUR_CATEGORY } from '../lib/workforceScope';
 import { PurchaseFormFields, emptyPurchaseForm, purchaseFormToBody, validatePurchaseForm, type PurchaseFormData } from './PurchaseFormFields';
 import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from './PurchaseBadges';
 import { EntityPickerPanel, enginToPickerItem } from './EntityPickerPanel';
 import { SiteEnginsPanel, type SiteEnginCosts } from './engins/SiteEngins';
 import { SiteMaterielPanel } from './engins/SiteMaterielPanel';
 import { useI18n } from '../i18n/I18nContext';
-import { ChantierWorkersPanel } from './ChantierWorkersPanel';
+import { ChantierWorkersHub } from './ChantierWorkersHub';
+import { type SiteAssignment } from './ChantierWorkersPanel';
+import DetailSectionNav from './DetailSectionNav';
 import { EntityDocChecklist } from './EntityDocChecklist';
-import { PaymentBox, TaskSubcontractEditor, draftFromContracts, subcontractTotals, type SubDraft, type TaskSubcontract } from './TaskSubcontractEditor';
+import { TaskSubcontractEditor, draftFromContracts, type SubDraft, type TaskSubcontract } from './TaskSubcontractEditor';
 
 export type TrancheListItem = {
   id: string;
@@ -86,7 +88,7 @@ export type TrancheDetail = TrancheListItem & {
   }>;
 };
 
-type TrancheTab = 'avancement' | 'ouvriers' | 'engins' | 'materiel' | 'achats' | 'pointage' | 'documents';
+type TrancheTab = 'avancement' | 'ouvriers' | 'chauffeurs' | 'engins' | 'materiel' | 'achats' | 'documents';
 
 export function ChantierTranchesList({
   chantierId,
@@ -234,7 +236,6 @@ export function ChantierTrancheView({
   const [editPhasesForm, setEditPhasesForm] = useState<TaskPhaseInput[]>(emptyPhaseForm());
   const [subDraft, setSubDraft] = useState<SubDraft>(draftFromContracts([], []));
   const [subContracts, setSubContracts] = useState<TaskSubcontract[]>([]);
-  const [stTask, setStTask] = useState<TrancheDetail['progress'][number] | null>(null);
   const [taskRef, setTaskRef] = useState<string[]>([]);
   const [standardLots, setStandardLots] = useState<{ name: string; phases: TaskPhaseInput[] }[]>([]);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
@@ -248,8 +249,6 @@ export function ChantierTrancheView({
     estimatedStartDate: '',
     estimatedEndDate: '',
   });
-  const [pointages, setPointages] = useState<any[]>([]);
-  const [pointageLoading, setPointageLoading] = useState(false);
 
   function load() {
     setError('');
@@ -280,29 +279,6 @@ export function ChantierTrancheView({
     }, 50);
     navigate(location.pathname, { replace: true, state: null });
   }, [detail, location.state]);
-
-  useEffect(() => {
-    if (tab !== 'pointage' || !detail) return;
-    loadTranchePointages();
-  }, [tab, detail?.id]);
-
-  function loadTranchePointages() {
-    if (!detail) return;
-    setPointageLoading(true);
-    const qs = new URLSearchParams({
-      chantierId,
-      limit: '50',
-      sort: 'date',
-      order: 'desc',
-      tranche: detail.name,
-    });
-    api<{ items: any[] }>(`/chantiers/pointage?${qs}`)
-      .then((r) => {
-        setPointages(r.items);
-      })
-      .catch(() => setPointages([]))
-      .finally(() => setPointageLoading(false));
-  }
 
   async function savePercent(progressId: string, percent: number) {
     setSavingProgress(progressId);
@@ -423,30 +399,6 @@ export function ChantierTrancheView({
     const work = extractWorkPhases(phases);
     const labels = workPhaseLabels(phases);
     return ensureAnchoredPhases(work.map((phase, index) => ({ ...phase, label: labels[index] })));
-  }
-
-  function withSite(contract: TaskSubcontract): TaskSubcontract {
-    return { ...contract, chantierId: contract.chantierId || chantierId };
-  }
-
-  function advanceBlocks(contracts: TaskSubcontract[], labels: string[]) {
-    const whole = contracts.find((item) => item.scope !== 'phase');
-    const phaseOnes = contracts.filter((item) => item.scope === 'phase');
-    if (whole) {
-      const names = labels.length ? labels : [t('detail.stWholeTask')];
-      return names.map((label) => ({
-        key: `task-${whole.id}-${label}`,
-        title: `${label} · ${whole.companyName}`,
-        contract: withSite(whole),
-        phaseLabel: labels.length ? label : undefined,
-      }));
-    }
-    return phaseOnes.map((contract) => ({
-      key: contract.id,
-      title: `${contract.phaseLabel || t('detail.stCompletePhases')} · ${contract.companyName}`,
-      contract: withSite(contract),
-      phaseLabel: undefined as string | undefined,
-    }));
   }
 
   async function addTask(e: React.FormEvent) {
@@ -653,14 +605,73 @@ export function ChantierTrancheView({
     return <p className="py-8 text-[12px] text-gic-muted text-center">{t('msg.loadingTranche')}</p>;
   }
 
-  const tabs: { id: TrancheTab; label: string; icon: typeof HardHat; badge?: number }[] = [
-    { id: 'avancement', label: t('tabs.progress'), icon: HardHat, badge: detail.tasksCount },
-    { id: 'ouvriers', label: t('tabs.workers'), icon: Users, badge: detail.assignments.length || undefined },
-    { id: 'pointage', label: t('tabs.attendance'), icon: Clock, badge: detail.workersCount },
-    { id: 'engins', label: t('tabs.equipment'), icon: Truck, badge: detail.enginCosts?.byEngin?.length || detail.missionsCount },
-    { id: 'materiel', label: t('tabs.materiel'), icon: Package },
-    { id: 'achats', label: t('tabs.purchases'), icon: ShoppingCart, badge: detail.purchasesCount },
-    { id: 'documents', label: t('tabs.documents'), icon: FileText },
+  const workerAssignments: SiteAssignment[] = detail.assignments.flatMap((a) => (
+    a.workforce.id && a.workforce.category !== CHAUFFEUR_CATEGORY
+      ? [{
+          id: a.id,
+          functionRole: a.functionRole,
+          tranche: a.tranche,
+          workforce: {
+            id: a.workforce.id,
+            firstName: a.workforce.firstName,
+            lastName: a.workforce.lastName,
+            category: a.workforce.category,
+            phone1: a.workforce.phone1,
+            groupe: a.workforce.groupe,
+          },
+        }]
+      : []
+  ));
+  const driverAssignments: SiteAssignment[] = detail.assignments.flatMap((a) => (
+    a.workforce.id && a.workforce.category === CHAUFFEUR_CATEGORY
+      ? [{
+          id: a.id,
+          functionRole: a.functionRole,
+          tranche: a.tranche,
+          workforce: {
+            id: a.workforce.id,
+            firstName: a.workforce.firstName,
+            lastName: a.workforce.lastName,
+            category: a.workforce.category,
+            phone1: a.workforce.phone1,
+            groupe: a.workforce.groupe,
+          },
+        }]
+      : []
+  ));
+
+  const navGroups = [
+    {
+      id: 'pilotage',
+      label: t('tabs.pilotage'),
+      items: [
+        { id: 'avancement' as const, label: t('tabs.progress'), icon: HardHat, badge: detail.tasksCount || undefined },
+      ],
+    },
+    {
+      id: 'exploitation',
+      label: t('tabs.exploitation'),
+      items: [
+        { id: 'ouvriers' as const, label: t('tabs.workers'), icon: Users, badge: workerAssignments.length || undefined },
+        { id: 'chauffeurs' as const, label: t('pages.drivers'), icon: Car, badge: driverAssignments.length || undefined },
+        { id: 'engins' as const, label: t('tabs.equipment'), icon: Truck, badge: detail.enginCosts?.byEngin?.length || detail.missionsCount || undefined },
+        { id: 'materiel' as const, label: t('tabs.materiel'), icon: Package },
+      ],
+    },
+    {
+      id: 'appro',
+      label: t('tabs.supply'),
+      items: [
+        { id: 'achats' as const, label: t('tabs.purchases'), icon: ShoppingCart, badge: detail.purchasesCount || undefined },
+      ],
+    },
+    {
+      id: 'ressources',
+      label: t('tabs.mediaDocs'),
+      items: [
+        { id: 'documents' as const, label: t('tabs.documents'), icon: FileText },
+      ],
+    },
   ];
 
   return (
@@ -743,30 +754,12 @@ export function ChantierTrancheView({
       </div>
 
       <div className="tranche-detail-shell">
-        <nav className="tranche-detail-nav" aria-label={t('detail.trancheSectionsAria')}>
-          <ul className="chantier-detail-nav-list">
-            {tabs.map((item) => {
-              const Icon = item.icon;
-              const isActive = tab === item.id;
-              return (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    className={`chantier-detail-nav-item${isActive ? ' chantier-detail-nav-item-active' : ''}`}
-                    onClick={() => setTab(item.id)}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    <Icon size={15} strokeWidth={2} className="chantier-detail-nav-icon" />
-                    <span className="chantier-detail-nav-label">{item.label}</span>
-                    {item.badge != null && item.badge > 0 && (
-                      <span className="chantier-detail-nav-badge">{item.badge}</span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
+        <DetailSectionNav
+          active={tab}
+          onChange={(id) => setTab(id as TrancheTab)}
+          groups={navGroups}
+          ariaLabel={t('detail.trancheSectionsAria')}
+        />
 
         <div className="tranche-detail-content">
       {tab === 'avancement' && (
@@ -821,24 +814,17 @@ export function ChantierTrancheView({
                         <button type="button" className="mac-chip mac-chip-violet shrink-0" onClick={() => openEditPhases(p)}>{t('detail.stBadge')}</button>
                       )}
                     </p>
-                    {contracts.length > 0 && (() => {
-                      const money = subcontractTotals(contracts);
-                      return (
-                        <p className="mac-task-sub leading-snug whitespace-normal">
-                          {t('detail.stPrice')} {formatMad(money.prix)}
-                          {' · '}{t('detail.stAdvanceTotal')} {formatMad(money.avance)}
-                          {' · '}{t('detail.stRemaining')} {formatMad(money.reste)}
-                        </p>
-                      );
-                    })()}
+                    {contracts.length > 0 && (
+                      <p className="mac-task-sub truncate">
+                        {whole
+                          ? `${t('detail.stWholeTask')} · ${whole.companyName}`
+                          : `${t('detail.stSomePhases')} · ${[...new Set(phaseOnes.map((item) => item.companyName).filter(Boolean))].join(', ')}`}
+                      </p>
+                    )}
                     <p className="mac-task-sub truncate">
-                      {whole
-                        ? `${t('detail.stWholeTask')} · ${whole.companyName}`
-                        : phaseOnes.length
-                          ? `${t('detail.stSomePhases')} · ${phaseOnes.map((item) => item.phaseLabel).filter(Boolean).join(', ')}`
-                          : p.phases?.length
-                            ? t('detail.phasesCount', { count: p.phases.length })
-                            : t('detail.noPhasesShort')}
+                      {p.phases?.length
+                        ? t('detail.phasesCount', { count: p.phases.length })
+                        : t('detail.noPhasesShort')}
                     </p>
                   </div>
                   <div className={`flex-1 min-w-0${savingProgress === p.id ? ' opacity-60' : ''}`}>
@@ -877,9 +863,20 @@ export function ChantierTrancheView({
       )}
 
       {tab === 'ouvriers' && (
-        <ChantierWorkersPanel
+        <ChantierWorkersHub
           chantierId={chantierId}
-          assignments={detail.assignments}
+          assignments={workerAssignments}
+          tranches={[detail.name]}
+          fixedTranche={detail.name}
+          onChanged={load}
+        />
+      )}
+
+      {tab === 'chauffeurs' && (
+        <ChantierWorkersHub
+          scope="drivers"
+          chantierId={chantierId}
+          assignments={driverAssignments}
           tranches={[detail.name]}
           fixedTranche={detail.name}
           onChanged={load}
@@ -978,54 +975,6 @@ export function ChantierTrancheView({
           )}
         </div>
       )}
-
-      {tab === 'pointage' && (
-        <div>
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <p className="text-[13px] font-medium text-gic-ink">{t('detail.attendanceOnTranche')}</p>
-            <div className="flex flex-wrap gap-2">
-              <Link to={`/pointage?chantierId=${chantierId}&tranche=${encodeURIComponent(detail.name)}&tab=synthese`}>
-                <Btn variant="secondary" icon={Users}>{t('pointageMgmt.byWorkerTab')}</Btn>
-              </Link>
-              <Link to={`/pointage?chantierId=${chantierId}&tranche=${encodeURIComponent(detail.name)}&tab=gestion`}>
-                <Btn icon={Clock}>{t('actions.enterAttendance')}</Btn>
-              </Link>
-            </div>
-          </div>
-          {pointageLoading ? (
-            <p className="py-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
-          ) : pointages.length === 0 ? (
-            <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptyAttendanceOnTranche')}</p>
-          ) : (
-            <TableWrap mac>
-              <thead>
-                <tr>
-                  <Th mac>{t('columns.date')}</Th>
-                  <Th mac>{t('columns.worker')}</Th>
-                  <Th mac>{t('columns.days')}</Th>
-                  <Th mac>{t('columns.validated')}</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {pointages.map((p) => (
-                  <tr key={p.id}>
-                    <Td mac className="mac-table-muted">{formatDate(p.date)}</Td>
-                    <Td mac>
-                      {p.workforce ? (
-                        <Link to={workforceDetailPathForCategory(p.workforce.category, p.workforce.id)} className="mac-table-ref">
-                          {p.workforce.firstName} {p.workforce.lastName}
-                        </Link>
-                      ) : '—'}
-                    </Td>
-                    <Td mac>{p.totalDay}</Td>
-                    <Td mac>{p.validated ? t('common.yes') : t('common.no')}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </TableWrap>
-          )}
-        </div>
-      )}
         </div>
       </div>
 
@@ -1102,13 +1051,14 @@ export function ChantierTrancheView({
               setAddSubDraft((prev) => keepPhaseChoices(prev, labels));
             }}
           />
-          <TaskSubcontractEditor
-            draft={addSubDraft}
-            labels={workPhaseLabels(addTaskForm.phases)}
-            chantierId={chantierId}
-            contracts={[]}
-            onChange={setAddSubDraft}
-          />
+            <TaskSubcontractEditor
+              draft={addSubDraft}
+              labels={workPhaseLabels(addTaskForm.phases)}
+              chantierId={chantierId}
+              contracts={[]}
+              onChange={setAddSubDraft}
+              hidePayments
+            />
           <p className="text-[10px] text-gic-muted">{t('detail.trancheLabel')} <strong>{detail.name}</strong> · {t('fields.alwaysStartAtZero')}</p>
         </form>
       </Modal>
@@ -1139,30 +1089,11 @@ export function ChantierTrancheView({
               chantierId={chantierId}
               contracts={subContracts}
               onChange={setSubDraft}
-              hidePayments
+              onPaid={(updated) => setSubContracts((rows) => rows.map((row) => row.id === updated.id ? updated : row))}
             />
             <div>
               <Btn type="button" variant="secondary" onClick={() => persistLot(false)}>{t('detail.stSaveContract')}</Btn>
             </div>
-          </section>
-          <section className="space-y-2">
-            <p className="text-[12px] font-semibold uppercase tracking-wide text-gic-muted">{t('detail.stEditStepAdvances')}</p>
-            {subDraft.mode === 'none' && subContracts.length === 0 ? (
-              <p className="text-[12px] text-gic-muted">{t('detail.stEditAdvancesHint')}</p>
-            ) : subContracts.length === 0 ? (
-              <p className="text-[12px] text-gic-muted">{t('detail.stEditAdvancesHint')}</p>
-            ) : (
-              advanceBlocks(subContracts, workPhaseLabels(editPhasesForm)).map((block) => (
-                <div key={block.key} className="rounded-lg border border-black/[0.08] p-3">
-                  <p className="text-[12px] font-medium mb-2">{block.title}</p>
-                  <PaymentBox
-                    contract={block.contract}
-                    phaseLabel={block.phaseLabel}
-                    onPaid={(updated) => setSubContracts((rows) => rows.map((row) => row.id === updated.id ? updated : row))}
-                  />
-                </div>
-              ))
-            )}
           </section>
         </form>
       </Modal>
@@ -1199,50 +1130,6 @@ export function ChantierTrancheView({
         </form>
       </Modal>
 
-      <Modal
-        open={!!stTask}
-        size="lg"
-        title={stTask ? `${t('detail.stDetail')} — ${stTask.taskName}` : ''}
-        onClose={() => setStTask(null)}
-        footer={<Btn variant="secondary" onClick={() => setStTask(null)}>{t('common.close')}</Btn>}
-      >
-        {stTask && (
-          <div className="space-y-3">
-            {(stTask.subcontractors || []).length === 0 && <p className="text-[12px] text-gic-muted">{t('detail.stNone')}</p>}
-            {advanceBlocks(stTask.subcontractors || [], (stTask.phases || []).map((phase) => phase.label).filter(Boolean)).map((block) => (
-              <div key={block.key} className="rounded-lg border border-black/[0.06] p-3">
-                <p className="text-[13px] font-medium">
-                  <span className="mac-chip mac-chip-violet mr-2">{t('detail.stBadge')}</span>
-                  {block.title}
-                </p>
-                {(() => {
-                  const money = subcontractTotals([block.contract]);
-                  return (
-                    <p className="text-[12px] text-gic-muted mt-1">
-                      {t('detail.stPrice')} {formatMad(money.prix)}
-                      {' · '}{t('detail.stAdvanceTotal')} {formatMad(money.avance)}
-                      {' · '}{t('detail.stRemaining')} {formatMad(money.reste)}
-                    </p>
-                  );
-                })()}
-                <div className="mt-2">
-                  <PaymentBox
-                    contract={block.contract}
-                    phaseLabel={block.phaseLabel}
-                    onPaid={(updated) => {
-                      setStTask((current) => current ? {
-                        ...current,
-                        subcontractors: (current.subcontractors || []).map((row) => row.id === updated.id ? updated : row),
-                      } : current);
-                      load();
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }

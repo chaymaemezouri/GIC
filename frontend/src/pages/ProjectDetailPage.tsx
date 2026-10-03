@@ -14,6 +14,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentAddButton } from '../components/DocumentAddButton';
 import { fileUrl, photoSrc } from '../lib/photoUrl';
+import { availabilityStatusOf, propertyDealOf } from '../lib/propertyDeal';
 import {
   buildProjectDocChecklist,
   newCustomChecklistKey,
@@ -34,6 +35,12 @@ import {
 } from '../components/BienFormFields';
 import { ChantierFormFields, emptyChantierForm, type ChantierFormData, type ChefOption } from '../components/ChantierFormFields';
 import ConversationsPanel from '../components/ConversationsPanel';
+import {
+  SaleFormFields, emptySaleForm, saleFormToCreateBody, type SaleFormData,
+} from '../components/SaleFormFields';
+import {
+  RentalFormFields, emptyRentalForm, rentalFormToBody, type RentalFormData,
+} from '../components/RentalFormFields';
 
 type Tab = 'infos' | 'galerie' | 'structure' | 'biens' | 'chantiers' | 'ventes' | 'locations' | 'documents' | 'echanges' | 'historique';
 
@@ -98,6 +105,14 @@ export default function ProjectDetailPage() {
   const [rentalModalOpen, setRentalModalOpen] = useState(false);
   const [rentalDetail, setRentalDetail] = useState<any>(null);
   const [rentalDetailLoading, setRentalDetailLoading] = useState(false);
+  const [saleFormOpen, setSaleFormOpen] = useState(false);
+  const [saleForm, setSaleForm] = useState<SaleFormData>(emptySaleForm());
+  const [saleFormError, setSaleFormError] = useState('');
+  const [saleLock, setSaleLock] = useState<{ id: string; label: string } | null>(null);
+  const [rentalFormOpen, setRentalFormOpen] = useState(false);
+  const [rentalForm, setRentalForm] = useState<RentalFormData>(emptyRentalForm());
+  const [rentalFormError, setRentalFormError] = useState('');
+  const [rentalLock, setRentalLock] = useState<{ id: string; label: string } | null>(null);
 
   function load() {
     if (!id) return;
@@ -118,10 +133,15 @@ export default function ProjectDetailPage() {
     api<ChefOption[]>('/chantiers/chefs').then(setChefs).catch(() => {});
   }, [id]);
 
-  useEffect(() => {
+  function loadDeals() {
     if (!id) return;
     api(`/immobilier/projects/${id}/sales`).then(setSales).catch(() => setSales([]));
     api(`/immobilier/projects/${id}/rentals`).then(setRentals).catch(() => setRentals([]));
+  }
+
+  useEffect(() => {
+    if (!id) return;
+    loadDeals();
     reloadDocuments();
   }, [id]);
 
@@ -557,6 +577,66 @@ export default function ProjectDetailPage() {
     }
   }
 
+  function propertyLabel(p: { reference?: string; name?: string }) {
+    return `${p.reference || ''} — ${p.name || ''}`.replace(/^ — /, '');
+  }
+
+  function openNewSale(p?: { id: string; reference?: string; name?: string; price?: number | null }) {
+    setSaleForm({
+      ...emptySaleForm(),
+      propertyId: p?.id || '',
+      salePrice: p?.price != null ? String(p.price) : '',
+    });
+    setSaleLock(p ? { id: p.id, label: propertyLabel(p) } : null);
+    setSaleFormError('');
+    setSaleFormOpen(true);
+  }
+
+  function openNewRental(p?: { id: string; reference?: string; name?: string; price?: number | null }) {
+    setRentalForm({
+      ...emptyRentalForm(),
+      propertyId: p?.id || '',
+      monthlyRent: '',
+    });
+    setRentalLock(p ? { id: p.id, label: propertyLabel(p) } : null);
+    setRentalFormError('');
+    setRentalFormOpen(true);
+  }
+
+  async function saveProjectSale(e: React.FormEvent) {
+    e.preventDefault();
+    setSaleFormError('');
+    try {
+      await api('/transactions/sales', {
+        method: 'POST',
+        body: JSON.stringify(saleFormToCreateBody(saleForm)),
+      });
+      setSaleFormOpen(false);
+      setSaleLock(null);
+      load();
+      loadDeals();
+    } catch (err) {
+      setSaleFormError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function saveProjectRental(e: React.FormEvent) {
+    e.preventDefault();
+    setRentalFormError('');
+    try {
+      await api('/transactions/rentals', {
+        method: 'POST',
+        body: JSON.stringify(rentalFormToBody(rentalForm)),
+      });
+      setRentalFormOpen(false);
+      setRentalLock(null);
+      load();
+      loadDeals();
+    } catch (err) {
+      setRentalFormError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
   async function openSaleDetail(saleId: string) {
     setSaleModalOpen(true);
     setSaleDetailLoading(true);
@@ -672,13 +752,19 @@ export default function ProjectDetailPage() {
   const chantierCount = project?.chantiers?.length ?? 0;
   const mapsQuery = project ? projectLocationQuery(project) : '';
   const mapsUrl = mapsQuery ? googleMapsSearchUrl(mapsQuery) : '';
+  const venteBiens = (project?.properties || []).filter((p: { id: string; type?: string; status?: string }) => (
+    propertyDealOf(p) === 'vente' || sales.some((s: { property?: { id: string } }) => s.property?.id === p.id)
+  ));
+  const locationBiens = (project?.properties || []).filter((p: { id: string; type?: string; status?: string }) => (
+    propertyDealOf(p) === 'location' || rentals.some((r: { property?: { id: string } }) => r.property?.id === p.id)
+  ));
 
   const chipLabels: Partial<Record<Tab, string>> = {
     biens: `${t('tabs.properties')} (${project?.properties?.length ?? 0})`,
     galerie: `${t('tabs.gallery')} (${imageCount})`,
     chantiers: `${t('nav.sites')} (${chantierCount})`,
-    ventes: `${t('tabs.sales')} (${sales.length})`,
-    locations: `${t('tabs.rentals')} (${rentals.length})`,
+    ventes: `${t('tabs.sales')} (${venteBiens.length})`,
+    locations: `${t('tabs.rentals')} (${locationBiens.length})`,
   };
 
   if (!project && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
@@ -835,8 +921,8 @@ export default function ProjectDetailPage() {
                 items: [
                   { id: 'structure', label: t('tabs.structure'), icon: Layers },
                   { id: 'biens', label: t('tabs.properties'), icon: Home, badge: project.properties?.length ?? 0 },
-                  { id: 'ventes', label: t('tabs.sales'), icon: Building2, badge: sales.length },
-                  { id: 'locations', label: t('tabs.rentals'), icon: KeyRound, badge: rentals.length },
+                  { id: 'ventes', label: t('tabs.sales'), icon: Building2, badge: venteBiens.length },
+                  { id: 'locations', label: t('tabs.rentals'), icon: KeyRound, badge: locationBiens.length },
                 ],
               },
               {
@@ -1184,6 +1270,7 @@ export default function ProjectDetailPage() {
                 <tr>
                   <Th mac>{t('columns.reference')}</Th>
                   <Th mac>{t('columns.designation')}</Th>
+                  <Th mac>{t('columns.type')}</Th>
                   <Th mac>{t('columns.status')}</Th>
                   <Th mac>{t('columns.price')}</Th>
                   <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
@@ -1194,7 +1281,10 @@ export default function ProjectDetailPage() {
                   <tr key={p.id} className="cursor-pointer hover:bg-gray-50/60" onClick={() => openEditBien(p.id)}>
                     <Td mac className="font-medium text-gic-violet">{p.reference}</Td>
                     <Td mac>{p.name}</Td>
-                    <Td mac><StatusPill status={p.status} quiet /></Td>
+                    <Td mac>
+                      <StatusPill status={propertyDealOf(p) === 'location' ? 'loué' : 'vendu'} quiet />
+                    </Td>
+                    <Td mac><StatusPill status={availabilityStatusOf(p.status)} quiet /></Td>
                     <Td mac>{formatMad(p.price)}</Td>
                     <Td mac className="mac-td-actions">
                       <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
@@ -1214,45 +1304,73 @@ export default function ProjectDetailPage() {
 
       {tab === 'ventes' && (
         <div className="mt-1">
-          <h2 className="text-sm font-semibold flex items-center gap-2 mb-3">
-            <TrendingUp size={16} /> {t('tabs.sales')}
-          </h2>
-          {sales.length === 0 ? (
-            <p className="text-[12px] text-gic-muted py-4">{t('msg.emptySales')}</p>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <TrendingUp size={16} /> {t('tabs.sales')}
+            </h2>
+            <Btn icon={Plus} onClick={() => openNewSale()}>{t('actions.newSale')}</Btn>
+          </div>
+          {venteBiens.length === 0 ? (
+            <div className="py-6 text-center">
+              <p className="text-[12px] text-gic-muted mb-3">{t('msg.emptySales')}</p>
+              <Btn icon={Plus} onClick={() => openNewSale()}>{t('actions.newSale')}</Btn>
+            </div>
           ) : (
             <TableWrap mac>
               <thead>
                 <tr>
-                  <Th mac>{t('columns.ref')}</Th>
+                  <Th mac>{t('columns.reference')}</Th>
+                  <Th mac>{t('columns.designation')}</Th>
                   <Th mac>{t('columns.client')}</Th>
-                  <Th mac>{t('columns.property')}</Th>
-                  <Th mac>{t('columns.amount')}</Th>
+                  <Th mac>{t('columns.price')}</Th>
                   <Th mac>{t('columns.status')}</Th>
                   <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
                 </tr>
               </thead>
               <tbody>
-                {sales.map((s) => (
-                  <tr key={s.id} className="cursor-pointer hover:bg-gray-50/60" onClick={() => openSaleDetail(s.id)}>
-                    <Td mac className="font-medium text-gic-violet">{s.reference}</Td>
-                    <Td mac>
-                      <Link to={`/clients/${s.client.id}`} className="hover:text-gic-violet" onClick={(e) => e.stopPropagation()}>
-                        {s.client.firstName} {s.client.lastName}
-                      </Link>
-                    </Td>
-                    <Td mac className="text-[11px]">{s.property.reference} — {s.property.name}</Td>
-                    <Td mac>{formatMad(s.netPrice)}</Td>
-                    <Td mac><StatusPill status={s.status} quiet /></Td>
-                    <Td mac className="mac-td-actions">
-                      <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
-                        <MacActionBtn icon={ExternalLink} tone="blue" title={t('common.preview')} onClick={() => openSaleDetail(s.id)} />
-                        <Link to={`/ventes/${s.id}`} className="mac-action-btn mac-action-btn-gray" title={t('actions.openFiche')}>
-                          <ExternalLink size={14} strokeWidth={2.15} />
-                        </Link>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
+                {venteBiens.map((p: any) => {
+                  const sale = sales.find((s: any) => s.property?.id === p.id);
+                  return (
+                    <tr
+                      key={p.id}
+                      className="cursor-pointer hover:bg-gray-50/60"
+                      onClick={() => (sale ? openSaleDetail(sale.id) : openNewSale(p))}
+                    >
+                      <Td mac className="font-medium text-gic-violet">{p.reference}</Td>
+                      <Td mac>{p.name}</Td>
+                      <Td mac>
+                        {sale?.client ? (
+                          <Link to={`/clients/${sale.client.id}`} className="hover:text-gic-violet" onClick={(e) => e.stopPropagation()}>
+                            {sale.client.firstName} {sale.client.lastName}
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            className="text-[12px] text-[#007aff] hover:underline"
+                            onClick={(e) => { e.stopPropagation(); openNewSale(p); }}
+                          >
+                            {t('fields.selectClient')}
+                          </button>
+                        )}
+                      </Td>
+                      <Td mac>{formatMad(sale?.netPrice ?? p.price)}</Td>
+                      <Td mac><StatusPill status={availabilityStatusOf(p.status)} quiet /></Td>
+                      <Td mac className="mac-td-actions">
+                        <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
+                          <MacActionBtn
+                            icon={Pencil}
+                            tone="orange"
+                            title={sale ? t('common.edit') : t('actions.newSale')}
+                            onClick={() => (sale ? navigate(`/ventes/${sale.id}`) : openNewSale(p))}
+                          />
+                          <Link to={sale ? `/ventes/${sale.id}` : `/biens/${p.id}`} title={t('actions.openFiche')} className="mac-action-btn mac-action-btn-blue">
+                            <ExternalLink size={14} strokeWidth={2.15} />
+                          </Link>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </TableWrap>
           )}
@@ -1261,45 +1379,73 @@ export default function ProjectDetailPage() {
 
       {tab === 'locations' && (
         <div className="mt-1">
-          <h2 className="text-sm font-semibold flex items-center gap-2 mb-3">
-            <KeyRound size={16} /> {t('tabs.rentals')}
-          </h2>
-          {rentals.length === 0 ? (
-            <p className="text-[12px] text-gic-muted py-4">{t('msg.emptyRentals')}</p>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <KeyRound size={16} /> {t('tabs.rentals')}
+            </h2>
+            <Btn icon={Plus} onClick={() => openNewRental()}>{t('actions.newRental')}</Btn>
+          </div>
+          {locationBiens.length === 0 ? (
+            <div className="py-6 text-center">
+              <p className="text-[12px] text-gic-muted mb-3">{t('msg.emptyRentals')}</p>
+              <Btn icon={Plus} onClick={() => openNewRental()}>{t('actions.newRental')}</Btn>
+            </div>
           ) : (
             <TableWrap mac>
               <thead>
                 <tr>
-                  <Th mac>{t('columns.ref')}</Th>
+                  <Th mac>{t('columns.reference')}</Th>
+                  <Th mac>{t('columns.designation')}</Th>
                   <Th mac>{t('columns.tenant')}</Th>
-                  <Th mac>{t('columns.property')}</Th>
-                  <Th mac>{t('columns.rentMonth')}</Th>
+                  <Th mac>{t('columns.price')}</Th>
                   <Th mac>{t('columns.status')}</Th>
                   <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
                 </tr>
               </thead>
               <tbody>
-                {rentals.map((r) => (
-                  <tr key={r.id} className="cursor-pointer hover:bg-gray-50/60" onClick={() => openRentalDetail(r.id)}>
-                    <Td mac className="font-medium text-gic-violet">{r.reference}</Td>
-                    <Td mac>
-                      <Link to={`/clients/${r.client.id}`} className="hover:text-gic-violet" onClick={(e) => e.stopPropagation()}>
-                        {r.client.firstName} {r.client.lastName}
-                      </Link>
-                    </Td>
-                    <Td mac className="text-[11px]">{r.property.reference} — {r.property.name}</Td>
-                    <Td mac>{formatMad(r.monthlyRent)}</Td>
-                    <Td mac><StatusPill status={r.status} quiet /></Td>
-                    <Td mac className="mac-td-actions">
-                      <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
-                        <MacActionBtn icon={ExternalLink} tone="blue" title={t('common.preview')} onClick={() => openRentalDetail(r.id)} />
-                        <Link to={`/locations/${r.id}`} className="mac-action-btn mac-action-btn-gray" title={t('actions.openFiche')}>
-                          <ExternalLink size={14} strokeWidth={2.15} />
-                        </Link>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
+                {locationBiens.map((p: any) => {
+                  const rental = rentals.find((r: any) => r.property?.id === p.id);
+                  return (
+                    <tr
+                      key={p.id}
+                      className="cursor-pointer hover:bg-gray-50/60"
+                      onClick={() => (rental ? openRentalDetail(rental.id) : openNewRental(p))}
+                    >
+                      <Td mac className="font-medium text-gic-violet">{p.reference}</Td>
+                      <Td mac>{p.name}</Td>
+                      <Td mac>
+                        {rental?.client ? (
+                          <Link to={`/clients/${rental.client.id}`} className="hover:text-gic-violet" onClick={(e) => e.stopPropagation()}>
+                            {rental.client.firstName} {rental.client.lastName}
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            className="text-[12px] text-[#007aff] hover:underline"
+                            onClick={(e) => { e.stopPropagation(); openNewRental(p); }}
+                          >
+                            {t('fields.selectClient')}
+                          </button>
+                        )}
+                      </Td>
+                      <Td mac>{formatMad(rental?.monthlyRent ?? p.price)}</Td>
+                      <Td mac><StatusPill status={availabilityStatusOf(p.status)} quiet /></Td>
+                      <Td mac className="mac-td-actions">
+                        <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
+                          <MacActionBtn
+                            icon={Pencil}
+                            tone="orange"
+                            title={rental ? t('common.edit') : t('actions.newRental')}
+                            onClick={() => (rental ? navigate(`/locations/${rental.id}`) : openNewRental(p))}
+                          />
+                          <Link to={rental ? `/locations/${rental.id}` : `/biens/${p.id}`} title={t('actions.openFiche')} className="mac-action-btn mac-action-btn-blue">
+                            <ExternalLink size={14} strokeWidth={2.15} />
+                          </Link>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </TableWrap>
           )}
@@ -1589,6 +1735,65 @@ export default function ProjectDetailPage() {
             lockedFloorLabel={bienFloorLock?.label}
           />
           {bienError && <p className="mt-3 text-[11px] text-gic-coral">{bienError}</p>}
+        </form>
+      </Modal>
+
+      <Modal
+        open={saleFormOpen}
+        size="lg"
+        title={t('actions.newSale')}
+        onClose={() => { setSaleFormOpen(false); setSaleLock(null); setSaleFormError(''); }}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => { setSaleFormOpen(false); setSaleLock(null); }}>{t('common.cancel')}</Btn>
+            <Btn form="proj-sale-form" type="submit">{t('common.add')}</Btn>
+          </>
+        }
+      >
+        <form id="proj-sale-form" onSubmit={saveProjectSale}>
+          <SaleFormFields
+            form={saleForm}
+            setForm={setSaleForm}
+            clients={[]}
+            properties={(project?.properties || []).map((p: any) => ({
+              id: p.id,
+              reference: p.reference,
+              name: p.name,
+              status: p.status,
+            }))}
+            lockPropertyId={saleLock?.id}
+            lockedPropertyLabel={saleLock?.label}
+          />
+          {saleFormError && <p className="mt-3 text-[11px] text-gic-coral">{saleFormError}</p>}
+        </form>
+      </Modal>
+
+      <Modal
+        open={rentalFormOpen}
+        size="lg"
+        title={t('actions.newRental')}
+        onClose={() => { setRentalFormOpen(false); setRentalLock(null); setRentalFormError(''); }}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => { setRentalFormOpen(false); setRentalLock(null); }}>{t('common.cancel')}</Btn>
+            <Btn form="proj-rental-form" type="submit">{t('common.add')}</Btn>
+          </>
+        }
+      >
+        <form id="proj-rental-form" onSubmit={saveProjectRental}>
+          <RentalFormFields
+            form={rentalForm}
+            setForm={setRentalForm}
+            properties={(project?.properties || []).map((p: any) => ({
+              id: p.id,
+              reference: p.reference,
+              name: p.name,
+              status: p.status,
+            }))}
+            lockPropertyId={rentalLock?.id}
+            lockedPropertyLabel={rentalLock?.label}
+          />
+          {rentalFormError && <p className="mt-3 text-[11px] text-gic-coral">{rentalFormError}</p>}
         </form>
       </Modal>
 

@@ -250,9 +250,6 @@ router.post('/sales', async (req, res) => {
   }
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   if (!property) return res.status(404).json({ message: 'Bien introuvable' });
-  if (property.status === 'vendu') {
-    return res.status(400).json({ message: 'Bien déjà vendu (RG-BIEN-002)' });
-  }
   const active = await prisma.sale.findFirst({
     where: { propertyId, status: { notIn: ['annulée', 'résiliée'] } },
   });
@@ -293,6 +290,9 @@ router.post('/sales', async (req, res) => {
     });
     return created;
   });
+  try {
+    await prisma.$executeRawUnsafe('UPDATE Property SET type = ? WHERE id = ?', 'vente', propertyId);
+  } catch { /* type column */ }
   await audit(req, 'création', 'Sale', sale.id, reference);
 
   if (advanceAmount > 0) {
@@ -717,8 +717,12 @@ router.post('/rentals', async (req, res) => {
     return res.status(400).json({ message: 'Client, bien et mensualité obligatoires' });
   }
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
-  if (!property || !['disponible', 'réservé'].includes(property.status)) {
-    return res.status(400).json({ message: 'Bien non disponible à la location' });
+  if (!property) return res.status(404).json({ message: 'Bien introuvable' });
+  const activeRental = await prisma.rental.findFirst({
+    where: { propertyId, status: 'active' },
+  });
+  if (activeRental) {
+    return res.status(400).json({ message: 'Une location active existe déjà pour ce bien' });
   }
   const startDate = req.body.startDate
     ? new Date(req.body.startDate)
@@ -760,6 +764,9 @@ router.post('/rentals', async (req, res) => {
     });
     return created;
   });
+  try {
+    await prisma.$executeRawUnsafe('UPDATE Property SET type = ? WHERE id = ?', 'location', propertyId);
+  } catch { /* type column */ }
   await syncRentalMonthSchedules(rental.id, {
     startDate,
     endDate,

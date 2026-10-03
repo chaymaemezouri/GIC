@@ -706,6 +706,34 @@ function paymentInstant(value: unknown) {
   return new Date(year, month - 1, day, 12, 0, 0, 0);
 }
 
+async function recomputePayrollPaid(recordId: string, req: Parameters<typeof audit>[0]) {
+  const rec = await prisma.workforcePayrollRecord.findUnique({
+    where: { id: recordId },
+    include: {
+      payments: { orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }] },
+      workforce: { select: { firstName: true, lastName: true, reference: true } },
+    },
+  });
+  if (!rec) return null;
+  const amountPaid = rec.payments.reduce((s, p) => s + p.amount, 0);
+  const remaining = Math.max(0, rec.netDue - amountPaid);
+  const last = rec.payments[rec.payments.length - 1];
+  const status = remaining <= 0 && rec.netDue > 0 ? 'paid' : amountPaid > 0 ? 'partial' : 'pending';
+  const updated = await prisma.workforcePayrollRecord.update({
+    where: { id: recordId },
+    data: {
+      amountPaid,
+      remaining,
+      status,
+      paymentMode: last?.paymentMode || rec.paymentMode,
+      paidAt: last?.paidAt || null,
+    },
+    include: { workforce: { select: { firstName: true, lastName: true, reference: true } } },
+  });
+  await syncWorkforcePayrollMovement(updated, req);
+  return updated;
+}
+
 function pointageTrancheMatch(tranche: string) {
   if (!tranche) return { OR: [{ tranche: null }, { tranche: '' }] };
   return { tranche };
@@ -1114,6 +1142,134 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
   res.json(record);
 });
 
+router.put('/:id/payroll-payments/:payId', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const payId = String(req.params.payId);
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ message: 'Montant invalide' });
+  }
+  try {
+    const payment = await prisma.workforcePayrollPayment.findUnique({
+      where: { id: payId },
+      include: { record: true },
+    });
+    if (!payment) return res.status(404).json({ message: 'Paiement introuvable' });
+    if (payment.record.chantierId && payment.record.chantierId !== chantierId) {
+      return res.status(404).json({ message: 'Paiement introuvable' });
+    }
+    await prisma.workforcePayrollPayment.update({
+      where: { id: payId },
+      data: {
+        amount,
+        paymentMode: req.body.paymentMode != null ? String(req.body.paymentMode) : payment.paymentMode,
+        paidAt: req.body.paidAt != null ? paymentInstant(req.body.paidAt) : payment.paidAt,
+        remark: req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark) : null) : payment.remark,
+      },
+    });
+    const updated = await recomputePayrollPaid(payment.recordId, req);
+    await audit(req, 'modification', 'WorkforcePayrollPayment', payId, `${amount.toLocaleString('fr-MA')} MAD`);
+    res.json(updated);
+  } catch (err) {
+    console.error('PUT payroll-payments', err);
+    res.status(500).json({ message: 'Impossible de modifier ce paiement' });
+  }
+});
+
+router.delete('/:id/payroll-payments/:payId', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const payId = String(req.params.payId);
+  try {
+    const payment = await prisma.workforcePayrollPayment.findUnique({
+      where: { id: payId },
+      include: { record: true },
+    });
+    if (!payment) return res.status(404).json({ message: 'Paiement introuvable' });
+    if (payment.record.chantierId && payment.record.chantierId !== chantierId) {
+      return res.status(404).json({ message: 'Paiement introuvable' });
+    }
+    await prisma.workforcePayrollPayment.delete({ where: { id: payId } });
+    const updated = await recomputePayrollPaid(payment.recordId, req);
+    await audit(req, 'suppression', 'WorkforcePayrollPayment', payId, `${payment.amount.toLocaleString('fr-MA')} MAD`);
+    res.json(updated);
+  } catch (err) {
+    console.error('DELETE payroll-payments', err);
+    res.status(500).json({ message: 'Impossible de supprimer ce paiement' });
+  }
+});
+
+router.put('/:id/payroll-records/:recordId', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const recordId = String(req.params.recordId);
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ message: 'Montant invalide' });
+  }
+  const record = await prisma.workforcePayrollRecord.findUnique({ where: { id: recordId } });
+  if (!record) return res.status(404).json({ message: 'Paiement introuvable' });
+  if (record.chantierId && record.chantierId !== chantierId) {
+    return res.status(404).json({ message: 'Paiement introuvable' });
+  }
+  let childCount = 0;
+  try {
+    childCount = await prisma.workforcePayrollPayment.count({ where: { recordId } });
+  } catch {
+    childCount = 0;
+  }
+  if (childCount > 0) {
+    return res.status(400).json({ message: 'Modifiez chaque paiement de l\'historique' });
+  }
+  const remaining = Math.max(0, record.netDue - amount);
+  const status = remaining <= 0 && record.netDue > 0 ? 'paid' : amount > 0 ? 'partial' : 'pending';
+  const updated = await prisma.workforcePayrollRecord.update({
+    where: { id: recordId },
+    data: {
+      amountPaid: amount,
+      remaining,
+      status,
+      paymentMode: req.body.paymentMode != null ? String(req.body.paymentMode) : record.paymentMode,
+      paidAt: req.body.paidAt != null ? paymentInstant(req.body.paidAt) : record.paidAt,
+      remark: req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark) : null) : record.remark,
+    },
+    include: { workforce: { select: { firstName: true, lastName: true, reference: true } } },
+  });
+  await syncWorkforcePayrollMovement(updated, req);
+  await audit(req, 'modification', 'WorkforcePayrollRecord', recordId, `${amount.toLocaleString('fr-MA')} MAD`);
+  res.json(updated);
+});
+
+router.delete('/:id/payroll-records/:recordId', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const recordId = String(req.params.recordId);
+  const record = await prisma.workforcePayrollRecord.findUnique({ where: { id: recordId } });
+  if (!record) return res.status(404).json({ message: 'Paiement introuvable' });
+  if (record.chantierId && record.chantierId !== chantierId) {
+    return res.status(404).json({ message: 'Paiement introuvable' });
+  }
+  let childCount = 0;
+  try {
+    childCount = await prisma.workforcePayrollPayment.count({ where: { recordId } });
+  } catch {
+    childCount = 0;
+  }
+  if (childCount > 0) {
+    return res.status(400).json({ message: 'Supprimez chaque paiement de l\'historique' });
+  }
+  const updated = await prisma.workforcePayrollRecord.update({
+    where: { id: recordId },
+    data: {
+      amountPaid: 0,
+      remaining: Math.max(0, record.netDue),
+      status: record.netDue > 0 ? 'pending' : 'pending',
+      paidAt: null,
+    },
+    include: { workforce: { select: { firstName: true, lastName: true, reference: true } } },
+  });
+  await syncWorkforcePayrollMovement(updated, req);
+  await audit(req, 'suppression', 'WorkforcePayrollRecord', recordId, `${record.amountPaid.toLocaleString('fr-MA')} MAD`);
+  res.json(updated);
+});
+
 router.get('/:id/payroll-lines', async (req, res) => {
   const chantierId = String(req.params.id);
   const dateFrom = String(req.query.dateFrom || '');
@@ -1292,7 +1448,7 @@ router.get('/:id/payroll-lines', async (req, res) => {
     paymentMode: string | null;
     paidAt: Date | null;
     remark: string | null;
-    payments?: Array<{ amount: number; paidAt: Date; paymentMode: string | null; remark: string | null }>;
+    payments?: Array<{ id: string; amount: number; paidAt: Date; paymentMode: string | null; remark: string | null }>;
   }> = [];
   if (ids.length) {
     try {
@@ -1324,6 +1480,8 @@ router.get('/:id/payroll-lines', async (req, res) => {
       const remaining = Math.max(0, lineDue - paid);
       const status = netDue <= 0 ? 'none' : remaining <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
       const ledger = (record?.payments || []).map((p) => ({
+        id: p.id,
+        recordId: record?.id,
         amount: p.amount,
         paidAt: p.paidAt,
         paymentMode: p.paymentMode,
@@ -1335,6 +1493,7 @@ router.get('/:id/payroll-lines', async (req, res) => {
         : own
           .filter((r) => r.amountPaid > 0 && (!String(r.tranche || '') || String(r.tranche || '') === (b.monthly ? '' : b.tranche)))
           .map((r) => ({
+            recordId: r.id,
             amount: r.amountPaid,
             paidAt: r.paidAt,
             paymentMode: r.paymentMode,
@@ -1705,7 +1864,7 @@ router.post('/pointage/sessions/ensure', async (req, res) => {
     return res.status(500).json({ message: err instanceof Error ? err.message : 'Erreur serveur' });
   }
 
-  if (!session && active.length) {
+  if (!session) {
     const names = [...new Set(active.map((row) => String(row.tranche || '').trim()))];
     const tranche = onlyTranche != null ? onlyTranche : (names.length === 1 ? names[0] : '');
     const conflict = await findSessionConflict(chantierId, tranche, date);
@@ -2290,9 +2449,9 @@ router.put('/pointage/:id', async (req, res) => {
       hours,
       totalDay,
       dayRate,
-      advance: boundAdvance(
+      advance:       boundAdvance(
         req.body.advance != null ? Number(req.body.advance) : existing.advance,
-        existing.advance,
+        req.body.correct ? 0 : existing.advance,
         totalDay,
         rateUsed,
       ),
@@ -3646,6 +3805,18 @@ router.put('/:id/subcontractors/:subId/follows/:followId', async (req, res) => {
   res.json(await refreshSubcontract(String(req.params.subId)));
 });
 
+function phaseRemark(body: { phaseLabel?: unknown; remark?: unknown }, previous?: string | null) {
+  const phaseLabel = body.phaseLabel != null
+    ? String(body.phaseLabel).trim()
+    : String(previous || '').match(/^\[phase:(.*?)\]/)?.[1] || '';
+  const note = body.remark != null
+    ? String(body.remark).trim()
+    : String(previous || '').replace(/^\[phase:.*?\]\s*/, '').trim();
+  if (phaseLabel && note) return `[phase:${phaseLabel}] ${note}`;
+  if (phaseLabel) return `[phase:${phaseLabel}]`;
+  return note || null;
+}
+
 router.post('/:id/subcontractors/:subId/payments', async (req, res) => {
   const sub = await prisma.chantierSubcontractor.findFirst({
     where: { id: String(req.params.subId), chantierId: String(req.params.id) },
@@ -3666,16 +3837,54 @@ router.post('/:id/subcontractors/:subId/payments', async (req, res) => {
       kind: req.body.kind === 'solde' || req.body.kind === 'situation' ? String(req.body.kind) : 'avance',
       paymentMode: req.body.paymentMode ? String(req.body.paymentMode) : null,
       date: req.body.date ? new Date(String(req.body.date)) : new Date(),
-      remark: (() => {
-        const phaseLabel = req.body.phaseLabel ? String(req.body.phaseLabel).trim() : '';
-        const note = req.body.remark ? String(req.body.remark).trim() : '';
-        if (phaseLabel && note) return `[phase:${phaseLabel}] ${note}`;
-        if (phaseLabel) return `[phase:${phaseLabel}]`;
-        return note || null;
-      })(),
+      remark: phaseRemark(req.body),
     },
   });
   res.status(201).json(await refreshSubcontract(sub.id));
+});
+
+router.put('/:id/subcontractors/:subId/payments/:payId', async (req, res) => {
+  const sub = await prisma.chantierSubcontractor.findFirst({
+    where: { id: String(req.params.subId), chantierId: String(req.params.id) },
+    include: { payments: true },
+  });
+  if (!sub) return res.status(404).json({ message: 'Sous-traitance introuvable' });
+  const pay = sub.payments.find((row) => row.id === String(req.params.payId));
+  if (!pay) return res.status(404).json({ message: 'Avance introuvable' });
+  const amount = req.body.amount != null ? Number(req.body.amount) : pay.amount;
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: 'Montant invalide' });
+  const others = sub.payments.filter((row) => row.id !== pay.id).reduce((sum, row) => sum + row.amount, 0);
+  const cap = sub.amount ?? 0;
+  if (cap > 0 && others + amount > cap + 0.01) {
+    return res.status(400).json({ message: `Le paiement dépasse le montant de sous-traitance (reste ${(cap - others).toLocaleString('fr-MA')} MAD)` });
+  }
+  await prisma.subcontractorPayment.update({
+    where: { id: pay.id },
+    data: {
+      amount,
+      kind: req.body.kind === 'solde' || req.body.kind === 'situation' || req.body.kind === 'avance'
+        ? String(req.body.kind)
+        : pay.kind,
+      paymentMode: req.body.paymentMode !== undefined
+        ? (req.body.paymentMode ? String(req.body.paymentMode) : null)
+        : pay.paymentMode,
+      date: req.body.date ? new Date(String(req.body.date)) : pay.date,
+      remark: phaseRemark(req.body, pay.remark),
+    },
+  });
+  res.json(await refreshSubcontract(sub.id));
+});
+
+router.delete('/:id/subcontractors/:subId/payments/:payId', async (req, res) => {
+  const sub = await prisma.chantierSubcontractor.findFirst({
+    where: { id: String(req.params.subId), chantierId: String(req.params.id) },
+    include: { payments: true },
+  });
+  if (!sub) return res.status(404).json({ message: 'Sous-traitance introuvable' });
+  const pay = sub.payments.find((row) => row.id === String(req.params.payId));
+  if (!pay) return res.status(404).json({ message: 'Avance introuvable' });
+  await prisma.subcontractorPayment.delete({ where: { id: pay.id } });
+  res.json(await refreshSubcontract(sub.id));
 });
 
 router.put('/:id/subcontractors/:subId', async (req, res) => {

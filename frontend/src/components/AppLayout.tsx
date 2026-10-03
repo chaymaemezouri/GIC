@@ -72,7 +72,6 @@ function NavMenu({ group }: { group: NavGroup }) {
   const location = useLocation();
   const GroupIcon = group.icon;
   const groupLabel = t(group.label);
-  const groupDesc = t(group.description);
 
   const wide = group.items.length > 8;
 
@@ -147,7 +146,6 @@ function NavMenu({ group }: { group: NavGroup }) {
             </span>
             <div>
               <p className="shell-nav-menu-title">{groupLabel}</p>
-              <p className="shell-nav-menu-desc">{groupDesc}</p>
             </div>
           </div>
           <div className="shell-nav-menu-sep" />

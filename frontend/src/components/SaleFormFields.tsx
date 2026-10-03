@@ -1,5 +1,6 @@
 import { useI18n } from '../i18n/I18nContext';
 import { Input, Select } from './ui';
+import { ClientFormPicker } from './ClientFormPicker';
 
 export type SaleFormData = {
   clientId: string;
@@ -94,30 +95,43 @@ export function SaleFormFields({
   clients,
   properties,
   editMode,
+  lockPropertyId,
+  lockedPropertyLabel,
 }: {
   form: SaleFormData;
   setForm: (f: SaleFormData) => void;
   clients: { id: string; reference: string; firstName: string; lastName: string }[];
   properties: { id: string; reference: string; name: string; status: string }[];
   editMode?: boolean;
+  lockPropertyId?: string;
+  lockedPropertyLabel?: string;
 }) {
   const { t } = useI18n();
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {!editMode && (
         <>
-          <Select className="sm:col-span-2" label={`${t('fields.client')} *`} required value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
-            <option value="">{t('fields.selectClient')}</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>{c.reference} — {c.firstName} {c.lastName}</option>
-            ))}
-          </Select>
-          <Select className="sm:col-span-2" label={`${t('fields.property')} *`} required value={form.propertyId} onChange={(e) => setForm({ ...form, propertyId: e.target.value })}>
-            <option value="">{t('fields.selectProperty')}</option>
-            {properties.filter((p) => p.status === 'disponible' || p.id === form.propertyId).map((p) => (
-              <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>
-            ))}
-          </Select>
+          <div className="sm:col-span-2">
+            <ClientFormPicker
+              label={`${t('fields.buyer')} *`}
+              required
+              value={form.clientId}
+              onChange={(clientId) => setForm({ ...form, clientId })}
+            />
+          </div>
+          {lockPropertyId ? (
+            <div className="sm:col-span-2">
+              <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.property')}</p>
+              <p className="rounded-xl border border-gic-border bg-gray-50/80 px-3 py-2 text-[12px] font-medium">{lockedPropertyLabel || '—'}</p>
+            </div>
+          ) : (
+            <Select className="sm:col-span-2" label={`${t('fields.property')} *`} required value={form.propertyId} onChange={(e) => setForm({ ...form, propertyId: e.target.value })}>
+              <option value="">{t('fields.selectProperty')}</option>
+              {properties.filter((p) => p.status === 'disponible' || p.status === 'réservé' || p.id === form.propertyId).map((p) => (
+                <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>
+              ))}
+            </Select>
+          )}
         </>
       )}
       <Input label={`${t('fields.salePriceMad')} *`} required type="number" min="0" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: e.target.value })} disabled={editMode} />

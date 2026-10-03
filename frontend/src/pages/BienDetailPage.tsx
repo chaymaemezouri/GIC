@@ -17,9 +17,10 @@ import { useI18n } from '../i18n/I18nContext';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { fileUrl } from '../lib/documentDisplay';
+import { availabilityStatusOf, propertyDealOf } from '../lib/propertyDeal';
 
 import {
-  BienFormFields, bienToForm, flattenProjectFloors,
+  BienFormFields, bienToForm, emptyBienForm, flattenProjectFloors,
   type BienFormData, type FloorOption,
 } from '../components/BienFormFields';
 
@@ -51,10 +52,7 @@ export default function BienDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteMotif, setDeleteMotif] = useState('');
-  const [form, setForm] = useState<BienFormData>({
-    name: '', city: '', status: 'disponible', surface: '', rooms: '', price: '',
-    projectId: '', floorId: '', titleNumber: '', description: '', contractualDesc: '',
-  });
+  const [form, setForm] = useState<BienFormData>(() => emptyBienForm());
 
   function load() {
     if (!id) return;
@@ -118,6 +116,11 @@ export default function BienDetailPage() {
 
   async function updateStatus(status: string) {
     await api(`/immobilier/properties/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
+    load();
+  }
+
+  async function updateType(type: string) {
+    await api(`/immobilier/properties/${id}`, { method: 'PUT', body: JSON.stringify({ type }) });
     load();
   }
 
@@ -359,12 +362,17 @@ export default function BienDetailPage() {
               <Info label={t('fields.titleDeedShort')} value={bien.titleNumber || '—'} />
               <Info label={t('fields.createdAt')} value={formatDate(bien.createdAt)} />
               <div>
+                <p className="text-[10px] text-gic-muted uppercase mb-1">{t('columns.type')}</p>
+                <Select value={propertyDealOf(bien)} onChange={(e) => updateType(e.target.value)}>
+                  <option value="vente">{t('status.sold')}</option>
+                  <option value="location">{t('status.rented')}</option>
+                </Select>
+              </div>
+              <div>
                 <p className="text-[10px] text-gic-muted uppercase mb-1">{t('actions.changeStatus')}</p>
-                <Select value={bien.status} onChange={(e) => updateStatus(e.target.value)}>
+                <Select value={availabilityStatusOf(bien.status)} onChange={(e) => updateStatus(e.target.value)}>
                   <option value="disponible">{t('status.available')}</option>
                   <option value="réservé">{t('status.reserved')}</option>
-                  <option value="vendu">{t('status.sold')}</option>
-                  <option value="loué">{t('status.rented')}</option>
                   <option value="indisponible">{t('fields.unavailable')}</option>
                 </Select>
               </div>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { fetchDropdownOptions } from '../lib/api';
-import { PURCHASE_PAYMENT_MODES, computeLineAmounts, formatAmount, round2, type PurchaseDetail } from '../lib/purchases';
+import { PURCHASE_PAYMENT_MODES, PURCHASE_TYPES, computeLineAmounts, formatAmount, parsePurchaseType, round2, type PurchaseDetail, type PurchaseType } from '../lib/purchases';
 import { Btn, Input, Select, Textarea } from './ui';
 
 const FALLBACK_PURCHASE_UNITS = [
@@ -32,7 +32,7 @@ export type PurchaseFormData = {
   advanceAmount: string;
   advanceMode: string;
   advanceDate: string;
-  purchaseType: 'marchandise' | 'outil';
+  purchaseType: PurchaseType;
   lines: PurchaseLineForm[];
 };
 
@@ -42,7 +42,7 @@ export function emptyPurchaseLine(): PurchaseLineForm {
   return { key: `l${Date.now()}-${lineSeq}`, product: '', reference: '', family: '', quantity: '1', unit: '', unitPrice: '', tvaRate: '20' };
 }
 
-export function emptyPurchaseForm(): PurchaseFormData {
+export function emptyPurchaseForm(purchaseType: PurchaseType = 'marchandise'): PurchaseFormData {
   const today = new Date().toISOString().slice(0, 10);
   return {
     date: today,
@@ -56,7 +56,7 @@ export function emptyPurchaseForm(): PurchaseFormData {
     advanceAmount: '',
     advanceMode: 'especes',
     advanceDate: today,
-    purchaseType: 'marchandise',
+    purchaseType,
     lines: [emptyPurchaseLine()],
   };
 }
@@ -77,7 +77,7 @@ export function purchaseToForm(p: PurchaseDetail): PurchaseFormData {
     advanceAmount: advanceTotal ? String(advanceTotal) : '',
     advanceMode: firstAdvance?.mode || p.advanceMode || 'especes',
     advanceDate: firstAdvance ? String(firstAdvance.date).slice(0, 10) : new Date().toISOString().slice(0, 10),
-    purchaseType: p.purchaseType === 'outil' ? 'outil' : 'marchandise',
+    purchaseType: parsePurchaseType(p.purchaseType),
     lines: (p.lines || []).length
       ? p.lines.map((l) => ({
           key: l.id,
@@ -152,7 +152,7 @@ export function purchaseFormToBody(form: PurchaseFormData, opts: { trackingOnly?
     advanceAmount: Number(form.advanceAmount) || 0,
     advanceMode: form.advanceMode || null,
     advanceDate: form.advanceDate || null,
-    purchaseType: form.purchaseType === 'outil' ? 'outil' : 'marchandise',
+    purchaseType: form.purchaseType,
     lines: form.lines
       .filter((l) => l.product.trim())
       .map((l) => ({
@@ -191,6 +191,7 @@ export function PurchaseFormFields({
   lockedChantierName,
   lockSupplier,
   lockedSupplierName,
+  lockType,
 }: {
   form: PurchaseFormData;
   setForm: (f: PurchaseFormData) => void;
@@ -207,6 +208,7 @@ export function PurchaseFormFields({
   lockedChantierName?: string;
   lockSupplier?: string;
   lockedSupplierName?: string;
+  lockType?: boolean;
 }) {
   const { t } = useI18n();
   const [units, setUnits] = useState<{ value: string; label: string }[]>(
@@ -265,19 +267,23 @@ export function PurchaseFormFields({
       <section>
         <p className="purchase-form-section">{t('purchase.form.generalInfo')}</p>
         <div className="flex flex-wrap gap-2 mb-3">
-          {(['marchandise', 'outil'] as const).map((kind) => (
+          {PURCHASE_TYPES.map((kind) => (
             <button
               key={kind}
               type="button"
-              className={`rounded-full px-3 py-1 text-[12px] font-medium border ${form.purchaseType === kind ? 'bg-gic-violet text-white border-gic-violet' : 'bg-white text-gic-ink border-gic-border'}`}
-              onClick={() => set({ purchaseType: kind })}
+              disabled={lockType}
+              className={`rounded-full px-3 py-1 text-[12px] font-medium border ${form.purchaseType === kind ? 'bg-gic-violet text-white border-gic-violet' : 'bg-white text-gic-ink border-gic-border'} ${lockType ? 'opacity-80' : ''}`}
+              onClick={() => !lockType && set({ purchaseType: kind })}
             >
-              {t(kind === 'outil' ? 'siteOps.purchaseTools' : 'siteOps.purchaseGoods')}
+              {t(kind === 'outil' ? 'siteOps.purchaseTools' : kind === 'materiel' ? 'siteOps.purchaseMaterial' : 'siteOps.purchaseGoods')}
             </button>
           ))}
         </div>
         {form.purchaseType === 'outil' && (
           <p className="text-[11px] text-gic-muted mb-3">{t('siteOps.toolCreatedHint')}</p>
+        )}
+        {form.purchaseType === 'materiel' && (
+          <p className="text-[11px] text-gic-muted mb-3">{t('siteOps.materialCreatedHint')}</p>
         )}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <LockedValue label={t('purchase.fields.reference')} value={reference || t('purchase.form.autoReference')} />

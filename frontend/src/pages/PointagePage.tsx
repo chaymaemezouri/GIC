@@ -3,7 +3,7 @@ import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  CheckCircle, Download, Printer, Trash2, Pencil, Clock, Users, Wallet,
+  CheckCircle, Download, Printer, Trash2, Pencil, Clock, Users, Wallet, Truck,
   SlidersHorizontal, Check, Save, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import {
@@ -23,6 +23,7 @@ import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import PointageSessionManager from '../components/PointageSessionManager';
 import PointageWorkerSummary from '../components/PointageWorkerSummary';
+import { UsagePanel } from '../components/engins/Logs';
 
 type Pointage = {
   id: string;
@@ -79,13 +80,18 @@ function formatMadCompact(n: number | null | undefined) {
   return formatMad(v);
 }
 
+type PointageScope = WorkforceScope | 'engin';
+
 export default function PointagePage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [scope, setScope] = useState<WorkforceScope>(
-    searchParams.get('scope') === 'chauffeur' ? 'chauffeur' : 'main_oeuvre',
-  );
+  const [scope, setScope] = useState<PointageScope>(() => {
+    const s = searchParams.get('scope');
+    if (s === 'chauffeur' || s === 'engin') return s;
+    return 'main_oeuvre';
+  });
   const isChauffeur = scope === 'chauffeur';
+  const isEngin = scope === 'engin';
   const [tab, setTab] = useState<Tab>(() => {
     const urlTab = searchParams.get('tab') as Tab | null;
     if (urlTab && TABS.includes(urlTab)) return urlTab;
@@ -135,6 +141,10 @@ export default function PointagePage() {
   }, []);
 
   useEffect(() => {
+    if (scope === 'engin') {
+      setWorkforce([]);
+      return;
+    }
     fetchWorkforceList(scopeQueryParams(scope)).then(setWorkforce);
   }, [scope]);
 
@@ -157,7 +167,7 @@ export default function PointagePage() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (tab !== 'historique') return;
+    if (tab !== 'historique' || isEngin) return;
     const qs = new URLSearchParams();
     if (dateFrom) qs.set('dateFrom', dateFrom);
     if (dateTo) qs.set('dateTo', dateTo);
@@ -178,8 +188,9 @@ export default function PointagePage() {
     if (chantierId) qs.set('chantierId', chantierId);
     if (chantierId && trancheFilter) qs.set('tranche', trancheFilter);
     if (isChauffeur) qs.set('scope', 'chauffeur');
+    else if (isEngin) qs.set('scope', 'engin');
     setSearchParams(qs, { replace: true });
-  }, [tab, chantierId, trancheFilter, isChauffeur, setSearchParams]);
+  }, [tab, chantierId, trancheFilter, isChauffeur, isEngin, setSearchParams]);
 
   useEffect(() => {
     if (!showFilters) return;
@@ -267,8 +278,13 @@ export default function PointagePage() {
   }
 
   useEffect(() => {
+    if (isEngin && tab !== 'gestion') setTab('gestion');
+  }, [isEngin, tab]);
+
+  useEffect(() => {
+    if (isEngin) return;
     if (tab === 'historique') loadHistory(histPage);
-  }, [tab, histSort, histOrder]);
+  }, [tab, histSort, histOrder, isEngin]);
 
   function parseDayRate(value: string) {
     if (value === '' || value == null) return null;
@@ -435,7 +451,11 @@ export default function PointagePage() {
   const activeChantierId = tab === 'historique' ? histChantier : chantierId;
   const activeTranche = tab === 'historique' ? histTranche : trancheFilter;
   const activeChantierName = chantiers.find((c) => c.id === activeChantierId)?.name;
-  const pageSubtitle = isChauffeur
+  const pageSubtitle = isEngin
+      ? (activeChantierName
+        ? `${t('tabs.equipment')} · ${activeChantierName}${activeTranche ? ` · ${activeTranche}` : ''}`
+        : t('pages.attendanceEnginesSubtitle'))
+      : isChauffeur
       ? (activeChantierName
         ? `${t('pages.drivers')} · ${activeChantierName}${activeTranche ? ` · ${activeTranche}` : ''}`
         : t('pages.attendanceDriversSubtitle'))
@@ -451,10 +471,20 @@ export default function PointagePage() {
         subtitle={pageSubtitle}
         actions={
           <>
-            <Link to={isChauffeur ? '/chauffeurs' : '/main-oeuvre'}><Btn variant="secondary" icon={Users}>{isChauffeur ? t('pages.drivers') : t('tabs.personnel')}</Btn></Link>
-            <Link to={isChauffeur ? '/salaires?type=chauffeur' : '/salaires?type=main_oeuvre'}><Btn variant="secondary" icon={Wallet}>{t('pages.salaries')}</Btn></Link>
-            <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>
-            <Btn variant="secondary" icon={Download} onClick={exportExcel}>{t('common.excel')}</Btn>
+            {isEngin ? (
+              <Link to="/engins"><Btn variant="secondary" icon={Truck}>{t('tabs.equipment')}</Btn></Link>
+            ) : (
+              <Link to={isChauffeur ? '/chauffeurs' : '/main-oeuvre'}><Btn variant="secondary" icon={Users}>{isChauffeur ? t('pages.drivers') : t('tabs.personnel')}</Btn></Link>
+            )}
+            {!isEngin && (
+              <Link to={isChauffeur ? '/salaires?type=chauffeur' : '/salaires?type=main_oeuvre'}><Btn variant="secondary" icon={Wallet}>{t('pages.salaries')}</Btn></Link>
+            )}
+            {!isEngin && (
+              <>
+                <Btn variant="secondary" icon={Download} onClick={exportCsv}>{t('common.csv')}</Btn>
+                <Btn variant="secondary" icon={Download} onClick={exportExcel}>{t('common.excel')}</Btn>
+              </>
+            )}
             {tab === 'historique' && (
               <div className="mac-action-group">
                 <MacActionBtn
@@ -469,7 +499,7 @@ export default function PointagePage() {
         }
       />
 
-      {tab === 'historique' && (
+      {tab === 'historique' && !isEngin && (
       <div className="mac-kpi-grid mac-kpi-grid-4">
         <KpiCard title={t('columns.attendanceCount')} value={stats.total} icon={Clock} tone="violet" />
         <KpiCard title={t('columns.validated')} value={stats.validated} icon={CheckCircle} tone="emerald" delta={t('msg.pendingCount', { count: stats.pending })} deltaTone="muted" />
@@ -488,32 +518,36 @@ export default function PointagePage() {
 
       <Card className="mb-4 !pb-0">
         <MacToolbarTabs
-          scopeLabel={t('tabs.personnel')}
+          scopeLabel={t('fields.type')}
           scopeTabs={[
             { id: 'main_oeuvre', label: t('pages.workforce') },
             { id: 'chauffeur', label: t('pages.drivers') },
+            { id: 'engin', label: t('tabs.equipment') },
           ]}
           scope={scope}
           onScopeChange={(id) => {
-            setScope(id as WorkforceScope);
+            setScope(id as PointageScope);
+            if (id === 'engin') setTab('gestion');
             setSearchParams((prev) => {
               const next = new URLSearchParams(prev);
-              if (id === 'chauffeur') next.set('scope', 'chauffeur');
+              if (id === 'chauffeur' || id === 'engin') next.set('scope', id);
               else next.delete('scope');
               return next;
             }, { replace: true });
           }}
-          viewTabs={[
-            { id: 'gestion', label: t('actions.enterAttendance') },
-            { id: 'synthese', label: t('pointageMgmt.byWorkerTab') },
-            { id: 'historique', label: t('tabs.history') },
-          ]}
-          view={tab}
+          viewTabs={isEngin
+            ? [{ id: 'gestion', label: t('fleet.nav.utilisation') }]
+            : [
+                { id: 'gestion', label: t('actions.enterAttendance') },
+                { id: 'synthese', label: t('pointageMgmt.byWorkerTab') },
+                { id: 'historique', label: t('tabs.history') },
+              ]}
+          view={isEngin ? 'gestion' : tab}
           onViewChange={(id) => { setTab(id as Tab); setShowFilters(false); }}
         />
       </Card>
 
-      {error && (
+      {error && !isEngin && (
         <Card className="mb-4 border-gic-coral/40 bg-gic-coral-soft/30">
           <p className="text-[12px] text-gic-coral font-medium">{error}</p>
           <Btn
@@ -529,7 +563,13 @@ export default function PointagePage() {
         </Card>
       )}
 
-      {tab === 'gestion' && (
+      {isEngin ? (
+        <UsagePanel
+          toolbar
+          showKpis
+          fixed={{ kind: 'engin', chantierId: chantierId || undefined, tranche: trancheFilter || undefined }}
+        />
+      ) : tab === 'gestion' && (
         <PointageSessionManager
           chantiers={chantiers}
           chantierId={chantierId}
@@ -540,7 +580,7 @@ export default function PointagePage() {
         />
       )}
 
-      {tab === 'synthese' && (
+      {!isEngin && tab === 'synthese' && (
         <PointageWorkerSummary
           chantiers={chantiers}
           chantierId={chantierId}
@@ -551,7 +591,7 @@ export default function PointagePage() {
       )}
 
 
-      {tab === 'historique' && (
+      {!isEngin && tab === 'historique' && (
         <>
           <div className={`mac-filters-panel${showFilters ? ' mac-filters-panel-open' : ''}`}>
             <div className="mac-filters-row">

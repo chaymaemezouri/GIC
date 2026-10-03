@@ -808,8 +808,8 @@ export function MacToolbarTabs({
   scopeTabs,
   scope,
   onScopeChange,
-  viewTabs,
-  view,
+  viewTabs = [],
+  view = '',
   onViewChange,
   className = '',
 }: {
@@ -817,9 +817,9 @@ export function MacToolbarTabs({
   scopeTabs: { id: string; label: string }[];
   scope: string;
   onScopeChange: (id: string) => void;
-  viewTabs: { id: string; label: string }[];
-  view: string;
-  onViewChange: (id: string) => void;
+  viewTabs?: { id: string; label: string }[];
+  view?: string;
+  onViewChange?: (id: string) => void;
   className?: string;
 }) {
   const { t } = useI18n();
@@ -843,22 +843,24 @@ export function MacToolbarTabs({
           ))}
         </div>
       </div>
-      <div className="mac-toolbar-tabs-views">
-        <div className="mac-tabs mac-tabs-embedded">
-          {viewTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={view === tab.id}
-              onClick={() => onViewChange(tab.id)}
-              className={`mac-tab${view === tab.id ? ' mac-tab-active' : ''}`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      {viewTabs.length > 0 && (
+        <div className="mac-toolbar-tabs-views">
+          <div className="mac-tabs mac-tabs-embedded">
+            {viewTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={view === tab.id}
+                onClick={() => onViewChange?.(tab.id)}
+                className={`mac-tab${view === tab.id ? ' mac-tab-active' : ''}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

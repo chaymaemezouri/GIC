@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Check, Circle, Flag, Play, ShieldCheck } from 'lucide-react';
-import { api, formatDate, formatMad } from '../lib/api';
+import { Check, Flag, Play, ShieldCheck } from 'lucide-react';
+import { api, formatDate } from '../lib/api';
 import { appAlert } from '../lib/dialog';
 import {
   getPhaseDefinition,
@@ -38,11 +38,8 @@ function stepTitle(step: TrackStep) {
   return `${step.percent} % — ${step.label}`;
 }
 
-function workDoneCount(percent: number, workSteps: TrackStep[]) {
-  return workSteps.filter((s) => percent >= s.percent).length;
-}
-
 export default function ProgressSteps({ percent, onChange, size = 'md', showLabel = true, task, onTaskUpdated }: Props) {
+  const { t } = useI18n();
   const p = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
   const status = progressStatus(p);
   const interactive = typeof onChange === 'function';
@@ -51,10 +48,6 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
   const customPhases = task?.phases;
   const track = resolveTrackSteps(customPhases);
   const stages = track.filter((s) => s.percent > 0).map((s) => s.percent);
-  const workSteps = track.filter((s) => s.kind === 'phase');
-  const startStep = track.find((s) => s.kind === 'start');
-  const validationStep = track.find((s) => s.kind === 'validation');
-  const workDone = workDoneCount(p, workSteps);
   const validated = p >= 100;
 
   function openPhasePopup(stage: number) {
@@ -148,21 +141,8 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
                 {step.kind === 'phase' && (() => {
                   const phaseSt = task?.subcontracts?.find((item) => item.scope === 'phase' && item.phaseLabel === step.label);
                   const taskSt = task?.subcontracts?.find((item) => item.scope !== 'phase');
-                  const st = phaseSt || taskSt;
-                  if (!st) return null;
-                  const prix = Number(st.amount || 0);
-                  const avance = Number(st.paidAmount || 0);
-                  const reste = Math.max(0, prix - avance);
-                  return (
-                    <span className="mac-steps-st">
-                      ST
-                      {phaseSt && (
-                        <span className="mac-steps-st-fig">
-                          {formatMad(prix)} · {formatMad(avance)} · {formatMad(reste)}
-                        </span>
-                      )}
-                    </span>
-                  );
+                  if (!phaseSt && !taskSt) return null;
+                  return <span className="mac-steps-st">{t('detail.stBadge')}</span>;
                 })()}
                 </div>
               </div>
@@ -180,24 +160,17 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
         <Modal
           open
           size="lg"
-          title={task.taskName}
+          title={selectedStep?.kind === 'phase' ? `${selectedPhase.label}` : task.taskName}
           onClose={() => setPopupStage(null)}
           footer={<Btn variant="secondary" onClick={() => setPopupStage(null)}>Fermer</Btn>}
         >
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
               {task.tranche && <span className="mac-chip">{task.tranche}</span>}
+              <span className="mac-chip mac-chip-gray">{task.taskName}</span>
               <span className={`mac-chip ${validated ? 'mac-chip-green' : 'mac-chip-orange'}`}>
-                Avancement {p} %
+                {selectedPhase.percent} %
               </span>
-              <span className="mac-chip mac-chip-gray">
-                Phases {workDone}/{workSteps.length}
-              </span>
-              {validated && (
-                <span className="mac-chip mac-chip-green inline-flex items-center gap-1">
-                  <ShieldCheck size={11} /> Lot validé
-                </span>
-              )}
             </div>
 
             {/* Résumé sélection */}
@@ -274,161 +247,10 @@ export default function ProgressSteps({ percent, onChange, size = 'md', showLabe
                 </p>
               )}
             </div>
-
-            {/* Parcours organisé */}
-            <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-0.5">
-              {/* 1. Début */}
-              {startStep && (
-                <section>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gic-muted mb-1.5 px-0.5">
-                    1 · Début
-                  </p>
-                  <StepRow
-                    step={startStep}
-                    status={phaseStatus(p, 0, [0, ...stages])}
-                    selected={popupStage === 0}
-                    onSelect={() => setPopupStage(0)}
-                    icon={<Play size={12} />}
-                  />
-                </section>
-              )}
-
-              {/* 2. Phases */}
-              <section>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-gic-muted mb-1.5 px-0.5">
-                  2 · Phases du lot ({workDone}/{workSteps.length})
-                </p>
-                <div className="space-y-1 rounded-xl border border-black/[0.06] overflow-hidden divide-y divide-black/[0.05]">
-                  {workSteps.length === 0 ? (
-                    <p className="text-[12px] text-gic-muted p-3">Aucune phase définie</p>
-                  ) : (
-                    workSteps.map((step, idx) => (
-                      <StepRow
-                        key={`work-${step.percent}`}
-                        step={step}
-                        index={idx + 1}
-                        status={phaseStatus(p, step.percent, [0, ...stages])}
-                        selected={popupStage === step.percent}
-                        onSelect={() => setPopupStage(step.percent)}
-                        flat
-                      />
-                    ))
-                  )}
-                </div>
-              </section>
-
-              {/* 3. Validation — mise en avant */}
-              {validationStep && (
-                <section>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[#248a3d] mb-1.5 px-0.5">
-                    3 · Validation finale
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setPopupStage(100)}
-                    className={[
-                      'w-full text-left rounded-xl border-2 px-3.5 py-3 transition-colors',
-                      validated
-                        ? 'border-[#34c759] bg-[rgba(52,199,89,0.14)] shadow-[0_0_0_3px_rgba(52,199,89,0.12)]'
-                        : popupStage === 100
-                          ? 'border-[#34c759]/50 bg-[rgba(52,199,89,0.08)]'
-                          : 'border-[#34c759]/35 bg-[rgba(52,199,89,0.04)] hover:bg-[rgba(52,199,89,0.08)]',
-                    ].join(' ')}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={[
-                          'shrink-0 h-9 w-9 rounded-full flex items-center justify-center',
-                          validated ? 'bg-[#34c759] text-white' : 'bg-[rgba(52,199,89,0.18)] text-[#248a3d]',
-                        ].join(' ')}
-                      >
-                        <ShieldCheck size={18} strokeWidth={2.25} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-semibold text-gic-ink">
-                          Validation — 100 %
-                        </p>
-                        <p className="text-[11px] text-gic-muted mt-0.5">
-                          {validated
-                            ? 'Toutes les phases sont terminées et validées'
-                            : workDone < workSteps.length
-                              ? `Encore ${workSteps.length - workDone} phase(s) à terminer avant validation`
-                              : 'Prêt à valider — cliquez la pastille 100 % sur le rail'}
-                        </p>
-                      </div>
-                      <span
-                        className={[
-                          'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold',
-                          validated
-                            ? 'bg-[#34c759] text-white'
-                            : 'bg-black/[0.05] text-gic-muted',
-                        ].join(' ')}
-                      >
-                        {validated ? 'Validé' : 'En attente'}
-                      </span>
-                    </div>
-                  </button>
-                </section>
-              )}
-            </div>
           </div>
         </Modal>
       )}
     </>
-  );
-}
-
-function StepRow({
-  step,
-  status,
-  selected,
-  onSelect,
-  index,
-  icon,
-  flat,
-}: {
-  step: TrackStep;
-  status: 'done' | 'current' | 'pending';
-  selected: boolean;
-  onSelect: () => void;
-  index?: number;
-  icon?: React.ReactNode;
-  flat?: boolean;
-}) {
-  const label =
-    step.kind === 'start'
-      ? 'Début'
-      : step.label && step.label !== `${step.percent} %`
-        ? step.label
-        : `Phase ${index ?? ''}`.trim();
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={[
-        'w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors',
-        flat ? '' : 'rounded-xl border border-black/[0.06]',
-        selected ? 'bg-[rgba(0,122,255,0.08)]' : 'hover:bg-black/[0.03]',
-        flat && selected ? 'bg-[rgba(0,122,255,0.08)]' : '',
-      ].join(' ')}
-    >
-      <span
-        className={[
-          'shrink-0 h-7 w-7 rounded-full flex items-center justify-center text-[11px]',
-          status === 'done' ? 'bg-[#34c759] text-white' : status === 'current' ? 'bg-[#ff9500] text-white' : 'bg-black/[0.06] text-gic-muted',
-        ].join(' ')}
-      >
-        {status === 'done' ? <Check size={12} strokeWidth={3} /> : icon || (index != null ? <span className="font-semibold">{index}</span> : <Circle size={10} />)}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[12px] font-medium text-gic-ink truncate">
-          {label}
-          <span className="text-gic-muted font-normal"> · {step.percent} %</span>
-        </p>
-        <p className="text-[10px] text-gic-muted">{STATUS_LABEL[status]}</p>
-      </div>
-    </button>
   );
 }
 
@@ -461,17 +283,18 @@ function PhaseSubcontractPanel({
   const NEW = '__new__';
   const NONE = '__none__';
   const existing = task.subcontracts || [];
-  const current = existing.find((item) => item.scope === 'phase' && item.phaseLabel === phaseLabel)
-    || existing.find((item) => item.scope !== 'phase');
+  const phaseContract = existing.find((item) => item.scope === 'phase' && item.phaseLabel === phaseLabel);
+  const wholeContract = existing.find((item) => item.scope !== 'phase');
+  const current = phaseContract || null;
   const [companies, setCompanies] = useState<string[]>([]);
-  const [choice, setChoice] = useState(current ? current.companyName : NONE);
+  const [choice, setChoice] = useState(current ? current.companyName : wholeContract ? wholeContract.companyName : NONE);
   const [newName, setNewName] = useState('');
   const [amount, setAmount] = useState(current?.amount != null ? String(current.amount) : '');
   const [phone, setPhone] = useState(current?.phone || '');
   const [startDate, setStartDate] = useState(current?.startDate ? String(current.startDate).slice(0, 10) : '');
   const [endDate, setEndDate] = useState(current?.endDate ? String(current.endDate).slice(0, 10) : '');
   const [saving, setSaving] = useState(false);
-  const [contract, setContract] = useState<TaskSubcontract | null>(current?.id ? toContract(current, task.chantierId) : null);
+  const [contract, setContract] = useState<TaskSubcontract | null>((current || wholeContract)?.id ? toContract((current || wholeContract)!, task.chantierId) : null);
 
   useEffect(() => {
     if (!task.chantierId) return;
@@ -487,15 +310,16 @@ function PhaseSubcontractPanel({
   }, [task.chantierId, phaseLabel]);
 
   useEffect(() => {
-    const found = existing.find((item) => item.scope === 'phase' && item.phaseLabel === phaseLabel)
-      || existing.find((item) => item.scope !== 'phase');
-    setChoice(found ? found.companyName : NONE);
+    const found = existing.find((item) => item.scope === 'phase' && item.phaseLabel === phaseLabel);
+    const whole = existing.find((item) => item.scope !== 'phase');
+    setChoice(found ? found.companyName : whole ? whole.companyName : NONE);
     setNewName('');
     setAmount(found?.amount != null ? String(found.amount) : '');
-    setPhone(found?.phone || '');
+    setPhone(found?.phone || whole?.phone || '');
     setStartDate(found?.startDate ? String(found.startDate).slice(0, 10) : '');
     setEndDate(found?.endDate ? String(found.endDate).slice(0, 10) : '');
-    setContract(found?.id ? toContract(found, task.chantierId) : null);
+    const bound = found || whole;
+    setContract(bound?.id ? toContract(bound, task.chantierId) : null);
   }, [phaseLabel, task.progressId]);
 
   const optionNames = [...new Set([

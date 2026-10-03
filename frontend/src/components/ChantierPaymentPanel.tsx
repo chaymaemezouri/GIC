@@ -1,13 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Banknote, Clock, Gift, Wallet } from 'lucide-react';
+import { Banknote, Clock, Gift, Pencil, Trash2, Wallet } from 'lucide-react';
 import { api, formatDate, formatMad } from '../lib/api';
-import { appAlert } from '../lib/dialog';
+import { appAlert, appConfirm } from '../lib/dialog';
 import { CHAUFFEUR_CATEGORY, workforceDetailPathForCategory } from '../lib/workforceScope';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { SelectAllTh, SelectTd } from './RowSelection';
-import { Btn, Input, KpiCard, MacDateInput, MacSearch, Modal, Select, TableWrap, Tabs, Td, Textarea, Th } from './ui';
+import { Btn, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, Modal, Select, TableWrap, Tabs, Td, Textarea, Th } from './ui';
 import { useI18n } from '../i18n/I18nContext';
+
+type PayEvent = {
+  id?: string;
+  recordId?: string;
+  amount: number;
+  paidAt?: string | null;
+  paymentMode?: string | null;
+  tranche?: string;
+  remark?: string | null;
+};
 
 type PayLine = {
   id: string;
@@ -31,7 +41,37 @@ type PayLine = {
   remark?: string | null;
   task?: string;
   days?: PayDay[];
-  payments?: { amount: number; paidAt?: string | null; paymentMode?: string | null; tranche?: string; remark?: string | null }[];
+  payments?: PayEvent[];
+};
+
+type HistKind = 'all' | 'wage' | 'advance' | 'bonus' | 'payment';
+
+type HistRow = {
+  key: string;
+  date: string;
+  kind: 'wage' | 'advance' | 'bonus' | 'payment';
+  amount: number;
+  after: number;
+  mode?: string | null;
+  note?: string;
+  pointageId?: string;
+  paymentId?: string;
+  recordId?: string;
+  days?: number;
+  rate?: number;
+};
+
+type HistEdit = {
+  kind: 'wage' | 'advance' | 'bonus' | 'payment';
+  pointageId?: string;
+  paymentId?: string;
+  recordId?: string;
+  amount: string;
+  date: string;
+  mode: string;
+  remark: string;
+  days: string;
+  rate: string;
 };
 
 type PayDay = {
@@ -69,9 +109,11 @@ function monthStartISO() {
 export function ChantierPaymentPanel({
   chantierId,
   scope = 'workers',
+  tranche,
 }: {
   chantierId: string;
   scope?: 'workers' | 'drivers';
+  tranche?: string;
 }) {
   const { t } = useI18n();
   const [dateFrom, setDateFrom] = useState(monthStartISO);
@@ -88,6 +130,9 @@ export function ChantierPaymentPanel({
   const [payTargets, setPayTargets] = useState<PayLine[]>([]);
   const [payFilter, setPayFilter] = useState<'' | 'a_payer' | 'paye' | 'partiel'>('');
   const [paying, setPaying] = useState(false);
+  const [histTab, setHistTab] = useState<HistKind>('all');
+  const [histEdit, setHistEdit] = useState<HistEdit | null>(null);
+  const [histBusy, setHistBusy] = useState(false);
   const selection = useRowSelection<PayLine>();
 
   function load() {
@@ -116,6 +161,7 @@ export function ChantierPaymentPanel({
 
   const visible = useMemo(() => {
     const rows = (data?.lines || []).filter((row) => {
+      if (tranche && row.tranche !== tranche) return false;
       if (payFilter === 'a_payer') return row.remaining > 0;
       if (payFilter === 'paye') return row.status === 'paid';
       if (payFilter === 'partiel') return row.status === 'partial';
@@ -126,7 +172,7 @@ export function ChantierPaymentPanel({
     return rows.filter((row) => (
       `${row.firstName} ${row.lastName} ${row.tranche} ${row.chantierName} ${row.category || ''}`.toLowerCase().includes(needle)
     ));
-  }, [data, query, payFilter]);
+  }, [data, query, payFilter, tranche]);
 
   const shownTotals = useMemo(() => visible.reduce(
     (s, row) => ({
@@ -178,26 +224,49 @@ export function ChantierPaymentPanel({
     return '—';
   }
 
-  function payHistory(row: PayLine) {
-    const events: { key: string; date: string; kind: 'wage' | 'advance' | 'bonus' | 'payment'; amount: number; after: number; mode?: string | null; note?: string }[] = [];
+  function payHistory(row: PayLine): HistRow[] {
+    const events: HistRow[] = [];
     const days = [...(row.days || [])].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     let running = 0;
-    days.forEach((day, i) => {
+    days.forEach((day) => {
       const wage = day.days * day.rate;
       if (wage > 0) {
         running += wage;
-        events.push({ key: `w-${day.id}`, date: day.date, kind: 'wage', amount: wage, after: running, note: day.task || undefined });
+        events.push({
+          key: `w-${day.id}`,
+          date: day.date,
+          kind: 'wage',
+          amount: wage,
+          after: running,
+          note: day.task || undefined,
+          pointageId: day.id,
+          days: day.days,
+          rate: day.rate,
+        });
       }
       if (day.bonus > 0) {
         running += day.bonus;
-        events.push({ key: `b-${day.id}`, date: day.date, kind: 'bonus', amount: day.bonus, after: running, note: day.remark || undefined });
+        events.push({
+          key: `b-${day.id}`,
+          date: day.date,
+          kind: 'bonus',
+          amount: day.bonus,
+          after: running,
+          note: day.remark || undefined,
+          pointageId: day.id,
+        });
       }
       if (day.advance > 0) {
         running -= day.advance;
-        events.push({ key: `a-${day.id}`, date: day.date, kind: 'advance', amount: day.advance, after: running, note: day.remark || undefined });
-      }
-      if (!wage && !day.bonus && !day.advance && i === 0) {
-        /* keep empty days out of history */
+        events.push({
+          key: `a-${day.id}`,
+          date: day.date,
+          kind: 'advance',
+          amount: day.advance,
+          after: running,
+          note: day.remark || undefined,
+          pointageId: day.id,
+        });
       }
     });
     if (!days.length) {
@@ -221,16 +290,145 @@ export function ChantierPaymentPanel({
     pays.forEach((payment, i) => {
       running -= payment.amount;
       events.push({
-        key: `p-${payment.paidAt || i}-${i}`,
+        key: `p-${payment.id || payment.paidAt || i}-${i}`,
         date: payment.paidAt || '',
         kind: 'payment',
         amount: payment.amount,
         after: running,
         mode: payment.paymentMode,
         note: payment.remark || undefined,
+        paymentId: payment.id,
+        recordId: payment.recordId,
       });
     });
     return events;
+  }
+
+  function histKindLabel(kind: HistRow['kind']) {
+    if (kind === 'wage') return t('siteOps.payEventWage');
+    if (kind === 'advance') return t('siteOps.payEventAdvance');
+    if (kind === 'bonus') return t('siteOps.payEventBonus');
+    return t('siteOps.payEventPayment');
+  }
+
+  function openHistEdit(row: HistRow) {
+    if (row.kind === 'payment' && !row.paymentId && !row.recordId) return;
+    if ((row.kind === 'wage' || row.kind === 'advance' || row.kind === 'bonus') && !row.pointageId) return;
+    setHistEdit({
+      kind: row.kind,
+      pointageId: row.pointageId,
+      paymentId: row.paymentId,
+      recordId: row.recordId,
+      amount: String(row.amount),
+      date: row.date ? String(row.date).slice(0, 10) : localISO(new Date()),
+      mode: row.mode || 'especes',
+      remark: row.note || '',
+      days: String(row.days ?? 1),
+      rate: String(row.rate ?? row.amount),
+    });
+  }
+
+  async function saveHist(e: React.FormEvent) {
+    e.preventDefault();
+    if (!histEdit) return;
+    const amount = Number(histEdit.amount);
+    if (!Number.isFinite(amount) || amount < 0) return;
+    if (histEdit.kind === 'payment' && amount <= 0) {
+      await appAlert(t('common.error'));
+      return;
+    }
+    setHistBusy(true);
+    try {
+      if (histEdit.kind === 'payment' && histEdit.paymentId) {
+        await api(`/chantiers/${chantierId}/payroll-payments/${histEdit.paymentId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            amount,
+            paidAt: histEdit.date,
+            paymentMode: histEdit.mode,
+            remark: histEdit.remark.trim() || null,
+          }),
+        });
+      } else if (histEdit.kind === 'payment' && histEdit.recordId) {
+        await api(`/chantiers/${chantierId}/payroll-records/${histEdit.recordId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            amount,
+            paidAt: histEdit.date,
+            paymentMode: histEdit.mode,
+            remark: histEdit.remark.trim() || null,
+          }),
+        });
+      } else if (histEdit.kind === 'wage' && histEdit.pointageId) {
+        const days = Number(histEdit.days);
+        const rate = Number(histEdit.rate);
+        if (!Number.isFinite(days) || days < 0 || days > 1 || !Number.isFinite(rate) || rate < 0) {
+          await appAlert(t('common.error'));
+          setHistBusy(false);
+          return;
+        }
+        await api(`/chantiers/pointage/${histEdit.pointageId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            correct: true,
+            dayValue: days,
+            dayRate: rate,
+          }),
+        });
+      } else if (histEdit.pointageId) {
+        await api(`/chantiers/pointage/${histEdit.pointageId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            correct: true,
+            ...(histEdit.kind === 'advance' ? { advance: amount } : { bonus: amount }),
+          }),
+        });
+      }
+      setHistEdit(null);
+      load();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setHistBusy(false);
+    }
+  }
+
+  async function deleteHist(row: HistRow) {
+    const ok = await appConfirm(t('siteOps.payDeleteEvent'), { danger: true, title: t('common.delete') });
+    if (!ok) return;
+    setHistBusy(true);
+    try {
+      if (row.kind === 'payment' && row.paymentId) {
+        await api(`/chantiers/${chantierId}/payroll-payments/${row.paymentId}`, { method: 'DELETE' });
+      } else if (row.kind === 'payment' && row.recordId) {
+        await api(`/chantiers/${chantierId}/payroll-records/${row.recordId}`, { method: 'DELETE' });
+      } else if (row.pointageId && (row.kind === 'advance' || row.kind === 'bonus')) {
+        await api(`/chantiers/pointage/${row.pointageId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            correct: true,
+            ...(row.kind === 'advance' ? { advance: 0 } : { bonus: 0 }),
+          }),
+        });
+      }
+      load();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setHistBusy(false);
+    }
+  }
+
+  function canEdit(row: HistRow) {
+    if (row.kind === 'payment') return Boolean(row.paymentId || row.recordId);
+    if (row.kind === 'wage' || row.kind === 'advance' || row.kind === 'bonus') return Boolean(row.pointageId);
+    return false;
+  }
+
+  function canDelete(row: HistRow) {
+    if (row.kind === 'payment') return Boolean(row.paymentId || row.recordId);
+    if (row.kind === 'advance' || row.kind === 'bonus') return Boolean(row.pointageId);
+    return false;
   }
 
   function modeLabel(mode?: string | null) {
@@ -422,10 +620,10 @@ export function ChantierPaymentPanel({
         open={!!detail}
         size="xl"
         title={detail ? `${detail.firstName} ${detail.lastName} — ${t('actions.payment')}` : ''}
-        onClose={() => setDetail(null)}
+        onClose={() => { setDetail(null); setHistTab('all'); setHistEdit(null); }}
         footer={
           <>
-            <Btn variant="secondary" onClick={() => setDetail(null)}>{t('common.close')}</Btn>
+            <Btn variant="secondary" onClick={() => { setDetail(null); setHistTab('all'); setHistEdit(null); }}>{t('common.close')}</Btn>
             {detail && detail.remaining > 0.01 && (
               <Btn icon={Banknote} onClick={() => openPay([detail])}>
                 {t('actions.pay')}
@@ -466,40 +664,88 @@ export function ChantierPaymentPanel({
                   <span className="font-medium">{formatMad(detail.remaining)}</span>
                 </p>
               </div>
-              {payHistory(detail).length === 0 ? (
-                <p className="text-[12px] text-gic-muted">{t('rental.toPay')}</p>
-              ) : (
-                <TableWrap mac>
-                  <thead>
-                    <tr>
-                      <Th mac>{t('columns.date')}</Th>
-                      <Th mac>{t('columns.type')}</Th>
-                      <Th mac>{t('columns.amount')}</Th>
-                      <Th mac>{t('siteOps.payAfter')}</Th>
-                      <Th mac>{t('fields.remark')}</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {payHistory(detail).map((row) => (
-                      <tr key={row.key}>
-                        <Td mac>{row.date ? formatDate(row.date) : '—'}</Td>
-                        <Td mac>
-                          <span className={`mac-chip ${row.kind === 'payment' ? 'mac-chip-green' : row.kind === 'advance' ? 'mac-chip-orange' : row.kind === 'bonus' ? 'mac-chip-blue' : 'mac-chip-gray'}`}>
-                            {row.kind === 'wage' ? t('siteOps.payEventWage') : row.kind === 'advance' ? t('siteOps.payEventAdvance') : row.kind === 'bonus' ? t('siteOps.payEventBonus') : t('siteOps.payEventPayment')}
-                          </span>
-                        </Td>
-                        <Td mac className={row.kind === 'advance' || row.kind === 'payment' ? 'font-medium text-gic-coral' : 'font-medium'}>
-                          {row.kind === 'advance' || row.kind === 'payment' ? '− ' : '+ '}{formatMad(row.amount)}
-                        </Td>
-                        <Td mac className="font-medium">{formatMad(row.after)}</Td>
-                        <Td mac className="mac-table-muted">
-                          {[row.mode ? modeLabel(row.mode) : '', row.note].filter(Boolean).join(' · ') || '—'}
-                        </Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </TableWrap>
-              )}
+              {(() => {
+                const hist = payHistory(detail);
+                const filtered = histTab === 'all' ? hist : hist.filter((row) => row.kind === histTab);
+                const countOf = (kind: HistKind) => (kind === 'all' ? hist.length : hist.filter((row) => row.kind === kind).length);
+                const tabLabel = (id: HistKind, label: string) => `${label} (${countOf(id)})`;
+                return (
+                  <>
+                    <Tabs
+                      mac
+                      className="mb-2"
+                      active={histTab}
+                      onChange={(id) => setHistTab(id as HistKind)}
+                      tabs={[
+                        { id: 'all', label: tabLabel('all', t('siteOps.payHistoryAll')) },
+                        { id: 'wage', label: tabLabel('wage', t('siteOps.payEventWage')) },
+                        { id: 'advance', label: tabLabel('advance', t('siteOps.payEventAdvance')) },
+                        { id: 'bonus', label: tabLabel('bonus', t('siteOps.payEventBonus')) },
+                        { id: 'payment', label: tabLabel('payment', t('siteOps.payEventPayment')) },
+                      ]}
+                    />
+                    {filtered.length === 0 ? (
+                      <p className="text-[12px] text-gic-muted">{t('rental.toPay')}</p>
+                    ) : (
+                      <TableWrap mac>
+                        <thead>
+                          <tr>
+                            <Th mac>{t('columns.date')}</Th>
+                            <Th mac>{t('columns.type')}</Th>
+                            <Th mac>{t('columns.amount')}</Th>
+                            <Th mac>{t('siteOps.payAfter')}</Th>
+                            <Th mac>{t('fields.remark')}</Th>
+                            <th className="mac-th mac-th-actions" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((row) => (
+                            <tr key={row.key}>
+                              <Td mac>{row.date ? formatDate(row.date) : '—'}</Td>
+                              <Td mac>
+                                <span className={`mac-chip ${row.kind === 'payment' ? 'mac-chip-green' : row.kind === 'advance' ? 'mac-chip-orange' : row.kind === 'bonus' ? 'mac-chip-blue' : 'mac-chip-gray'}`}>
+                                  {histKindLabel(row.kind)}
+                                </span>
+                              </Td>
+                              <Td mac className={row.kind === 'advance' || row.kind === 'payment' ? 'font-medium text-gic-coral' : 'font-medium'}>
+                                {row.kind === 'advance' || row.kind === 'payment' ? '− ' : '+ '}{formatMad(row.amount)}
+                              </Td>
+                              <Td mac className="font-medium">{formatMad(row.after)}</Td>
+                              <Td mac className="mac-table-muted">
+                                {[row.mode ? modeLabel(row.mode) : '', row.note].filter(Boolean).join(' · ') || '—'}
+                              </Td>
+                              <Td mac className="mac-td-actions">
+                                {(canEdit(row) || canDelete(row)) && (
+                                  <div className="flex items-center justify-end gap-1">
+                                    {canEdit(row) && (
+                                      <MacActionBtn
+                                        icon={Pencil}
+                                        tone="orange"
+                                        title={t('common.edit')}
+                                        disabled={histBusy}
+                                        onClick={() => openHistEdit(row)}
+                                      />
+                                    )}
+                                    {canDelete(row) && (
+                                      <MacActionBtn
+                                        icon={Trash2}
+                                        tone="red"
+                                        title={t('common.delete')}
+                                        disabled={histBusy}
+                                        onClick={() => { void deleteHist(row); }}
+                                      />
+                                    )}
+                                  </div>
+                                )}
+                              </Td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </TableWrap>
+                    )}
+                  </>
+                );
+              })()}
             </div>
             {(detail.days || []).length === 0 ? (
               <p className="py-4 text-center text-[12px] text-gic-muted">{t('pointageMgmt.emptyLines')}</p>
@@ -529,10 +775,50 @@ export function ChantierPaymentPanel({
                         {day.remark && <span className="block text-[10px] text-gic-muted">{day.remark}</span>}
                       </Td>
                       <Td mac>{day.days.toFixed(2)}{day.hours ? <span className="block text-[10px] text-gic-muted">{day.hours.toFixed(1)} h</span> : null}</Td>
-                      <Td mac>{formatMad(day.rate)}</Td>
+                      <Td mac>
+                        <span className="inline-flex items-center gap-1">
+                          {formatMad(day.rate)}
+                          <MacActionBtn
+                            icon={Pencil}
+                            tone="orange"
+                            title={t('common.edit')}
+                            onClick={() => openHistEdit({
+                              key: `w-${day.id}`,
+                              date: day.date,
+                              kind: 'wage',
+                              amount: day.days * day.rate,
+                              after: 0,
+                              pointageId: day.id,
+                              note: day.task,
+                              days: day.days,
+                              rate: day.rate,
+                            })}
+                          />
+                        </span>
+                      </Td>
                       <Td mac className="whitespace-nowrap font-medium">{formulaOf(day.days, day.rate)}</Td>
-                      <Td mac className={day.advance > 0 ? 'font-medium text-gic-coral' : ''}>{formatMad(day.advance)}</Td>
-                      <Td mac className={day.bonus > 0 ? 'font-medium' : ''}>{formatMad(day.bonus)}</Td>
+                      <Td mac className={day.advance > 0 ? 'font-medium text-gic-coral' : ''}>
+                        <span className="inline-flex items-center gap-1">
+                          {formatMad(day.advance)}
+                          {day.advance > 0 && (
+                            <>
+                              <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openHistEdit({ key: `a-${day.id}`, date: day.date, kind: 'advance', amount: day.advance, after: 0, pointageId: day.id, note: day.remark })} />
+                              <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { void deleteHist({ key: `a-${day.id}`, date: day.date, kind: 'advance', amount: day.advance, after: 0, pointageId: day.id }); }} />
+                            </>
+                          )}
+                        </span>
+                      </Td>
+                      <Td mac className={day.bonus > 0 ? 'font-medium' : ''}>
+                        <span className="inline-flex items-center gap-1">
+                          {formatMad(day.bonus)}
+                          {day.bonus > 0 && (
+                            <>
+                              <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openHistEdit({ key: `b-${day.id}`, date: day.date, kind: 'bonus', amount: day.bonus, after: 0, pointageId: day.id, note: day.remark })} />
+                              <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { void deleteHist({ key: `b-${day.id}`, date: day.date, kind: 'bonus', amount: day.bonus, after: 0, pointageId: day.id }); }} />
+                            </>
+                          )}
+                        </span>
+                      </Td>
                       <Td mac className="font-medium">{formatMad(day.net)}</Td>
                       <Td mac>
                         <span className={`mac-chip ${day.validated ? 'mac-chip-green' : 'mac-chip-gray'}`}>
@@ -645,6 +931,75 @@ export function ChantierPaymentPanel({
           <Textarea label={t('fields.remark')} value={payRemark} onChange={(e) => setPayRemark(e.target.value)} rows={2} />
           <p className="text-[11px] text-gic-muted">{t('msg.debitBalanceHint')}</p>
         </form>
+      </Modal>
+
+      <Modal
+        open={!!histEdit}
+        title={histEdit ? `${t('common.edit')} — ${histKindLabel(histEdit.kind)}` : ''}
+        onClose={() => setHistEdit(null)}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => setHistEdit(null)}>{t('common.cancel')}</Btn>
+            <Btn form="pay-hist-edit" type="submit" disabled={histBusy}>
+              {histBusy ? t('common.inProgress') : t('common.save')}
+            </Btn>
+          </>
+        }
+      >
+        {histEdit && (
+          <form id="pay-hist-edit" onSubmit={saveHist} className="space-y-3">
+            {histEdit.kind === 'wage' ? (
+              <>
+                <Input
+                  label={t('siteOps.payDays')}
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.25"
+                  value={histEdit.days}
+                  onChange={(e) => setHistEdit({ ...histEdit, days: e.target.value })}
+                  required
+                />
+                <Input
+                  label={t('columns.dailyRateMad')}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={histEdit.rate}
+                  onChange={(e) => setHistEdit({ ...histEdit, rate: e.target.value })}
+                  required
+                />
+                <p className="text-[12px] font-medium">
+                  {formulaOf(Number(histEdit.days) || 0, Number(histEdit.rate) || 0)}
+                </p>
+              </>
+            ) : (
+              <Input
+                label={t('fields.amountMad')}
+                type="number"
+                min="0"
+                step="0.01"
+                value={histEdit.amount}
+                onChange={(e) => setHistEdit({ ...histEdit, amount: e.target.value })}
+                required
+              />
+            )}
+            {histEdit.kind === 'payment' && (
+              <>
+                <div className="w-40">
+                  <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('columns.date')}</p>
+                  <MacDateInput value={histEdit.date} onChange={(value) => setHistEdit({ ...histEdit, date: value })} placeholder={t('columns.date')} />
+                </div>
+                <Select label={t('fields.mode')} value={histEdit.mode} onChange={(e) => setHistEdit({ ...histEdit, mode: e.target.value })}>
+                  <option value="especes">{t('fields.modeCash')}</option>
+                  <option value="virement">{t('fields.modeTransfer')}</option>
+                  <option value="cheque">{t('fields.modeCheck')}</option>
+                </Select>
+                <Textarea label={t('fields.remark')} value={histEdit.remark} onChange={(e) => setHistEdit({ ...histEdit, remark: e.target.value })} rows={2} />
+              </>
+            )}
+          </form>
+        )}
       </Modal>
     </div>
   );

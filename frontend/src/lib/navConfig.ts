@@ -4,7 +4,7 @@ import {
   Wallet, CreditCard, Calculator, Truck, ShoppingCart, HardHat, Cog,
   Clock, Banknote, TrendingUp, TrendingDown, FolderOpen, Settings, Shield,
   BookOpen, UserCog, FileSearch, Bell, Car, Coins, Contact,
-  Package, CalendarRange, PieChart, Warehouse, Undo2, Gauge,
+  Package, CalendarRange, PieChart, Warehouse, Undo2, Gauge, ArrowLeftRight,
 } from 'lucide-react';
 import { isNavPathVisible } from './featureFlags';
 
@@ -53,6 +53,7 @@ export const navbarGroups: NavGroup[] = [
     items: [
       { to: '/projets', label: 'nav.projects', icon: MapPin },
       { to: '/chantiers', label: 'nav.sites', icon: HardHat },
+      { to: '/avancement', label: 'nav.progress', icon: TrendingUp },
       { to: '/biens', label: 'nav.properties', icon: Building2 },
       { to: '/ventes', label: 'nav.sales', icon: Handshake },
       { to: '/locations', label: 'nav.rentals', icon: Home },
@@ -79,7 +80,11 @@ export const navbarGroups: NavGroup[] = [
     icon: ShoppingCart,
     items: [
       { to: '/achats', label: 'nav.purchases', icon: ShoppingCart },
-      { to: '/avancement', label: 'nav.progress', icon: TrendingUp },
+      { to: '/pointage', label: 'nav.attendance', icon: Clock },
+      { to: '/operations/paiements', label: 'nav.opsPayments', icon: Banknote },
+      { to: '/operations/affectation', label: 'nav.opsAssign', icon: CalendarRange },
+      { to: '/operations/transfert', label: 'nav.opsTransfer', icon: ArrowLeftRight },
+      { to: '/operations/desaffectation', label: 'nav.opsUnassign', icon: Undo2 },
     ],
   },
   {
@@ -156,7 +161,4 @@ export function splitNavbarGroups(groups: NavGroup[]) {
 }
 
 /** Liens directs navbar — hors menus déroulants (à côté d'Accueil) */
-export const navbarDirectLinks: NavItem[] = [
-  { to: '/chantiers', label: 'nav.sites', icon: HardHat },
-  { to: '/pointage', label: 'nav.attendance', icon: Clock },
-];
+export const navbarDirectLinks: NavItem[] = [];

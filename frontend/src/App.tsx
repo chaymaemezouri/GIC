@@ -46,6 +46,8 @@ const WorkforceDetailPage = lazy(() => import('./pages/WorkforceDetailPage'));
 const ChauffeursPage = lazy(() => import('./pages/ChauffeursPage'));
 const ChauffeurDetailPage = lazy(() => import('./pages/ChauffeurDetailPage'));
 const PointagePage = lazy(() => import('./pages/PointagePage'));
+const OperationsPaiementsPage = lazy(() => import('./pages/OperationsPaiementsPage'));
+const OperationsMouvementsPage = lazy(() => import('./pages/OperationsMouvementsPage'));
 const ProjetsPage = lazy(() => import('./pages/ProjetsPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const BienDetailPage = lazy(() => import('./pages/BienDetailPage'));
@@ -167,6 +169,10 @@ export default function App() {
               <Route path="chauffeurs" element={<ChauffeursPage />} />
               <Route path="chauffeurs/:id" element={<ChauffeurDetailPage />} />
               <Route path="pointage" element={<PointagePage />} />
+              <Route path="operations/paiements" element={<OperationsPaiementsPage />} />
+              <Route path="operations/affectation" element={<OperationsMouvementsPage action="affectation" />} />
+              <Route path="operations/transfert" element={<OperationsMouvementsPage action="transfert" />} />
+              <Route path="operations/desaffectation" element={<OperationsMouvementsPage action="desaffectation" />} />
               <Route path="equipe-interne" element={<EquipeInternePage />} />
               <Route path="equipe-interne/:id" element={<EquipeInterneDetailPage />} />
               <Route element={<FleetLayout />}>

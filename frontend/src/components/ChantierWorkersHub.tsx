@@ -62,8 +62,16 @@ type PointageWorker = {
   photo?: string | null;
 };
 
-export function ChantierPointagePanel({ chantierId, scope = 'workers' }: { chantierId: string; scope?: 'workers' | 'drivers' }) {
-  const [tranche, setTranche] = useState('');
+export function ChantierPointagePanel({
+  chantierId,
+  scope = 'workers',
+  lockedTranche,
+}: {
+  chantierId: string;
+  scope?: 'workers' | 'drivers';
+  lockedTranche?: string;
+}) {
+  const [tranche, setTranche] = useState(lockedTranche || '');
   const [workforce, setWorkforce] = useState<PointageWorker[]>([]);
 
   useEffect(() => {
@@ -71,9 +79,14 @@ export function ChantierPointagePanel({ chantierId, scope = 'workers' }: { chant
     fetchWorkforceList<PointageWorker>(opts).then(setWorkforce).catch(() => setWorkforce([]));
   }, [chantierId, scope]);
 
+  useEffect(() => {
+    if (lockedTranche) setTranche(lockedTranche);
+  }, [lockedTranche]);
+
   return (
     <PointageSessionManager
       hideSiteSelect
+      hideTrancheSelect={Boolean(lockedTranche)}
       chantiers={[]}
       chantierId={chantierId}
       onChantierChange={() => {}}
@@ -91,28 +104,34 @@ export function ChantierWorkersHub({
   assignments,
   tranches,
   scope = 'workers',
+  fixedTranche,
   onChanged,
 }: {
   chantierId: string;
   assignments: SiteAssignment[];
   tranches: string[];
   scope?: 'workers' | 'drivers';
+  fixedTranche?: string;
   onChanged: () => void;
+  onlySection?: Section;
 }) {
   const { t } = useI18n();
-  const [section, setSection] = useState<Section>('affectation');
+  const [section, setSection] = useState<Section>(onlySection || 'affectation');
+  useEffect(() => {
+    if (onlySection) setSection(onlySection);
+  }, [onlySection]);
   const [chantiers, setChantiers] = useState<ChantierOption[]>([]);
   const [destTranches, setDestTranches] = useState<string[]>([]);
   const [destId, setDestId] = useState('');
   const [destAssignments, setDestAssignments] = useState<SiteAssignment[]>([]);
-  const [sourceFilter, setSourceFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState(fixedTranche || 'all');
   const [destFilter, setDestFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [destQuery, setDestQuery] = useState('');
   const [selectedLeft, setSelectedLeft] = useState<string[]>([]);
   const [selectedRight, setSelectedRight] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [filterTranche, setFilterTranche] = useState('');
+  const [filterTranche, setFilterTranche] = useState(fixedTranche || '');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sessions, setSessions] = useState<SessionSynthesis[]>([]);
@@ -143,6 +162,12 @@ export function ChantierWorkersHub({
       ))))
       .catch(() => setDestAssignments([]));
   }, [destId, chantierId, tranches, assignments, scope]);
+
+  useEffect(() => {
+    if (!fixedTranche) return;
+    setSourceFilter(fixedTranche);
+    setFilterTranche(fixedTranche);
+  }, [fixedTranche]);
 
   useEffect(() => {
     if (section !== 'synthese') return;
@@ -262,10 +287,17 @@ export function ChantierWorkersHub({
 
   return (
     <div className="mt-2 space-y-3">
-      <Tabs mac active={section} onChange={(id) => setSection(id as Section)} tabs={tabs} />
+      {!onlySection && <Tabs mac active={section} onChange={(id) => setSection(id as Section)} tabs={tabs} />}
 
       {section === 'affectation' && (
-        <ChantierWorkersPanel chantierId={chantierId} assignments={assignments} tranches={tranches} scope={scope} onChanged={onChanged} />
+        <ChantierWorkersPanel
+          chantierId={chantierId}
+          assignments={assignments}
+          tranches={tranches}
+          fixedTranche={fixedTranche}
+          scope={scope}
+          onChanged={onChanged}
+        />
       )}
 
       {section === 'transfer' && (
@@ -281,6 +313,7 @@ export function ChantierWorkersHub({
               filter={sourceFilter}
               onFilter={setSourceFilter}
               tranches={tranches}
+              lockFilter={fixedTranche}
               allLabel={t('common.all')}
               wholeLabel={t('msg.wholeSite')}
               arrive={t('siteOps.transferArrive', { place: placeOf(sourceFilter) || t('msg.wholeSite') })}
@@ -345,16 +378,20 @@ export function ChantierWorkersHub({
           </div>
         </div>
       )}
-      {section === 'pointage' && <ChantierPointagePanel chantierId={chantierId} scope={scope} />}
+      {section === 'pointage' && (
+        <ChantierPointagePanel chantierId={chantierId} scope={scope} lockedTranche={fixedTranche} />
+      )}
 
       {section === 'synthese' && (
         <div className="flex flex-wrap items-end gap-2">
-          <div className="w-56">
-            <Select label={t('columns.tranche')} value={filterTranche} onChange={(e) => setFilterTranche(e.target.value)}>
-              <option value="">{t('common.all')}</option>
-              {tranches.map((name) => <option key={name} value={name}>{name}</option>)}
-            </Select>
-          </div>
+          {!fixedTranche && (
+            <div className="w-56">
+              <Select label={t('columns.tranche')} value={filterTranche} onChange={(e) => setFilterTranche(e.target.value)}>
+                <option value="">{t('common.all')}</option>
+                {tranches.map((name) => <option key={name} value={name}>{name}</option>)}
+              </Select>
+            </div>
+          )}
           <MacDateInput value={dateFrom} onChange={setDateFrom} placeholder={t('msg.fromDate')} className="w-36 shrink-0" />
           <MacDateInput value={dateTo} onChange={setDateTo} placeholder={t('msg.toDate')} className="w-36 shrink-0" />
           <MacDateInput
@@ -466,14 +503,14 @@ export function ChantierWorkersHub({
         </div>
       )}
 
-      {section === 'paiement' && <ChantierPaymentPanel chantierId={chantierId} scope={scope} />}
+      {section === 'paiement' && <ChantierPaymentPanel chantierId={chantierId} scope={scope} tranche={fixedTranche} />}
     </div>
   );
 }
 
 
 function WorkerColumn({
-  title, count, query, onQuery, searchPlaceholder, filter, onFilter, tranches, allLabel, wholeLabel, arrive, rows, selected, onToggle, empty, embedded, tone = 'blue',
+  title, count, query, onQuery, searchPlaceholder, filter, onFilter, tranches, allLabel, wholeLabel, arrive, rows, selected, onToggle, empty, embedded, tone = 'blue', lockFilter,
 }: {
   title: string;
   count: number;
@@ -492,6 +529,7 @@ function WorkerColumn({
   empty: string;
   embedded?: boolean;
   tone?: 'blue' | 'green';
+  lockFilter?: string;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -530,6 +568,7 @@ function WorkerColumn({
           <div className="flex-1 min-w-0">
             <MacSearch value={query} onChange={onQuery} placeholder={searchPlaceholder} />
           </div>
+          {!lockFilter && (
           <div ref={menuRef} className="relative shrink-0">
             <Btn
               variant="secondary"
@@ -559,6 +598,7 @@ function WorkerColumn({
               </div>
             )}
           </div>
+          )}
         </div>
         <p className={`mac-chip ${chip} mt-2`}>{current} · {arrive}</p>
       </div>

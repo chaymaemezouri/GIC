@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, formatDate } from '../../lib/api';
 import { useI18n } from '../../i18n/I18nContext';
+import { parseIntQty } from '../../lib/engins';
 import { Btn, Input, KpiCard, Select, TableWrap, Td, Th } from '../ui';
 import { Package, Warehouse, Wrench } from 'lucide-react';
 
@@ -36,12 +37,14 @@ export function MaterielStockPanel({
   tranche: fixedTranche,
   onOpenDetail,
   hideMovementForm = false,
+  defaultType,
 }: {
   enginId?: string;
   chantierId?: string;
   tranche?: string;
   onOpenDetail?: (id: string, label: string) => void;
   hideMovementForm?: boolean;
+  defaultType?: (typeof TYPES)[number];
 }) {
   const { t } = useI18n();
   const [stock, setStock] = useState<Stock | null>(null);
@@ -52,7 +55,7 @@ export function MaterielStockPanel({
   const [tranches, setTranches] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState(enginId || '');
-  const [movementType, setMovementType] = useState<(typeof TYPES)[number]>('affectation');
+  const [movementType, setMovementType] = useState<(typeof TYPES)[number]>(defaultType || 'affectation');
   const [quantity, setQuantity] = useState('1');
   const [destId, setDestId] = useState(chantierId || '');
   const [tranche, setTranche] = useState(fixedTranche || '');
@@ -120,10 +123,16 @@ export function MaterielStockPanel({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!activeId) return;
+    const n = parseIntQty(quantity);
+    if (n == null) {
+      const { appAlert } = await import('../../lib/dialog');
+      await appAlert(t('fleet.stock.integerQty'));
+      return;
+    }
     const fromSite = source.startsWith('site:') ? source.slice(5).split(':') : null;
     const body: Record<string, unknown> = {
       movementType,
-      quantity: Number(quantity),
+      quantity: n,
       date,
       remark: remark || null,
     };
@@ -307,7 +316,10 @@ export function MaterielStockPanel({
           <Select label={t('fleet.stock.type')} value={movementType} onChange={(e) => setMovementType(e.target.value as (typeof TYPES)[number])}>
             {TYPES.map((type) => <option key={type} value={type}>{t(`fleet.stock.${type}`)}</option>)}
           </Select>
-          <Input label={t('fleet.fields.quantity')} type="number" min="0.01" step="1" required value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+          <Input label={t('fleet.fields.quantity')} type="number" min="1" step="1" inputMode="numeric" required value={quantity} onChange={(e) => {
+            const n = parseInt(e.target.value.replace(',', '.'), 10);
+            setQuantity(Number.isFinite(n) && n > 0 ? String(n) : '');
+          }} />
           <Input label={t('common.date')} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           {needsSource && (
             <Select label={t('fleet.stock.source')} value={source} onChange={(e) => setSource(e.target.value)}>

@@ -9,7 +9,7 @@ import {
 import { api, downloadCsv, downloadExcel, fetchSupplierList, fetchChantierList, formatDate, formatMad, openPrintUrl, type PaginatedResponse } from '../lib/api';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
-  Modal, PageHeader, Pagination, Select, TableWrap, Tabs, Td, Th,
+  Modal, PageHeader, Pagination, Select, TableWrap, Td, Th, MacToolbarTabs,
 } from '../components/ui';
 import {
   PurchaseFormFields, emptyPurchaseForm, purchaseFormToBody, purchaseToForm, validatePurchaseForm, type PurchaseFormData,
@@ -20,7 +20,7 @@ import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection'
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
-import { PURCHASE_STATUSES, type PurchaseDetail } from '../lib/purchases';
+import { PURCHASE_STATUSES, PURCHASE_TYPES, type PurchaseDetail, type PurchaseType } from '../lib/purchases';
 
 type Purchase = {
   id: string;
@@ -62,6 +62,9 @@ export default function AchatsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [view, setView] = useState<'liste' | 'analyse'>(searchParams.get('tab') === 'analyse' ? 'analyse' : 'liste');
+  const lockedType = PURCHASE_TYPES.includes(searchParams.get('type') as PurchaseType)
+    ? (searchParams.get('type') as PurchaseType)
+    : '';
   const [items, setItems] = useState<Purchase[]>([]);
   const [totals, setTotals] = useState({ amount: 0, paid: 0, remaining: 0 });
   const [page, setPage] = useState(1);
@@ -109,6 +112,7 @@ export default function AchatsPage() {
     Object.entries(f).forEach(([k, v]) => { if (v) qs.set(k, v); });
     if (dateFrom) qs.set('dateFrom', dateFrom);
     if (dateTo) qs.set('dateTo', dateTo);
+    if (lockedType) qs.set('purchaseType', lockedType);
     qs.set('sort', sort);
     qs.set('order', order);
     qs.set('page', String(pageNum));
@@ -153,7 +157,7 @@ export default function AchatsPage() {
   useEffect(() => {
     load(1);
     setPage(1);
-  }, [sort, order, dateFrom, dateTo]);
+  }, [sort, order, dateFrom, dateTo, lockedType]);
 
   useEffect(() => {
     loadRefs();
@@ -209,7 +213,12 @@ export default function AchatsPage() {
 
   function openCreate() {
     setEditing(null);
-    setForm({ ...emptyPurchaseForm(), chantierId: filters.chantierId, tranche: filters.tranche, supplierId: filters.supplierId });
+    setForm({
+      ...emptyPurchaseForm(lockedType || 'marchandise'),
+      chantierId: filters.chantierId,
+      tranche: filters.tranche,
+      supplierId: filters.supplierId,
+    });
     setFormError('');
     setOpen(true);
   }
@@ -384,11 +393,19 @@ export default function AchatsPage() {
     );
   }
 
+  const title = lockedType === 'outil'
+    ? t('nav.purchaseTools')
+    : lockedType === 'materiel'
+      ? t('nav.purchaseMaterial')
+      : lockedType === 'marchandise'
+        ? t('nav.purchaseGoods')
+        : t('pages.purchases');
+
   return (
     <div className="space-y-0">
       <PageHeader
         mac
-        title={t('pages.purchases')}
+        title={title}
         subtitle={t('purchase.list.subtitle')}
         actions={
           <>
@@ -403,16 +420,33 @@ export default function AchatsPage() {
         }
       />
 
-      <Tabs
-        mac
-        className="mb-3"
-        active={view}
-        onChange={(id) => setView(id as 'liste' | 'analyse')}
-        tabs={[
-          { id: 'liste', label: t('purchase.list.tabList') },
-          { id: 'analyse', label: t('purchase.list.tabAnalytics') },
-        ]}
-      />
+      <Card className="mb-4 !pb-0">
+        <MacToolbarTabs
+          scopeLabel={t('fields.type')}
+          scopeTabs={[
+            { id: 'all', label: t('common.all') },
+            ...PURCHASE_TYPES.map((id) => ({
+              id,
+              label: t(id === 'outil' ? 'nav.purchaseTools' : id === 'materiel' ? 'nav.purchaseMaterial' : 'nav.purchaseGoods'),
+            })),
+          ]}
+          scope={lockedType || 'all'}
+          onScopeChange={(id) => {
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              if (id === 'all') next.delete('type');
+              else next.set('type', id);
+              return next;
+            }, { replace: true });
+          }}
+          viewTabs={[
+            { id: 'liste', label: t('purchase.list.tabList') },
+            { id: 'analyse', label: t('purchase.list.tabAnalytics') },
+          ]}
+          view={view}
+          onViewChange={(id) => setView(id as 'liste' | 'analyse')}
+        />
+      </Card>
 
       <div className={`mac-filters-panel${showFilters ? ' mac-filters-panel-open' : ''}`}>
         <div className="mac-filters-row">
@@ -655,6 +689,7 @@ export default function AchatsPage() {
             tranches={formTranches}
             reference={editing?.reference}
             trackingOnly={trackingOnly}
+            lockType={!!lockedType && !editing}
           />
           {formError && <p className="mt-3 text-[11px] text-gic-coral">{formError}</p>}
         </form>

@@ -115,8 +115,8 @@ export function SiteTransferPanel({
   function qtyOf(row: MaterielRow) {
     const key = rowKey(row.enginId, row.tranche);
     const raw = qty[key];
-    const n = raw === undefined ? row.quantity : Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : row.quantity;
+    const n = raw === undefined ? row.quantity : parseInt(String(raw).replace(',', '.'), 10);
+    return Number.isInteger(n) && n > 0 ? n : Math.round(row.quantity) || 1;
   }
 
   async function move(direction: 'out' | 'in') {
@@ -391,11 +391,14 @@ function TransferColumn({
                   <input
                     className="w-20 rounded-md border border-black/[0.1] bg-white px-2 py-1 text-[12px] outline-none"
                     type="number"
-                    min="0.01"
-                    max={row.quantity}
+                    min="1"
+                    max={Math.round(row.quantity)}
                     step="1"
-                    value={qty[id] ?? String(row.quantity)}
-                    onChange={(e) => onQty({ ...qty, [id]: e.target.value })}
+                    value={qty[id] ?? String(Math.round(row.quantity))}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value.replace(',', '.'), 10);
+                      onQty({ ...qty, [id]: Number.isFinite(n) && n > 0 ? String(n) : '' });
+                    }}
                     aria-label={t('fleet.fields.quantity')}
                   />
                 )}
