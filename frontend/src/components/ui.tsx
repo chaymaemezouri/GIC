@@ -692,6 +692,10 @@ export function StatusPill({ status, quiet = false }: { status: string; quiet?: 
       validé: 'mac-status mac-status-info',
       termine: 'mac-status mac-status-info',
       vendu: 'mac-status mac-status-info',
+      'à vendre': 'mac-status mac-status-info',
+      'à louer': 'mac-status mac-status-info',
+      vente: 'mac-status mac-status-info',
+      location: 'mac-status mac-status-info',
       signée: 'mac-status',
       brouillon: 'mac-status',
       inactif: 'mac-status',
@@ -701,7 +705,7 @@ export function StatusPill({ status, quiet = false }: { status: string; quiet?: 
       retard: 'mac-status mac-status-danger',
       loué: 'mac-status mac-status-info',
     };
-    return <span className={`capitalize ${tones[status] || 'mac-status'}`}>{label}</span>;
+    return <span className={`${status.startsWith('à ') ? '' : 'capitalize '} ${tones[status] || 'mac-status'}`}>{label}</span>;
   }
   const map: Record<string, string> = {
     actif: 'bg-gic-emerald-soft text-gic-emerald',
@@ -718,6 +722,10 @@ export function StatusPill({ status, quiet = false }: { status: string; quiet?: 
     en_cours: 'bg-gic-amber-soft text-gic-amber',
     en_cours_paiement: 'bg-gic-amber-soft text-gic-amber',
     vendu: 'bg-gic-violet-soft text-gic-violet',
+    'à vendre': 'bg-gic-violet-soft text-gic-violet',
+    'à louer': 'bg-gic-pink-soft text-gic-pink',
+    vente: 'bg-gic-violet-soft text-gic-violet',
+    location: 'bg-gic-pink-soft text-gic-pink',
     loué: 'bg-gic-pink-soft text-gic-pink',
     réservé: 'bg-gic-amber-soft text-gic-amber',
     en_maintenance: 'bg-gic-coral-soft text-gic-coral',

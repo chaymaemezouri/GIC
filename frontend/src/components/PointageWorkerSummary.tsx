@@ -246,8 +246,8 @@ export default function PointageWorkerSummary({
     return 'pending';
   }
 
-  function payableOf(row: { remaining: number; brut: number }) {
-    return Math.max(0, Math.round(Math.min(Math.max(0, row.remaining), row.brut) * 100) / 100);
+  function payableOf(row: { remaining: number }) {
+    return Math.max(0, Math.round(Math.max(0, row.remaining) * 100) / 100);
   }
 
   function openPay(row: SummaryItem) {

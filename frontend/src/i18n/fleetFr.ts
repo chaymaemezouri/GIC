@@ -515,6 +515,8 @@ const fleetFr: Dict = {
     onSite: 'Sur ce chantier',
     onTranche: 'Sur cette tranche',
     empty: 'Aucun mouvement de quantité.',
+    historyIn: 'Entrées',
+    historyOut: 'Sorties',
     qtyHere: 'Sur place',
     qtyDepot: 'Dépôt',
     assignCta: 'Affecter du matériel',

@@ -928,6 +928,7 @@ router.post('/properties', async (req, res) => {
   const deal = propertyDealType(req.body.type, req.body.status);
   const body = { ...req.body };
   delete body.type;
+  if (body.status !== 'réservé') body.status = 'disponible';
   const property = await prisma.property.create({
     data: {
       ...body,
@@ -948,8 +949,16 @@ router.put('/properties/:id', async (req, res) => {
   const data = { ...req.body };
   delete data.reference;
   delete data.id;
+  const existing = await prisma.property.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ message: 'Bien introuvable' });
   const deal = data.type != null && data.type !== '' ? propertyDealType(data.type, data.status) : null;
   delete data.type;
+  if (data.status === 'indisponible') {
+    data.status = (deal || propertyDealType(undefined, existing.status)) === 'location' ? 'loué' : 'vendu';
+  }
+  if (['vendu', 'loué'].includes(existing.status) && data.status && !['vendu', 'loué'].includes(String(data.status))) {
+    delete data.status;
+  }
   if (data.price != null) data.price = Number(data.price);
   if (data.surface != null) data.surface = Number(data.surface);
   if (data.rooms != null) data.rooms = Number(data.rooms);

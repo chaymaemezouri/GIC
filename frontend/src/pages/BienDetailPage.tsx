@@ -17,7 +17,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { fileUrl } from '../lib/documentDisplay';
-import { availabilityStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
 
 import {
   BienFormFields, bienToForm, emptyBienForm, flattenProjectFloors,
@@ -112,11 +112,6 @@ export default function BienDetailPage() {
     await uploadForm(`/immobilier/properties/${id}/photo`, fd);
     load();
     e.target.value = '';
-  }
-
-  async function updateStatus(status: string) {
-    await api(`/immobilier/properties/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
-    load();
   }
 
   async function updateType(type: string) {
@@ -221,7 +216,8 @@ export default function BienDetailPage() {
               {bien.project?.name ? ` · ${bien.project.name}` : ''}
             </p>
             <div className="flex flex-wrap gap-1.5 mt-2.5">
-              <StatusPill status={bien.status} quiet />
+              <StatusPill status={propertyDealOf(bien) === 'location' ? 'à louer' : 'à vendre'} quiet />
+              <StatusPill status={occupancyStatusOf(bien)} quiet />
               {bien.surface && <span className="mac-chip mac-chip-gray">{bien.surface} m²</span>}
               {bien.rooms && <span className="mac-chip mac-chip-gray">{bien.rooms} {t('fields.rooms').toLowerCase()}</span>}
               {bien.titleNumber && <span className="mac-chip mac-chip-blue">TF {bien.titleNumber}</span>}
@@ -364,17 +360,14 @@ export default function BienDetailPage() {
               <div>
                 <p className="text-[10px] text-gic-muted uppercase mb-1">{t('columns.type')}</p>
                 <Select value={propertyDealOf(bien)} onChange={(e) => updateType(e.target.value)}>
-                  <option value="vente">{t('status.sold')}</option>
-                  <option value="location">{t('status.rented')}</option>
+                  <option value="vente">{t('status.forSale')}</option>
+                  <option value="location">{t('status.forRent')}</option>
                 </Select>
               </div>
               <div>
-                <p className="text-[10px] text-gic-muted uppercase mb-1">{t('actions.changeStatus')}</p>
-                <Select value={availabilityStatusOf(bien.status)} onChange={(e) => updateStatus(e.target.value)}>
-                  <option value="disponible">{t('status.available')}</option>
-                  <option value="réservé">{t('status.reserved')}</option>
-                  <option value="indisponible">{t('fields.unavailable')}</option>
-                </Select>
+                <p className="text-[10px] text-gic-muted uppercase mb-1">{t('fields.status')}</p>
+                <StatusPill status={occupancyStatusOf(bien)} quiet />
+                <p className="mt-1 text-[10px] text-gic-muted">{t('fields.propertyStatusHint')}</p>
               </div>
             </div>
             {bien.description && (

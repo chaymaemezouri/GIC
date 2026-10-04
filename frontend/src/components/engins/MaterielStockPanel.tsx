@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, formatDate } from '../../lib/api';
 import { useI18n } from '../../i18n/I18nContext';
-import { parseIntQty } from '../../lib/engins';
+import { formatQty, formatSignedQty, materielQtyDelta, parseIntQty } from '../../lib/engins';
 import { Btn, Input, KpiCard, Select, TableWrap, Td, Th } from '../ui';
 import { Package, Warehouse, Wrench } from 'lucide-react';
 
@@ -12,6 +12,8 @@ type Move = {
   movementType: string;
   quantity: number;
   date: string;
+  chantierId?: string | null;
+  fromChantierId?: string | null;
   tranche?: string | null;
   fromTranche?: string | null;
   remark?: string | null;
@@ -244,7 +246,7 @@ export function MaterielStockPanel({
                     </Td>
                   )}
                   <Td mac>{row.tranche || '—'}</Td>
-                  <Td mac className="font-medium">{row.quantity}</Td>
+                  <Td mac className="font-medium">{formatQty(row.quantity)}</Td>
                 </tr>
               ))}
             </tbody>
@@ -268,7 +270,7 @@ export function MaterielStockPanel({
                   <Link to={`/chantiers/${site.chantierId}?tab=materiel`} className="hover:text-[#007aff]">{site.chantierName || site.chantierId}</Link>
                 </Td>
                 <Td mac>{site.tranche || '—'}</Td>
-                <Td mac className="font-medium">{site.quantity}</Td>
+                <Td mac className="font-medium">{formatQty(site.quantity)}</Td>
               </tr>
             ))}
           </tbody>
@@ -291,16 +293,27 @@ export function MaterielStockPanel({
             </tr>
           </thead>
           <tbody>
-            {moves.map((move) => (
+            {moves.map((move) => {
+              const delta = materielQtyDelta(move, chantierId ? { chantierId, tranche: fixedTranche } : undefined);
+              return (
               <tr key={move.id}>
                 <Td mac>{formatDate(move.date)}</Td>
                 {!enginId && <Td mac>{move.engin?.designation || '—'}</Td>}
-                <Td mac>{t(`fleet.stock.${move.movementType}`)}</Td>
-                <Td mac className="font-medium">{move.quantity}</Td>
+                <Td mac>
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    delta > 0 ? 'bg-emerald-50 text-emerald-800'
+                      : delta < 0 ? 'bg-[#ff3b30]/10 text-gic-coral'
+                      : 'bg-black/[0.04] text-gic-ink'
+                  }`}>
+                    {t(`fleet.stock.${move.movementType}`)}
+                  </span>
+                </Td>
+                <Td mac className={`font-medium ${delta < 0 ? 'text-gic-coral' : ''}`}>{formatSignedQty(delta, move.quantity)}</Td>
                 <Td mac className="mac-table-muted">{moveSource(move)}</Td>
                 <Td mac className="mac-table-muted">{moveDest(move)}</Td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </TableWrap>
       )}

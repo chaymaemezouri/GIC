@@ -6,12 +6,13 @@ import {
   Plus, Pencil, Eye, Download, Printer, Ban, Wallet, TrendingUp, FileText, AlertCircle,
   SlidersHorizontal, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
-import { api, downloadCsv, downloadExcel, downloadPdf, fetchClientList, fetchPropertyList, formatMad, type PaginatedResponse } from '../lib/api';
+import { api, downloadCsv, downloadExcel, downloadPdf, fetchClientList, fetchPropertyList, formatMad, uploadForm, type PaginatedResponse } from '../lib/api';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
-import { SaleFormFields, emptySaleForm, saleFormToCreateBody, type SaleFormData } from '../components/SaleFormFields';
+import { SaleFormFields, emptySaleForm, saleFormToCreateBody, attachSaleCreateFiles, type SaleFormData } from '../components/SaleFormFields';
+import { isBankPaymentMode } from '../lib/paymentMode';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { printSaleReceipt } from '../lib/printSale';
 import { useRowSelection } from '../hooks/useRowSelection';
@@ -73,7 +74,7 @@ export default function VentesPage() {
   const [resiliateId, setResiliateId] = useState<string | null>(null);
   const [resiliateMotif, setResiliateMotif] = useState('');
   const [form, setForm] = useState<SaleFormData>(emptySaleForm());
-  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '' });
+  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null as File | null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const selection = useRowSelection<Sale>();
@@ -190,10 +191,11 @@ export default function VentesPage() {
     e.preventDefault();
     setError('');
     try {
-      await api('/transactions/sales', {
+      const created = await api<{ id: string; advancePaymentId?: string | null }>('/transactions/sales', {
         method: 'POST',
         body: JSON.stringify(saleFormToCreateBody(form)),
       });
+      await attachSaleCreateFiles(created.id, created.advancePaymentId, form);
       setOpen(false);
       load(1);
       setPage(1);
@@ -207,12 +209,17 @@ export default function VentesPage() {
     e.preventDefault();
     if (!payOpen) return;
     try {
-      await api('/transactions/payments', {
-        method: 'POST',
-        body: JSON.stringify({ saleId: payOpen, ...payForm }),
-      });
+      const fd = new FormData();
+      fd.append('saleId', payOpen);
+      fd.append('amount', payForm.amount);
+      fd.append('operationType', payForm.operationType);
+      fd.append('nature', payForm.nature || 'acompte');
+      if (payForm.payerName) fd.append('payerName', payForm.payerName);
+      if (payForm.bank) fd.append('bank', payForm.bank);
+      if (payForm.proof) fd.append('proof', payForm.proof);
+      await uploadForm('/transactions/payments', fd);
       setPayOpen(null);
-      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '' });
+      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null });
       load(page);
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -521,8 +528,24 @@ export default function VentesPage() {
             <option value="cheque">{t('fields.modeCheck')}</option>
             <option value="carte">{t('fields.modeCard')}</option>
           </Select>
+          <Select label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })}>
+            <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
+            <option value="echeance">{t('fields.paymentNatureInstallment')}</option>
+            <option value="solde">{t('fields.paymentNatureBalance')}</option>
+          </Select>
           <Input label={t('fields.payerNameShort')} value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} />
-          <Input label={t('fields.bankRefOperation')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
+          {isBankPaymentMode(payForm.operationType) && (
+            <Input label={t('fields.bankRefOperation')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
+          )}
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</label>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              className="block w-full text-[12px]"
+              onChange={(e) => setPayForm({ ...payForm, proof: e.target.files?.[0] || null })}
+            />
+          </div>
         </form>
       </Modal>
 

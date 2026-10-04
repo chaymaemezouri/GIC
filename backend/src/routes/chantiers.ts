@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
@@ -686,6 +687,67 @@ function boundAdvance(requested: number, saved: number, days: number, rate: numb
   return Math.round(Math.min(Math.max(value, floor), ceiling) * 100) / 100;
 }
 
+type PayrollExtra = {
+  id: string;
+  workforceId: string;
+  chantierId: string;
+  tranche: string;
+  kind: string;
+  amount: number;
+  occurredAt: Date | string;
+  remark: string | null;
+};
+
+function sqlQuote(value: string) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function extraTotals(rows: Array<{ kind: string; amount: number }>) {
+  return {
+    bonuses: rows.filter((row) => row.kind === 'bonus').reduce((s, row) => s + row.amount, 0),
+    advances: rows.filter((row) => row.kind === 'advance').reduce((s, row) => s + row.amount, 0),
+  };
+}
+
+async function listPayrollExtras(where: {
+  workforceId?: string;
+  workforceIds?: string[];
+  chantierId?: string;
+  tranche?: string;
+  from?: Date | null;
+  to?: Date | null;
+}): Promise<PayrollExtra[]> {
+  const ids = where.workforceIds || (where.workforceId ? [where.workforceId] : []);
+  if (!ids.length) return [];
+  const clauses = [`workforceId IN (${ids.map(sqlQuote).join(',')})`];
+  if (where.chantierId != null) clauses.push(`chantierId = ${sqlQuote(where.chantierId)}`);
+  if (where.tranche != null) clauses.push(`tranche = ${sqlQuote(where.tranche)}`);
+  if (where.from) clauses.push(`occurredAt >= ${sqlQuote(where.from.toISOString())}`);
+  if (where.to) clauses.push(`occurredAt <= ${sqlQuote(where.to.toISOString())}`);
+  try {
+    return await prisma.$queryRawUnsafe<PayrollExtra[]>(
+      `SELECT id, workforceId, chantierId, tranche, kind, amount, occurredAt, remark
+       FROM WorkforcePayrollAdjustment
+       WHERE ${clauses.join(' AND ')}
+       ORDER BY occurredAt ASC, createdAt ASC`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function getPayrollExtra(id: string): Promise<PayrollExtra | null> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<PayrollExtra[]>(
+      `SELECT id, workforceId, chantierId, tranche, kind, amount, occurredAt, remark
+       FROM WorkforcePayrollAdjustment WHERE id = ${sqlQuote(id)} LIMIT 1`,
+    );
+    return rows[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 function computeSalary(
   dailySalary: number,
   pointages: Array<{ totalDay: number; advance: number; bonus: number; dayRate?: number | null }>
@@ -1038,7 +1100,17 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
     },
   });
   const computed = computeWorkerPeriodSalary(worker, pointages);
-  const netDue = computed.net;
+  const extras = await listPayrollExtras({
+    workforceId,
+    chantierId: siteKey || undefined,
+    tranche: siteKey && trancheSpecified ? trancheKey : undefined,
+    from: periodStart,
+    to: periodEnd,
+  });
+  const extra = extraTotals(extras);
+  const bonuses = computed.bonuses + extra.bonuses;
+  const advances = computed.advances + extra.advances;
+  const netDue = Math.round((computed.brut + bonuses - advances) * 100) / 100;
 
   if (netDue <= 0) {
     return res.status(400).json({ message: 'Aucun salaire dû pour cette période' });
@@ -1053,19 +1125,17 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
     .reduce((s, r) => s + r.amountPaid, 0);
   const prevPaid = existing?.amountPaid ?? 0;
   const amountPaid = prevPaid + amount;
-  const wageCap = siteKey && !isMonthlyWorkforce(worker) ? computed.brut : netDue;
-  const cap = siteKey ? wageCap : Math.max(0, netDue - paidElsewhere);
+  const cap = siteKey ? netDue : Math.max(0, netDue - paidElsewhere);
   const paidOnSite = siteKey && !trancheSpecified
     ? periodRecords.filter((r) => r.chantierId === siteKey).reduce((s, r) => s + r.amountPaid, 0)
     : prevPaid;
   const paidForCap = siteKey && !trancheSpecified ? paidOnSite : prevPaid;
   const nextForCap = paidForCap + amount;
   if (nextForCap > cap + 0.01) {
-    const left = Math.max(0, cap - paidForCap);
-    const message = siteKey && !isMonthlyWorkforce(worker)
-      ? `La somme ne peut pas dépasser jours × prix (${computed.brut.toLocaleString('fr-MA')} MAD, reste ${left.toLocaleString('fr-MA')} MAD)`
-      : `Montant supérieur au net dû (${netDue.toLocaleString('fr-MA')} MAD, reste ${left.toLocaleString('fr-MA')} MAD)`;
-    return res.status(400).json({ message });
+    const left = Math.round(Math.max(0, cap - paidForCap) * 100) / 100;
+    return res.status(400).json({
+      message: `Montant supérieur au reste dû (${left.toLocaleString('fr-MA')} MAD)`,
+    });
   }
 
   const remaining = siteKey
@@ -1092,8 +1162,8 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
       periodYear,
       periodMonth,
       brut: computed.brut,
-      advances: computed.advances,
-      bonuses: computed.bonuses,
+      advances,
+      bonuses,
       netDue,
       amountPaid,
       remaining,
@@ -1104,8 +1174,8 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
     },
     update: {
       brut: computed.brut,
-      advances: computed.advances,
-      bonuses: computed.bonuses,
+      advances,
+      bonuses,
       netDue,
       amountPaid,
       remaining,
@@ -1195,6 +1265,96 @@ router.delete('/:id/payroll-payments/:payId', async (req, res) => {
   } catch (err) {
     console.error('DELETE payroll-payments', err);
     res.status(500).json({ message: 'Impossible de supprimer ce paiement' });
+  }
+});
+
+router.post('/:id/payroll-adjustments', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const workforceId = String(req.body.workforceId || '');
+  const kind = String(req.body.kind || '');
+  const amount = Number(req.body.amount);
+  const tranche = String(req.body.tranche || '').trim();
+  if (!workforceId || (kind !== 'bonus' && kind !== 'advance')) {
+    return res.status(400).json({ message: 'Type invalide' });
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ message: 'Montant invalide' });
+  }
+  const occurredAt = paymentInstant(req.body.occurredAt);
+  const periodYear = Number(req.body.periodYear) || occurredAt.getFullYear();
+  const periodMonth = Number(req.body.periodMonth) || occurredAt.getMonth() + 1;
+  try {
+    const id = randomUUID().replace(/-/g, '').slice(0, 25);
+    const remark = req.body.remark ? String(req.body.remark) : null;
+    const now = new Date().toISOString();
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO WorkforcePayrollAdjustment
+        (id, workforceId, chantierId, tranche, periodYear, periodMonth, kind, amount, occurredAt, remark, createdAt, updatedAt)
+       VALUES (
+         ${sqlQuote(id)}, ${sqlQuote(workforceId)}, ${sqlQuote(chantierId)}, ${sqlQuote(tranche)},
+         ${periodYear}, ${periodMonth}, ${sqlQuote(kind)}, ${amount},
+         ${sqlQuote(occurredAt.toISOString())}, ${remark == null ? 'NULL' : sqlQuote(remark)},
+         ${sqlQuote(now)}, ${sqlQuote(now)}
+       )`,
+    );
+    const row = await getPayrollExtra(id);
+    await audit(req, 'creation', 'WorkforcePayrollAdjustment', id, `${kind} ${amount.toLocaleString('fr-MA')} MAD`);
+    res.status(201).json(row);
+  } catch (err) {
+    console.error('POST payroll-adjustments', err);
+    res.status(500).json({ message: 'Impossible d\'ajouter cette ligne' });
+  }
+});
+
+router.put('/:id/payroll-adjustments/:adjId', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const adjId = String(req.params.adjId);
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ message: 'Montant invalide' });
+  }
+  try {
+    const existing = await getPayrollExtra(adjId);
+    if (!existing || existing.chantierId !== chantierId) {
+      return res.status(404).json({ message: 'Ligne introuvable' });
+    }
+    const occurredAt = req.body.occurredAt != null ? paymentInstant(req.body.occurredAt) : new Date(existing.occurredAt);
+    const remark = req.body.remark !== undefined
+      ? (req.body.remark ? String(req.body.remark) : null)
+      : existing.remark;
+    await prisma.$executeRawUnsafe(
+      `UPDATE WorkforcePayrollAdjustment SET
+         amount = ${amount},
+         occurredAt = ${sqlQuote(occurredAt.toISOString())},
+         remark = ${remark == null ? 'NULL' : sqlQuote(remark)},
+         periodYear = ${occurredAt.getFullYear()},
+         periodMonth = ${occurredAt.getMonth() + 1},
+         updatedAt = ${sqlQuote(new Date().toISOString())}
+       WHERE id = ${sqlQuote(adjId)}`,
+    );
+    const row = await getPayrollExtra(adjId);
+    await audit(req, 'modification', 'WorkforcePayrollAdjustment', adjId, `${existing.kind} ${amount.toLocaleString('fr-MA')} MAD`);
+    res.json(row);
+  } catch (err) {
+    console.error('PUT payroll-adjustments', err);
+    res.status(500).json({ message: 'Impossible de modifier cette ligne' });
+  }
+});
+
+router.delete('/:id/payroll-adjustments/:adjId', async (req, res) => {
+  const chantierId = String(req.params.id);
+  const adjId = String(req.params.adjId);
+  try {
+    const existing = await getPayrollExtra(adjId);
+    if (!existing || existing.chantierId !== chantierId) {
+      return res.status(404).json({ message: 'Ligne introuvable' });
+    }
+    await prisma.$executeRawUnsafe(`DELETE FROM WorkforcePayrollAdjustment WHERE id = ${sqlQuote(adjId)}`);
+    await audit(req, 'suppression', 'WorkforcePayrollAdjustment', adjId, `${existing.kind} ${existing.amount.toLocaleString('fr-MA')} MAD`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE payroll-adjustments', err);
+    res.status(500).json({ message: 'Impossible de supprimer cette ligne' });
   }
 });
 
@@ -1463,9 +1623,25 @@ router.get('/:id/payroll-lines', async (req, res) => {
     }
   }
 
+  const extras = ids.length
+    ? await listPayrollExtras({
+        workforceIds: ids,
+        chantierId,
+        from,
+        to,
+      })
+    : [];
+  for (const row of extras) {
+    const key = `${row.workforceId}::${row.tranche || ''}`;
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    if (row.kind === 'bonus') bucket.bonuses += row.amount;
+    else if (row.kind === 'advance') bucket.advances += row.amount;
+  }
+
   const lines = [...buckets.values()]
     .map((b) => {
-      const netDue = b.brut + b.bonuses - b.advances;
+      const netDue = Math.round((b.brut + b.bonuses - b.advances) * 100) / 100;
       const own = records.filter((r) => r.workforceId === b.workforceId && r.chantierId === (b.monthly ? '' : chantierId));
       const record = own.find((r) => String(r.tranche || '') === (b.monthly ? '' : b.tranche));
       const unallocated = own
@@ -1473,11 +1649,11 @@ router.get('/:id/payroll-lines', async (req, res) => {
         .reduce((s, r) => s + r.amountPaid, 0);
       const workerDue = [...buckets.values()]
         .filter((row) => row.workforceId === b.workforceId)
-        .reduce((s, row) => s + Math.max(0, Math.min(row.brut, row.brut + row.bonuses - row.advances)), 0);
-      const lineDue = Math.max(0, Math.min(b.monthly ? netDue : b.brut, netDue));
+        .reduce((s, row) => s + Math.max(0, Math.round((row.brut + row.bonuses - row.advances) * 100) / 100), 0);
+      const lineDue = Math.max(0, netDue);
       const share = workerDue > 0 ? unallocated * (lineDue / workerDue) : 0;
       const paid = (record && String(record.tranche || '') ? record.amountPaid : 0) + share;
-      const remaining = Math.max(0, lineDue - paid);
+      const remaining = Math.max(0, Math.round((lineDue - paid) * 100) / 100);
       const status = netDue <= 0 ? 'none' : remaining <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
       const ledger = (record?.payments || []).map((p) => ({
         id: p.id,
@@ -1522,6 +1698,15 @@ router.get('/:id/payroll-lines', async (req, res) => {
         paidAt: record?.paidAt || null,
         remark: record?.remark || null,
         payments,
+        adjustments: extras
+          .filter((row) => row.workforceId === b.workforceId && String(row.tranche || '') === b.tranche)
+          .map((row) => ({
+            id: row.id,
+            kind: row.kind,
+            amount: row.amount,
+            occurredAt: row.occurredAt,
+            remark: row.remark,
+          })),
         days: b.days
           .slice()
           .sort((a, c) => c.date.getTime() - a.date.getTime()),
@@ -2174,6 +2359,21 @@ router.get('/pointage/by-worker', async (req, res) => {
     req.query.dateTo ? String(req.query.dateTo) : undefined,
   );
   const paidIds = [...map.keys()];
+  if (paidIds.length && chantierFilter) {
+    const extras = await listPayrollExtras({
+      workforceIds: paidIds,
+      chantierId: chantierFilter,
+      tranche: trancheFilter || undefined,
+      from: paidFrom,
+      to: paidTo,
+    });
+    for (const row of extras) {
+      const entry = map.get(row.workforceId);
+      if (!entry) continue;
+      if (row.kind === 'bonus') entry.bonuses += row.amount;
+      else if (row.kind === 'advance') entry.advances += row.amount;
+    }
+  }
   const paidRecords = paidIds.length
     ? await prisma.workforcePayrollRecord.findMany({
         where: {
@@ -2202,7 +2402,7 @@ router.get('/pointage/by-worker', async (req, res) => {
           tranche: r.tranche || '',
         }));
       const amountPaid = payments.reduce((s, r) => s + r.amount, 0);
-      const due = Math.max(0, Math.min(e.brut, e.brut + e.bonuses - e.advances));
+      const due = Math.max(0, Math.round((e.brut + e.bonuses - e.advances) * 100) / 100);
       return {
         workforceId: e.workforce.id,
         workforce: {

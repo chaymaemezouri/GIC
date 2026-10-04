@@ -556,6 +556,25 @@ model WorkforcePayrollPayment {
   @@index([recordId])
 }
 
+/// Prime ou avance hors pointage (plusieurs lignes possibles).
+model WorkforcePayrollAdjustment {
+  id          String    @id @default(cuid())
+  workforceId String
+  workforce   Workforce @relation(fields: [workforceId], references: [id], onDelete: Cascade)
+  chantierId  String    @default("")
+  tranche     String    @default("")
+  periodYear  Int
+  periodMonth Int
+  kind        String
+  amount      Float
+  occurredAt  DateTime
+  remark      String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workforceId, periodYear, periodMonth, chantierId])
+}
+
 model Supplier {
   id            String   @id @default(cuid())
   reference     String   @unique
@@ -888,6 +907,7 @@ model Workforce {
   pointages     Pointage[]
   generatedDocs WorkforceDocument[]
   payrollRecords WorkforcePayrollRecord[]
+  payrollAdjustments WorkforcePayrollAdjustment[]
   vehicleAssignments DriverAssignment[]
   enginUsages   EnginUsage[]
 }

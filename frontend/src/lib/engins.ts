@@ -59,6 +59,56 @@ export function formatQty(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return '0';
   return String(Math.round(value));
 }
+
+export type MaterielMoveRef = {
+  movementType: string;
+  quantity: number;
+  chantierId?: string | null;
+  fromChantierId?: string | null;
+  tranche?: string | null;
+  fromTranche?: string | null;
+};
+
+/** Delta de quantité vu depuis un chantier (ou le dépôt si pas de site). Affectation / entrée = +, désaffectation / transfert sortant = −. */
+export function materielQtyDelta(
+  move: MaterielMoveRef,
+  scope?: { chantierId?: string; tranche?: string },
+): number {
+  const q = Math.round(Math.abs(Number(move.quantity) || 0));
+  const type = move.movementType;
+  const siteId = scope?.chantierId;
+  const tranche = scope?.tranche;
+
+  if (!siteId) {
+    if (type === 'entree') return move.chantierId ? 0 : q;
+    if (type === 'sortie') return move.chantierId ? 0 : -q;
+    if (type === 'affectation') return -q;
+    if (type === 'desaffectation') return q;
+    if (type === 'maintenance') return move.fromChantierId ? 0 : -q;
+    if (type === 'retour') return move.chantierId ? 0 : q;
+    return 0;
+  }
+
+  const matchTo = move.chantierId === siteId && (!tranche || (move.tranche || '') === tranche);
+  const fromId =
+    move.fromChantierId
+    || ((type === 'desaffectation' || type === 'sortie' || type === 'maintenance') ? move.chantierId : null);
+  const fromTr =
+    move.fromTranche
+    ?? ((type === 'desaffectation' || type === 'sortie') ? move.tranche : null);
+  const matchFrom = fromId === siteId && (!tranche || (fromTr || '') === tranche);
+
+  if (type === 'affectation' || type === 'entree' || type === 'retour') return matchTo ? q : 0;
+  if (type === 'desaffectation' || type === 'sortie' || type === 'maintenance') return matchFrom ? -q : 0;
+  if (type === 'transfert') return (matchTo ? q : 0) + (matchFrom ? -q : 0);
+  return 0;
+}
+
+export function formatSignedQty(delta: number, fallbackAbs?: number) {
+  if (delta > 0) return `+${formatQty(delta)}`;
+  if (delta < 0) return `−${formatQty(-delta)}`;
+  return formatQty(fallbackAbs ?? 0);
+}
 export const RETURN_CONDITIONS = ['bon', 'usure', 'a_reparer', 'hors_service'] as const;
 export const PAYMENT_MODES = ['especes', 'virement', 'cheque', 'carte'] as const;
 

@@ -1,4 +1,7 @@
 import { useI18n } from '../i18n/I18nContext';
+import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { isBankPaymentMode } from '../lib/paymentMode';
+import { uploadDocument, uploadForm } from '../lib/api';
 import { Input, Select } from './ui';
 import { ClientFormPicker } from './ClientFormPicker';
 
@@ -16,6 +19,11 @@ export type SaleFormData = {
   sellerLegalizationNo: string;
   buyerSignatureDate: string;
   buyerLegalizationNo: string;
+  propertyStatus: string;
+  advanceMode: string;
+  advanceBank: string;
+  advanceProof: File | null;
+  documents: File[];
 };
 
 export function emptySaleForm(): SaleFormData {
@@ -33,6 +41,11 @@ export function emptySaleForm(): SaleFormData {
     sellerLegalizationNo: '',
     buyerSignatureDate: '',
     buyerLegalizationNo: '',
+    propertyStatus: 'vendu',
+    advanceMode: 'especes',
+    advanceBank: '',
+    advanceProof: null,
+    documents: [],
   };
 }
 
@@ -42,6 +55,10 @@ function dateField(v: unknown) {
 }
 
 export function saleToForm(s: Record<string, unknown>): SaleFormData {
+  const payments = Array.isArray(s.payments)
+    ? (s.payments as Array<{ nature?: string; operationType?: string; bank?: string }>)
+    : [];
+  const acompte = payments.find((p) => p.nature === 'acompte') || payments[0];
   return {
     clientId: String(s.clientId || ''),
     propertyId: String(s.propertyId || ''),
@@ -56,6 +73,14 @@ export function saleToForm(s: Record<string, unknown>): SaleFormData {
     sellerLegalizationNo: String(s.sellerLegalizationNo || ''),
     buyerSignatureDate: dateField(s.buyerSignatureDate),
     buyerLegalizationNo: String(s.buyerLegalizationNo || ''),
+    propertyStatus: occupancyStatusOf({
+      type: (s.property as { type?: string } | undefined)?.type,
+      status: (s.property as { status?: string } | undefined)?.status || 'vendu',
+    }),
+    advanceMode: String(acompte?.operationType || 'especes'),
+    advanceBank: String(acompte?.bank || ''),
+    advanceProof: null,
+    documents: [],
   };
 }
 
@@ -66,6 +91,8 @@ export function saleFormToCreateBody(f: SaleFormData) {
     salePrice: f.salePrice,
     discount: f.discount,
     advance: f.advance,
+    advanceMode: f.advanceMode || 'especes',
+    advanceBank: f.advanceBank || null,
     contractType: f.contractType,
     description: f.description || null,
     contractDate: f.contractDate || null,
@@ -73,6 +100,7 @@ export function saleFormToCreateBody(f: SaleFormData) {
     sellerLegalizationNo: f.sellerLegalizationNo || null,
     buyerSignatureDate: f.buyerSignatureDate || null,
     buyerLegalizationNo: f.buyerLegalizationNo || null,
+    propertyStatus: f.propertyStatus || 'vendu',
   };
 }
 
@@ -86,7 +114,29 @@ export function saleFormToUpdateBody(f: SaleFormData) {
     sellerLegalizationNo: f.sellerLegalizationNo || null,
     buyerSignatureDate: f.buyerSignatureDate || null,
     buyerLegalizationNo: f.buyerLegalizationNo || null,
+    propertyStatus: f.propertyStatus || undefined,
   };
+}
+
+export async function attachSaleCreateFiles(
+  saleId: string,
+  advancePaymentId: string | null | undefined,
+  f: SaleFormData,
+) {
+  for (const file of f.documents) {
+    await uploadDocument(file, {
+      name: file.name,
+      category: 'vente',
+      entityType: 'Sale',
+      entityId: saleId,
+      saleId,
+    });
+  }
+  if (f.advanceProof && advancePaymentId) {
+    const fd = new FormData();
+    fd.append('proof', f.advanceProof);
+    await uploadForm(`/transactions/payments/${advancePaymentId}`, fd, 'PUT');
+  }
 }
 
 export function SaleFormFields({
@@ -101,7 +151,7 @@ export function SaleFormFields({
   form: SaleFormData;
   setForm: (f: SaleFormData) => void;
   clients: { id: string; reference: string; firstName: string; lastName: string }[];
-  properties: { id: string; reference: string; name: string; status: string }[];
+  properties: { id: string; reference: string; name: string; status: string; type?: string }[];
   editMode?: boolean;
   lockPropertyId?: string;
   lockedPropertyLabel?: string;
@@ -127,7 +177,10 @@ export function SaleFormFields({
           ) : (
             <Select className="sm:col-span-2" label={`${t('fields.property')} *`} required value={form.propertyId} onChange={(e) => setForm({ ...form, propertyId: e.target.value })}>
               <option value="">{t('fields.selectProperty')}</option>
-              {properties.filter((p) => p.status === 'disponible' || p.status === 'réservé' || p.id === form.propertyId).map((p) => (
+              {properties.filter((p) => {
+                if (!(p.status === 'disponible' || p.status === 'réservé' || p.id === form.propertyId)) return false;
+                return propertyDealOf(p) === 'vente';
+              }).map((p) => (
                 <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>
               ))}
             </Select>
@@ -137,14 +190,70 @@ export function SaleFormFields({
       <Input label={`${t('fields.salePriceMad')} *`} required type="number" min="0" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: e.target.value })} disabled={editMode} />
       <Input label={t('fields.discountMad')} type="number" min="0" value={form.discount} onChange={(e) => setForm({ ...form, discount: e.target.value })} disabled={editMode} />
       <Input label={t('fields.advanceMad')} type="number" min="0" value={form.advance} onChange={(e) => setForm({ ...form, advance: e.target.value })} disabled={editMode} />
+      {(Number(form.advance) > 0 || editMode) && (
+        <>
+          <Select
+            label={t('fields.advancePaymentMode')}
+            value={form.advanceMode}
+            onChange={(e) => setForm({ ...form, advanceMode: e.target.value, advanceBank: isBankPaymentMode(e.target.value) ? form.advanceBank : '' })}
+            disabled={editMode}
+          >
+            <option value="especes">{t('fields.modeCash')}</option>
+            <option value="cheque">{t('fields.modeCheck')}</option>
+            <option value="virement">{t('fields.modeTransfer')}</option>
+            <option value="carte">{t('fields.modeCard')}</option>
+          </Select>
+          {isBankPaymentMode(form.advanceMode) && (
+            <Input
+              label={t('fields.bankRef')}
+              value={form.advanceBank}
+              onChange={(e) => setForm({ ...form, advanceBank: e.target.value })}
+              disabled={editMode}
+            />
+          )}
+          {!editMode && (
+            <div className={isBankPaymentMode(form.advanceMode) ? '' : 'sm:col-span-2'}>
+              <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.advanceProof')}</label>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                className="block w-full text-[12px] file:mr-2 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:border file:border-gic-border"
+                onChange={(e) => setForm({ ...form, advanceProof: e.target.files?.[0] || null })}
+              />
+            </div>
+          )}
+        </>
+      )}
+      {!editMode && (
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.saleDocuments')}</label>
+          <p className="mb-1.5 text-[11px] text-gic-muted">{t('fields.saleDocumentsHint')}</p>
+          <input
+            type="file"
+            multiple
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+            className="block w-full text-[12px] file:mr-2 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:border file:border-gic-border"
+            onChange={(e) => setForm({ ...form, documents: Array.from(e.target.files || []) })}
+          />
+          {form.documents.length > 0 && (
+            <p className="mt-1 text-[11px] text-gic-muted">{form.documents.map((f) => f.name).join(', ')}</p>
+          )}
+        </div>
+      )}
       <Input label={t('fields.contractDate')} type="date" value={form.contractDate} onChange={(e) => setForm({ ...form, contractDate: e.target.value })} />
       <Select label={t('fields.contractType')} value={form.contractType} onChange={(e) => setForm({ ...form, contractType: e.target.value })}>
         <option value="compromis">{t('fields.compromis')}</option>
         <option value="promesse">{t('fields.promesse')}</option>
         <option value="acte">{t('fields.acteAuthentique')}</option>
       </Select>
+      <Select label={t('fields.propertyStatus')} value={form.propertyStatus} onChange={(e) => setForm({ ...form, propertyStatus: e.target.value })}>
+        <option value="disponible">{t('status.available')}</option>
+        <option value="réservé">{t('status.reserved')}</option>
+        <option value="vendu">{t('status.sold')}</option>
+        <option value="loué">{t('status.rented')}</option>
+      </Select>
       {editMode && (
-        <Select label={t('fields.status')} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+        <Select label={t('fields.contractStatus')} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
           <option value="brouillon">{t('status.draft')}</option>
           <option value="signée">{t('fields.statusSigned')}</option>
           <option value="en_cours">{t('fields.statusInProgress')}</option>

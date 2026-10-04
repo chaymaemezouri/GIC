@@ -1,4 +1,5 @@
 import { useI18n } from '../i18n/I18nContext';
+import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
 import { Input, Select } from './ui';
 import { ClientFormPicker } from './ClientFormPicker';
 
@@ -17,6 +18,7 @@ export type RentalFormData = {
   landlordLegalizationNo: string;
   tenantSignatureDate: string;
   tenantLegalizationNo: string;
+  propertyStatus: string;
 };
 
 export function emptyRentalForm(): RentalFormData {
@@ -36,6 +38,7 @@ export function emptyRentalForm(): RentalFormData {
     landlordLegalizationNo: '',
     tenantSignatureDate: '',
     tenantLegalizationNo: '',
+    propertyStatus: 'loué',
   };
 }
 
@@ -60,6 +63,10 @@ export function rentalToForm(r: Record<string, unknown>): RentalFormData {
     landlordLegalizationNo: String(r.landlordLegalizationNo || ''),
     tenantSignatureDate: dateField(r.tenantSignatureDate),
     tenantLegalizationNo: String(r.tenantLegalizationNo || ''),
+    propertyStatus: occupancyStatusOf({
+      type: (r.property as { type?: string } | undefined)?.type,
+      status: (r.property as { status?: string } | undefined)?.status || 'loué',
+    }),
   };
 }
 
@@ -79,6 +86,7 @@ export function rentalFormToBody(f: RentalFormData, editMode = false) {
     monthlyRent: f.monthlyRent,
     discount: f.discount,
     ...bail,
+    propertyStatus: f.propertyStatus || 'loué',
   };
   if (editMode) {
     return { ...common, status: f.status };
@@ -101,7 +109,7 @@ export function RentalFormFields({
   form: RentalFormData;
   setForm: (f: RentalFormData) => void;
   clients?: { id: string; reference: string; firstName: string; lastName: string }[];
-  properties: { id: string; reference: string; name: string; status: string }[];
+  properties: { id: string; reference: string; name: string; status: string; type?: string }[];
   editMode?: boolean;
   lockPropertyId?: string;
   lockedPropertyLabel?: string;
@@ -127,7 +135,10 @@ export function RentalFormFields({
           ) : (
             <Select className="sm:col-span-2" label={`${t('fields.property')} *`} required value={form.propertyId} onChange={(e) => setForm({ ...form, propertyId: e.target.value })}>
               <option value="">{t('fields.selectProperty')}</option>
-              {properties.filter((p) => ['disponible', 'réservé', 'indisponible', 'loué'].includes(p.status) || p.id === form.propertyId).map((p) => (
+              {properties.filter((p) => {
+                if (!(p.status === 'disponible' || p.status === 'réservé' || p.id === form.propertyId)) return false;
+                return propertyDealOf(p) === 'location';
+              }).map((p) => (
                 <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>
               ))}
             </Select>
@@ -162,8 +173,14 @@ export function RentalFormFields({
       <p className="sm:col-span-2 text-[11px] text-gic-muted -mt-1">
         {t('msg.rentalOpenEndedHint')}
       </p>
+      <Select label={t('fields.propertyStatus')} value={form.propertyStatus} onChange={(e) => setForm({ ...form, propertyStatus: e.target.value })}>
+        <option value="disponible">{t('status.available')}</option>
+        <option value="réservé">{t('status.reserved')}</option>
+        <option value="vendu">{t('status.sold')}</option>
+        <option value="loué">{t('status.rented')}</option>
+      </Select>
       {editMode && (
-        <Select label={t('fields.status')} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+        <Select label={t('fields.contractStatus')} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
           <option value="active">{t('fields.statusActiveRental')}</option>
           <option value="suspendue">{t('fields.statusSuspendedRental')}</option>
           <option value="terminée">{t('fields.statusEndedRental')}</option>

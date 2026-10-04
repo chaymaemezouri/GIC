@@ -6,7 +6,7 @@ import {
   ArrowLeft, Pencil, Ban, Printer, Wallet, ExternalLink, FileText, Home, User, Building2,
   Info, Calendar, History, Upload, Trash2,
 } from 'lucide-react';
-import { api, fetchClientList, fetchDropdownOptions, fetchPropertyList, formatDate, formatMad, uploadDocument } from '../lib/api';
+import { api, fetchClientList, fetchDropdownOptions, fetchPropertyList, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
 import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th,
   PageBackLink,
@@ -15,7 +15,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
-import { SaleFormFields, saleToForm, saleFormToUpdateBody, type SaleFormData } from '../components/SaleFormFields';
+import { SaleFormFields, saleToForm, saleFormToUpdateBody, emptySaleForm, type SaleFormData } from '../components/SaleFormFields';
 import { printSaleReceipt } from '../lib/printSale';
 import PaymentSchedulePanel from '../components/PaymentSchedulePanel';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
@@ -56,12 +56,8 @@ export default function VenteDetailPage() {
   const [deleteMotif, setDeleteMotif] = useState('');
   const [newClientId, setNewClientId] = useState('');
   const [createNewSale, setCreateNewSale] = useState(false);
-  const [form, setForm] = useState<SaleFormData>({
-    clientId: '', propertyId: '', salePrice: '', discount: '0', advance: '0',
-    contractType: 'compromis', description: '', contractDate: '', status: 'en_cours',
-    sellerSignatureDate: '', sellerLegalizationNo: '', buyerSignatureDate: '', buyerLegalizationNo: '',
-  });
-  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '' });
+  const [form, setForm] = useState<SaleFormData>(emptySaleForm());
+  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null as File | null });
 
   function load() {
     if (!id) return;
@@ -155,12 +151,17 @@ export default function VenteDetailPage() {
   async function addPayment(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api('/transactions/payments', {
-        method: 'POST',
-        body: JSON.stringify({ saleId: id, ...payForm }),
-      });
+      const fd = new FormData();
+      fd.append('saleId', id);
+      fd.append('amount', payForm.amount);
+      fd.append('operationType', payForm.operationType);
+      fd.append('nature', payForm.nature || 'acompte');
+      if (payForm.payerName) fd.append('payerName', payForm.payerName);
+      if (payForm.bank) fd.append('bank', payForm.bank);
+      if (payForm.proof) fd.append('proof', payForm.proof);
+      await uploadForm('/transactions/payments', fd);
       setPayOpen(false);
-      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '' });
+      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null });
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -227,6 +228,16 @@ export default function VenteDetailPage() {
   const payProgress = sale.netPrice > 0
     ? Math.min(100, Math.round((sale.totalPaid / sale.netPrice) * 100))
     : 0;
+  const firstAcompte = [...(sale.payments || [])]
+    .filter((p: { nature?: string }) => p.nature === 'acompte')
+    .sort((a: { date?: string }, b: { date?: string }) => String(a.date || '').localeCompare(String(b.date || '')))[0];
+
+  function paymentNatureLabel(nature?: string) {
+    if (nature === 'acompte') return t('fields.paymentNatureAdvance');
+    if (nature === 'echeance') return t('fields.paymentNatureInstallment');
+    if (nature === 'solde') return t('fields.paymentNatureBalance');
+    return nature || '—';
+  }
 
   return (
     <div className="space-y-0">
@@ -388,6 +399,14 @@ export default function VenteDetailPage() {
                   <InfoRow label={t('fields.salePriceShort')} value={formatMad(sale.salePrice)} />
                   <InfoRow label={t('fields.discount')} value={formatMad(sale.discount)} />
                   <InfoRow label={t('fields.initialAdvance')} value={formatMad(sale.advance)} />
+                  {firstAcompte && (
+                    <>
+                      <InfoRow label={t('fields.advancePaymentMode')} value={paymentModeLabel(firstAcompte.operationType)} />
+                      {isBankPaymentMode(firstAcompte.operationType) && (
+                        <InfoRow label={t('fields.bankRef')} value={firstAcompte.bank || '—'} />
+                      )}
+                    </>
+                  )}
                   <InfoRow label={t('fields.contractType')} value={sale.contractType || '—'} />
                   <InfoRow label={t('fields.contractDate')} value={formatDate(sale.contractDate)} />
                   <InfoRow label={t('fields.createdAtFem')} value={formatDate(sale.createdAt)} />
@@ -448,6 +467,7 @@ export default function VenteDetailPage() {
                     <Th mac>{t('columns.receipt')}</Th>
                     <Th mac>{t('columns.date')}</Th>
                     <Th mac>{t('columns.amount')}</Th>
+                    <Th mac>{t('fields.nature')}</Th>
                     <Th mac>{t('columns.mode')}</Th>
                     <Th mac>{t('columns.bank')}</Th>
                     <Th mac>{t('columns.proof')}</Th>
@@ -463,6 +483,7 @@ export default function VenteDetailPage() {
                       </Td>
                       <Td mac className="mac-table-muted">{formatDate(p.date)}</Td>
                       <Td mac className="font-medium">{formatMad(p.amount)}</Td>
+                      <Td mac>{paymentNatureLabel(p.nature)}</Td>
                       <Td mac>{paymentModeLabel(p.operationType)}</Td>
                       <Td mac className="mac-table-muted">
                         {isBankPaymentMode(p.operationType) ? (p.bank || '—') : '—'}
@@ -570,19 +591,34 @@ export default function VenteDetailPage() {
           </Select>
           {paymentNatures.length > 0 ? (
             <Select label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })}>
-              <option value="">—</option>
+              <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
               {paymentNatures.map((n) => (
                 <option key={n.value} value={n.value}>{n.label || n.value}</option>
               ))}
-              {payForm.nature && !paymentNatures.some((n) => n.value === payForm.nature) && (
+              {payForm.nature && !['acompte', ...paymentNatures.map((n) => n.value)].includes(payForm.nature) && (
                 <option value={payForm.nature}>{payForm.nature}</option>
               )}
             </Select>
           ) : (
-            <Input label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })} placeholder={t('fields.naturePlaceholder')} />
+            <Select label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })}>
+              <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
+              <option value="echeance">{t('fields.paymentNatureInstallment')}</option>
+              <option value="solde">{t('fields.paymentNatureBalance')}</option>
+            </Select>
           )}
           <Input label={t('fields.payerName')} value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} />
-          <Input label={t('fields.bankRef')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
+          {isBankPaymentMode(payForm.operationType) && (
+            <Input label={t('fields.bankRef')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
+          )}
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</label>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              className="block w-full text-[12px]"
+              onChange={(e) => setPayForm({ ...payForm, proof: e.target.files?.[0] || null })}
+            />
+          </div>
         </form>
       </Modal>
 

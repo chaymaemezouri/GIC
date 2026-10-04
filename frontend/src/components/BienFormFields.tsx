@@ -1,13 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useI18n, tStatic } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
-import { api, fetchDropdownOptions, fetchProjectList } from '../lib/api';
-import { availabilityStatusOf, propertyDealOf } from '../lib/propertyDeal';
-import { Input, Select } from './ui';
-
-const FALLBACK_PROPERTY_STATUS_VALUES = ['disponible', 'réservé', 'indisponible'] as const;
-
-type StatusOption = { value: string; label?: string };
+import { api, fetchProjectList } from '../lib/api';
+import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { Input, Select, StatusPill } from './ui';
 
 export type BienFormData = {
   name: string;
@@ -42,11 +38,11 @@ export function emptyBienForm(): BienFormData {
 }
 
 export function bienToForm(p: Record<string, unknown>): BienFormData {
-  const status = String(p.status || 'disponible');
+  const status = occupancyStatusOf({ type: p.type != null ? String(p.type) : '', status: String(p.status || 'disponible') });
   return {
     name: String(p.name || ''),
     city: String(p.city || ''),
-    status: availabilityStatusOf(status),
+    status,
     type: propertyDealOf({ type: p.type != null ? String(p.type) : '', status }),
     surface: p.surface != null ? String(p.surface) : '',
     rooms: p.rooms != null ? String(p.rooms) : '',
@@ -125,9 +121,6 @@ export function BienFormFields({
   const { t } = useI18n();
   const cascade = !lockProjectId && !lockFloorId;
   const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
-  const [statusOptions, setStatusOptions] = useState<StatusOption[]>(
-    () => FALLBACK_PROPERTY_STATUS_VALUES.map((value) => ({ value })),
-  );
   const [locationId, setLocationId] = useState('');
   const [cascadeProjects, setCascadeProjects] = useState<{ id: string; name: string }[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
@@ -136,20 +129,6 @@ export function BienFormFields({
   const [trancheId, setTrancheId] = useState('');
   const [blocId, setBlocId] = useState('');
   const [lotId, setLotId] = useState('');
-
-  useEffect(() => {
-    fetchDropdownOptions('property_status')
-      .then((opts) => {
-        if (opts.length > 0) {
-          setStatusOptions(
-            opts
-              .map((o) => ({ value: o.value, label: o.label || o.value }))
-              .filter((o) => o.value !== 'vendu' && o.value !== 'loué'),
-          );
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (!cascade) return;
@@ -210,14 +189,7 @@ export function BienFormFields({
 
   const floors = cascade && form.projectId ? cascadeFloors : floorsProp;
   const loadingFloors = cascade ? loadingTree : loadingFloorsProp;
-
-  const fallbackStatusLabels: Record<string, string> = {
-    disponible: t('status.available'),
-    réservé: t('status.reserved'),
-    vendu: t('status.sold'),
-    loué: t('status.rented'),
-    indisponible: t('fields.unavailable'),
-  };
+  const shownStatus = occupancyStatusOf({ type: form.type, status: form.status });
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -226,17 +198,16 @@ export function BienFormFields({
       <Input label={t('fields.city')} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
       <Input label={t('fields.titleDeed')} value={form.titleNumber} onChange={(e) => setForm({ ...form, titleNumber: e.target.value })} />
       <Select label={t('columns.type')} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-        <option value="vente">{t('status.sold')}</option>
-        <option value="location">{t('status.rented')}</option>
+        <option value="vente">{t('status.forSale')}</option>
+        <option value="location">{t('status.forRent')}</option>
       </Select>
-      <Select label={t('fields.status')} value={form.status === 'vendu' || form.status === 'loué' ? 'indisponible' : form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-        {statusOptions.map((o) => (
-          <option key={o.value} value={o.value}>{fallbackStatusLabels[o.value] || o.label || o.value}</option>
-        ))}
-        {form.status && form.status !== 'vendu' && form.status !== 'loué' && !statusOptions.some((o) => o.value === form.status) && (
-          <option value={form.status}>{form.status}</option>
-        )}
-      </Select>
+      <div>
+        <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.status')}</p>
+        <div className="flex min-h-[38px] items-center rounded-xl border border-gic-border bg-gray-50/80 px-3">
+          <StatusPill status={shownStatus} quiet />
+        </div>
+        <p className="mt-1 text-[10px] text-gic-muted">{t('fields.propertyStatusHint')}</p>
+      </div>
 
       {cascade && (
         <>

@@ -14,7 +14,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentAddButton } from '../components/DocumentAddButton';
 import { fileUrl, photoSrc } from '../lib/photoUrl';
-import { availabilityStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
 import {
   buildProjectDocChecklist,
   newCustomChecklistKey,
@@ -36,10 +36,10 @@ import {
 import { ChantierFormFields, emptyChantierForm, type ChantierFormData, type ChefOption } from '../components/ChantierFormFields';
 import ConversationsPanel from '../components/ConversationsPanel';
 import {
-  SaleFormFields, emptySaleForm, saleFormToCreateBody, type SaleFormData,
+  SaleFormFields, emptySaleForm, saleFormToCreateBody, saleFormToUpdateBody, saleToForm, attachSaleCreateFiles, type SaleFormData,
 } from '../components/SaleFormFields';
 import {
-  RentalFormFields, emptyRentalForm, rentalFormToBody, type RentalFormData,
+  RentalFormFields, emptyRentalForm, rentalFormToBody, rentalToForm, type RentalFormData,
 } from '../components/RentalFormFields';
 
 type Tab = 'infos' | 'galerie' | 'structure' | 'biens' | 'chantiers' | 'ventes' | 'locations' | 'documents' | 'echanges' | 'historique';
@@ -109,10 +109,12 @@ export default function ProjectDetailPage() {
   const [saleForm, setSaleForm] = useState<SaleFormData>(emptySaleForm());
   const [saleFormError, setSaleFormError] = useState('');
   const [saleLock, setSaleLock] = useState<{ id: string; label: string } | null>(null);
+  const [editSaleId, setEditSaleId] = useState<string | null>(null);
   const [rentalFormOpen, setRentalFormOpen] = useState(false);
   const [rentalForm, setRentalForm] = useState<RentalFormData>(emptyRentalForm());
   const [rentalFormError, setRentalFormError] = useState('');
   const [rentalLock, setRentalLock] = useState<{ id: string; label: string } | null>(null);
+  const [editRentalId, setEditRentalId] = useState<string | null>(null);
 
   function load() {
     if (!id) return;
@@ -582,6 +584,7 @@ export default function ProjectDetailPage() {
   }
 
   function openNewSale(p?: { id: string; reference?: string; name?: string; price?: number | null }) {
+    setEditSaleId(null);
     setSaleForm({
       ...emptySaleForm(),
       propertyId: p?.id || '',
@@ -593,6 +596,7 @@ export default function ProjectDetailPage() {
   }
 
   function openNewRental(p?: { id: string; reference?: string; name?: string; price?: number | null }) {
+    setEditRentalId(null);
     setRentalForm({
       ...emptyRentalForm(),
       propertyId: p?.id || '',
@@ -603,16 +607,53 @@ export default function ProjectDetailPage() {
     setRentalFormOpen(true);
   }
 
+  async function openEditSale(saleId: string) {
+    setSaleFormError('');
+    try {
+      const s = await api<Record<string, unknown>>(`/transactions/sales/${saleId}`);
+      const property = s.property as { id?: string; reference?: string; name?: string } | undefined;
+      setSaleForm(saleToForm(s));
+      setEditSaleId(saleId);
+      setSaleLock(property?.id ? { id: property.id, label: propertyLabel(property) } : null);
+      setSaleFormOpen(true);
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function openEditRental(rentalId: string) {
+    setRentalFormError('');
+    try {
+      const r = await api<Record<string, unknown>>(`/transactions/rentals/${rentalId}`);
+      const property = r.property as { id?: string; reference?: string; name?: string } | undefined;
+      setRentalForm(rentalToForm(r));
+      setEditRentalId(rentalId);
+      setRentalLock(property?.id ? { id: property.id, label: propertyLabel(property) } : null);
+      setRentalFormOpen(true);
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
   async function saveProjectSale(e: React.FormEvent) {
     e.preventDefault();
     setSaleFormError('');
     try {
-      await api('/transactions/sales', {
-        method: 'POST',
-        body: JSON.stringify(saleFormToCreateBody(saleForm)),
-      });
+      if (editSaleId) {
+        await api(`/transactions/sales/${editSaleId}`, {
+          method: 'PUT',
+          body: JSON.stringify(saleFormToUpdateBody(saleForm)),
+        });
+      } else {
+        const created = await api<{ id: string; advancePaymentId?: string | null }>('/transactions/sales', {
+          method: 'POST',
+          body: JSON.stringify(saleFormToCreateBody(saleForm)),
+        });
+        await attachSaleCreateFiles(created.id, created.advancePaymentId, saleForm);
+      }
       setSaleFormOpen(false);
       setSaleLock(null);
+      setEditSaleId(null);
       load();
       loadDeals();
     } catch (err) {
@@ -624,12 +665,20 @@ export default function ProjectDetailPage() {
     e.preventDefault();
     setRentalFormError('');
     try {
-      await api('/transactions/rentals', {
-        method: 'POST',
-        body: JSON.stringify(rentalFormToBody(rentalForm)),
-      });
+      if (editRentalId) {
+        await api(`/transactions/rentals/${editRentalId}`, {
+          method: 'PUT',
+          body: JSON.stringify(rentalFormToBody(rentalForm, true)),
+        });
+      } else {
+        await api('/transactions/rentals', {
+          method: 'POST',
+          body: JSON.stringify(rentalFormToBody(rentalForm)),
+        });
+      }
       setRentalFormOpen(false);
       setRentalLock(null);
+      setEditRentalId(null);
       load();
       loadDeals();
     } catch (err) {
@@ -1282,9 +1331,9 @@ export default function ProjectDetailPage() {
                     <Td mac className="font-medium text-gic-violet">{p.reference}</Td>
                     <Td mac>{p.name}</Td>
                     <Td mac>
-                      <StatusPill status={propertyDealOf(p) === 'location' ? 'loué' : 'vendu'} quiet />
+                      <StatusPill status={propertyDealOf(p) === 'location' ? 'à louer' : 'à vendre'} quiet />
                     </Td>
-                    <Td mac><StatusPill status={availabilityStatusOf(p.status)} quiet /></Td>
+                    <Td mac><StatusPill status={occupancyStatusOf(p)} quiet /></Td>
                     <Td mac>{formatMad(p.price)}</Td>
                     <Td mac className="mac-td-actions">
                       <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
@@ -1354,14 +1403,14 @@ export default function ProjectDetailPage() {
                         )}
                       </Td>
                       <Td mac>{formatMad(sale?.netPrice ?? p.price)}</Td>
-                      <Td mac><StatusPill status={availabilityStatusOf(p.status)} quiet /></Td>
+                      <Td mac><StatusPill status={occupancyStatusOf(p)} quiet /></Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
                           <MacActionBtn
                             icon={Pencil}
                             tone="orange"
                             title={sale ? t('common.edit') : t('actions.newSale')}
-                            onClick={() => (sale ? navigate(`/ventes/${sale.id}`) : openNewSale(p))}
+                            onClick={() => (sale ? void openEditSale(sale.id) : openNewSale(p))}
                           />
                           <Link to={sale ? `/ventes/${sale.id}` : `/biens/${p.id}`} title={t('actions.openFiche')} className="mac-action-btn mac-action-btn-blue">
                             <ExternalLink size={14} strokeWidth={2.15} />
@@ -1429,14 +1478,14 @@ export default function ProjectDetailPage() {
                         )}
                       </Td>
                       <Td mac>{formatMad(rental?.monthlyRent ?? p.price)}</Td>
-                      <Td mac><StatusPill status={availabilityStatusOf(p.status)} quiet /></Td>
+                      <Td mac><StatusPill status={occupancyStatusOf(p)} quiet /></Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
                           <MacActionBtn
                             icon={Pencil}
                             tone="orange"
                             title={rental ? t('common.edit') : t('actions.newRental')}
-                            onClick={() => (rental ? navigate(`/locations/${rental.id}`) : openNewRental(p))}
+                            onClick={() => (rental ? void openEditRental(rental.id) : openNewRental(p))}
                           />
                           <Link to={rental ? `/locations/${rental.id}` : `/biens/${p.id}`} title={t('actions.openFiche')} className="mac-action-btn mac-action-btn-blue">
                             <ExternalLink size={14} strokeWidth={2.15} />
@@ -1741,12 +1790,12 @@ export default function ProjectDetailPage() {
       <Modal
         open={saleFormOpen}
         size="lg"
-        title={t('actions.newSale')}
-        onClose={() => { setSaleFormOpen(false); setSaleLock(null); setSaleFormError(''); }}
+        title={editSaleId ? t('actions.editSale') : t('actions.newSale')}
+        onClose={() => { setSaleFormOpen(false); setSaleLock(null); setSaleFormError(''); setEditSaleId(null); }}
         footer={
           <>
-            <Btn variant="secondary" onClick={() => { setSaleFormOpen(false); setSaleLock(null); }}>{t('common.cancel')}</Btn>
-            <Btn form="proj-sale-form" type="submit">{t('common.add')}</Btn>
+            <Btn variant="secondary" onClick={() => { setSaleFormOpen(false); setSaleLock(null); setEditSaleId(null); }}>{t('common.cancel')}</Btn>
+            <Btn form="proj-sale-form" type="submit">{editSaleId ? t('common.save') : t('common.add')}</Btn>
           </>
         }
       >
@@ -1760,9 +1809,11 @@ export default function ProjectDetailPage() {
               reference: p.reference,
               name: p.name,
               status: p.status,
+              type: p.type,
             }))}
             lockPropertyId={saleLock?.id}
             lockedPropertyLabel={saleLock?.label}
+            editMode={!!editSaleId}
           />
           {saleFormError && <p className="mt-3 text-[11px] text-gic-coral">{saleFormError}</p>}
         </form>
@@ -1771,12 +1822,12 @@ export default function ProjectDetailPage() {
       <Modal
         open={rentalFormOpen}
         size="lg"
-        title={t('actions.newRental')}
-        onClose={() => { setRentalFormOpen(false); setRentalLock(null); setRentalFormError(''); }}
+        title={editRentalId ? t('actions.editRental') : t('actions.newRental')}
+        onClose={() => { setRentalFormOpen(false); setRentalLock(null); setRentalFormError(''); setEditRentalId(null); }}
         footer={
           <>
-            <Btn variant="secondary" onClick={() => { setRentalFormOpen(false); setRentalLock(null); }}>{t('common.cancel')}</Btn>
-            <Btn form="proj-rental-form" type="submit">{t('common.add')}</Btn>
+            <Btn variant="secondary" onClick={() => { setRentalFormOpen(false); setRentalLock(null); setEditRentalId(null); }}>{t('common.cancel')}</Btn>
+            <Btn form="proj-rental-form" type="submit">{editRentalId ? t('common.save') : t('common.add')}</Btn>
           </>
         }
       >
@@ -1789,9 +1840,11 @@ export default function ProjectDetailPage() {
               reference: p.reference,
               name: p.name,
               status: p.status,
+              type: p.type,
             }))}
             lockPropertyId={rentalLock?.id}
             lockedPropertyLabel={rentalLock?.label}
+            editMode={!!editRentalId}
           />
           {rentalFormError && <p className="mt-3 text-[11px] text-gic-coral">{rentalFormError}</p>}
         </form>

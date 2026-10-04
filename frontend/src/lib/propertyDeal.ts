@@ -23,3 +23,14 @@ export function availabilityStatusOf(status: string) {
   if (value === 'vendu' || value === 'loue') return 'indisponible';
   return status || 'disponible';
 }
+
+/** Statut réel du bien : disponible | réservé | vendu | loué */
+export function occupancyStatusOf(p: { type?: string | null; status?: string | null }) {
+  const value = fold(p.status);
+  if (value === 'vendu') return 'vendu';
+  if (value === 'loue') return 'loué';
+  if (value === 'reserve') return 'réservé';
+  if (value === 'disponible') return 'disponible';
+  if (value === 'indisponible') return propertyDealOf(p) === 'location' ? 'loué' : 'vendu';
+  return p.status || 'disponible';
+}

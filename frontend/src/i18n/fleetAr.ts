@@ -515,6 +515,8 @@ const fleetAr: Dict = {
     onSite: 'في هذا الورش',
     onTranche: 'في هذا الشطر',
     empty: 'لا توجد حركات كميات.',
+    historyIn: 'دخول',
+    historyOut: 'خروج',
     qtyHere: 'في الموقع',
     qtyDepot: 'المستودع',
     assignCta: 'تخصيص معدات',

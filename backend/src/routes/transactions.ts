@@ -16,6 +16,38 @@ const router = Router();
 router.use(requireAuth);
 router.use(requirePermission);
 
+async function syncPropertyOccupancy(propertyId: string) {
+  const [sale, rental] = await Promise.all([
+    prisma.sale.findFirst({
+      where: { propertyId, status: { notIn: ['résiliée', 'annulée'] } },
+      orderBy: { updatedAt: 'desc' },
+    }),
+    prisma.rental.findFirst({
+      where: { propertyId, status: { notIn: ['terminée'] } },
+      orderBy: { updatedAt: 'desc' },
+    }),
+  ]);
+  let status = 'disponible';
+  if (sale) status = sale.status === 'brouillon' ? 'réservé' : 'vendu';
+  else if (rental) status = 'loué';
+  await prisma.property.update({ where: { id: propertyId }, data: { status } });
+}
+
+function occupancyFromBody(raw: unknown) {
+  const value = String(raw || '').trim();
+  if (['disponible', 'réservé', 'vendu', 'loué'].includes(value)) return value;
+  return null;
+}
+
+async function applyPropertyOccupancy(propertyId: string, explicit?: unknown) {
+  const status = occupancyFromBody(explicit);
+  if (status) {
+    await prisma.property.update({ where: { id: propertyId }, data: { status } });
+    return;
+  }
+  await syncPropertyOccupancy(propertyId);
+}
+
 /** Sync des mois de loyer (idempotent) + recalcul totalPaid / remaining */
 async function syncRentalMonthSchedules(
   rentalId: string,
@@ -283,7 +315,10 @@ router.post('/sales', async (req, res) => {
       },
       include: { client: true, property: true },
     });
-    await tx.property.update({ where: { id: propertyId }, data: { status: 'vendu' } });
+    await tx.property.update({
+      where: { id: propertyId },
+      data: { status: occupancyFromBody(req.body.propertyStatus) || 'vendu' },
+    });
     await tx.client.update({
       where: { id: clientId },
       data: { isBuyer: true, isProspect: false },
@@ -295,6 +330,7 @@ router.post('/sales', async (req, res) => {
   } catch { /* type column */ }
   await audit(req, 'création', 'Sale', sale.id, reference);
 
+  let advancePaymentId: string | null = null;
   if (advanceAmount > 0) {
     const receiptNo = await nextReference('REC');
     const client = sale.client;
@@ -310,6 +346,7 @@ router.post('/sales', async (req, res) => {
         date: sale.contractDate,
       },
     });
+    advancePaymentId = payment.id;
     await audit(req, 'création', 'Payment', payment.id, `${receiptNo} — acompte ${reference}`);
     const full = await prisma.payment.findUnique({
       where: { id: payment.id },
@@ -318,7 +355,7 @@ router.post('/sales', async (req, res) => {
     if (full) await syncEncaissementMovement(full, req);
   }
 
-  res.status(201).json(sale);
+  res.status(201).json({ ...sale, advancePaymentId });
 });
 
 router.get('/sales/:id/documents', async (req, res) => {
@@ -450,6 +487,7 @@ router.put('/sales/:id', async (req, res) => {
   if (req.body.buyerSignatureDate !== undefined) data.buyerSignatureDate = req.body.buyerSignatureDate || null;
   if (req.body.buyerLegalizationNo !== undefined) data.buyerLegalizationNo = req.body.buyerLegalizationNo || null;
   const updated = await prisma.sale.update({ where: { id }, data });
+  await applyPropertyOccupancy(updated.propertyId, req.body.propertyStatus);
   await audit(req, 'modification', 'Sale', id, updated.reference);
   res.json(updated);
 });
@@ -757,7 +795,10 @@ router.post('/rentals', async (req, res) => {
       },
       include: { client: true, property: true },
     });
-    await tx.property.update({ where: { id: propertyId }, data: { status: 'loué' } });
+    await tx.property.update({
+      where: { id: propertyId },
+      data: { status: occupancyFromBody(req.body.propertyStatus) || 'loué' },
+    });
     await tx.client.update({
       where: { id: clientId },
       data: { isTenant: true, isProspect: false },
@@ -1022,6 +1063,7 @@ router.put('/rentals/:id', async (req, res) => {
   if (req.body.tenantSignatureDate !== undefined) data.tenantSignatureDate = req.body.tenantSignatureDate || null;
   if (req.body.tenantLegalizationNo !== undefined) data.tenantLegalizationNo = req.body.tenantLegalizationNo || null;
   const updated = await prisma.rental.update({ where: { id }, data });
+  await applyPropertyOccupancy(updated.propertyId, req.body.propertyStatus);
   if (
     req.body.startDate != null ||
     req.body.endDate !== undefined ||

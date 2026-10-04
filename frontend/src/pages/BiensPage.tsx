@@ -16,7 +16,7 @@ import {
   type BienFormData, type FloorOption,
 } from '../components/BienFormFields';
 import MacAvatar from '../components/MacAvatar';
-import { availabilityStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
@@ -295,7 +295,6 @@ export default function BiensPage() {
     { id: 'réservé', label: t('common.reservedPlural') },
     { id: 'vendu', label: t('common.soldPlural') },
     { id: 'loué', label: t('common.rentedPlural') },
-    { id: 'indisponible', label: t('common.unavailablePlural') },
   ];
 
   const hasActiveFilters = !!statusFilter || !!projectFilter || !!q;
@@ -500,9 +499,9 @@ export default function BiensPage() {
                   <Td mac className="mac-table-muted">{p.surface ? `${p.surface} m²` : '—'}</Td>
                   <Td mac>{p.price ? formatMad(p.price) : '—'}</Td>
                   <Td mac>
-                    <StatusPill status={propertyDealOf(p) === 'location' ? 'loué' : 'vendu'} quiet />
+                    <StatusPill status={propertyDealOf(p) === 'location' ? 'à louer' : 'à vendre'} quiet />
                   </Td>
-                  <Td mac><StatusPill status={availabilityStatusOf(p.status)} quiet /></Td>
+                  <Td mac><StatusPill status={occupancyStatusOf(p)} quiet /></Td>
                   <Td mac onClick={(e) => e.stopPropagation()}>
                     {client ? (
                       <>

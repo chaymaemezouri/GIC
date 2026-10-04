@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRightLeft, Eye, Package, Plus, Undo2, Wallet, Warehouse } from 'lucide-react';
 import { api, formatDate, formatMad } from '../../lib/api';
 import { appAlert } from '../../lib/dialog';
-import { COST_CATEGORIES, formatQty, parseIntQty, todayISO, type CostBucket, type CostLine } from '../../lib/engins';
+import { COST_CATEGORIES, formatQty, formatSignedQty, materielQtyDelta, parseIntQty, todayISO, type CostBucket, type CostLine } from '../../lib/engins';
 import { useI18n } from '../../i18n/I18nContext';
 import { Btn, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, Modal, Select, TableWrap, Tabs, Td, Th } from '../ui';
 import { MaterielStockPanel } from './MaterielStockPanel';
@@ -35,6 +35,8 @@ type Move = {
   movementType: string;
   quantity: number;
   date: string;
+  chantierId?: string | null;
+  fromChantierId?: string | null;
   tranche?: string | null;
   fromTranche?: string | null;
   remark?: string | null;
@@ -42,6 +44,7 @@ type Move = {
   chantier?: { id: string; name: string } | null;
   fromChantier?: { id: string; name: string } | null;
 };
+type HistFilter = 'all' | 'in' | 'out';
 type Chantier = { id: string; name: string };
 type Section = 'affectation' | 'transfer' | 'retours' | 'synthese';
 type ActionKind = 'assign' | 'return' | 'split' | 'transfer';
@@ -98,6 +101,7 @@ export function SiteMaterielPanel({
   const [returnQty, setReturnQty] = useState<Record<string, string>>({});
   const [costs, setCosts] = useState<CostsPayload | null>(null);
   const [openEnginId, setOpenEnginId] = useState<string | null>(null);
+  const [histFilter, setHistFilter] = useState<HistFilter>('all');
 
   function bump() {
     setReload((n) => n + 1);
@@ -159,11 +163,20 @@ export function SiteMaterielPanel({
     return positions.filter((p) => `${labelOf(p)} ${p.code || ''} ${p.tranche || ''}`.toLowerCase().includes(needle));
   }, [positions, query]);
 
+  function siteDelta(move: Move) {
+    return materielQtyDelta(move, { chantierId, tranche });
+  }
+
   const filteredHistory = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return history;
-    return history.filter((m) => `${m.engin?.designation || ''} ${m.movementType} ${m.remark || ''}`.toLowerCase().includes(needle));
-  }, [history, query]);
+    return history.filter((m) => {
+      if (needle && !`${m.engin?.designation || ''} ${m.movementType} ${m.remark || ''}`.toLowerCase().includes(needle)) return false;
+      const delta = materielQtyDelta(m, { chantierId, tranche });
+      if (histFilter === 'in') return delta > 0;
+      if (histFilter === 'out') return delta < 0;
+      return true;
+    });
+  }, [history, query, histFilter, chantierId, tranche]);
 
   const synthesisRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -422,7 +435,27 @@ export function SiteMaterielPanel({
             </TableWrap>
           )}
           <div className="space-y-2">
-            <p className="text-[13px] font-medium text-gic-ink">{t('fleet.stock.history')}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[13px] font-medium text-gic-ink">{t('fleet.stock.history')}</p>
+              <div className="flex flex-wrap gap-1">
+                {([
+                  ['all', t('common.all')],
+                  ['in', t('fleet.stock.historyIn')],
+                  ['out', t('fleet.stock.historyOut')],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setHistFilter(id)}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                      histFilter === id ? 'bg-gic-ink text-white' : 'bg-black/[0.04] text-gic-muted hover:text-gic-ink'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             {filteredHistory.length === 0 ? (
               <p className="py-6 text-center text-[12px] text-gic-muted">{t('fleet.stock.empty')}</p>
             ) : (
@@ -439,21 +472,34 @@ export function SiteMaterielPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredHistory.map((move) => (
-                    <tr key={move.id}>
-                      <Td mac>{formatDate(move.date)}</Td>
-                      <Td mac>
-                        {move.engin ? (
-                          <Link to={`/engins/${move.engin.id}`} className="mac-table-ref">{labelOf(move.engin)}</Link>
-                        ) : '—'}
-                      </Td>
-                      <Td mac>{t(`fleet.stock.${move.movementType}`)}</Td>
-                      <Td mac className="mac-td-num font-medium">{formatQty(move.quantity)}</Td>
-                      <Td mac className="mac-table-muted">{moveSource(move)}</Td>
-                      <Td mac className="mac-table-muted">{moveDest(move)}</Td>
-                      <Td mac className="mac-table-muted">{move.remark || '—'}</Td>
-                    </tr>
-                  ))}
+                  {filteredHistory.map((move) => {
+                    const delta = siteDelta(move);
+                    return (
+                      <tr key={move.id}>
+                        <Td mac>{formatDate(move.date)}</Td>
+                        <Td mac>
+                          {move.engin ? (
+                            <Link to={`/engins/${move.engin.id}`} className="mac-table-ref">{labelOf(move.engin)}</Link>
+                          ) : '—'}
+                        </Td>
+                        <Td mac>
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                            delta > 0 ? 'bg-emerald-50 text-emerald-800'
+                              : delta < 0 ? 'bg-[#ff3b30]/10 text-gic-coral'
+                              : 'bg-black/[0.04] text-gic-ink'
+                          }`}>
+                            {t(`fleet.stock.${move.movementType}`)}
+                          </span>
+                        </Td>
+                        <Td mac className={`mac-td-num font-medium ${delta < 0 ? 'text-gic-coral' : ''}`}>
+                          {formatSignedQty(delta, move.quantity)}
+                        </Td>
+                        <Td mac className="mac-table-muted">{moveSource(move)}</Td>
+                        <Td mac className="mac-table-muted">{moveDest(move)}</Td>
+                        <Td mac className="mac-table-muted">{move.remark || '—'}</Td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </TableWrap>
             )}
