@@ -1,5 +1,5 @@
 import { useI18n } from '../i18n/I18nContext';
-import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { occupancyForDeal, propertyDealOf } from '../lib/propertyDeal';
 import { isBankPaymentMode } from '../lib/paymentMode';
 import { uploadDocument, uploadForm } from '../lib/api';
 import { Input, Select } from './ui';
@@ -73,10 +73,7 @@ export function saleToForm(s: Record<string, unknown>): SaleFormData {
     sellerLegalizationNo: String(s.sellerLegalizationNo || ''),
     buyerSignatureDate: dateField(s.buyerSignatureDate),
     buyerLegalizationNo: String(s.buyerLegalizationNo || ''),
-    propertyStatus: occupancyStatusOf({
-      type: (s.property as { type?: string } | undefined)?.type,
-      status: (s.property as { status?: string } | undefined)?.status || 'vendu',
-    }),
+    propertyStatus: occupancyForDeal('vente', (s.property as { status?: string } | undefined)?.status || 'vendu'),
     advanceMode: String(acompte?.operationType || 'especes'),
     advanceBank: String(acompte?.bank || ''),
     advanceProof: null,
@@ -100,7 +97,7 @@ export function saleFormToCreateBody(f: SaleFormData) {
     sellerLegalizationNo: f.sellerLegalizationNo || null,
     buyerSignatureDate: f.buyerSignatureDate || null,
     buyerLegalizationNo: f.buyerLegalizationNo || null,
-    propertyStatus: f.propertyStatus || 'vendu',
+    propertyStatus: occupancyForDeal('vente', f.propertyStatus || 'vendu'),
   };
 }
 
@@ -114,7 +111,7 @@ export function saleFormToUpdateBody(f: SaleFormData) {
     sellerLegalizationNo: f.sellerLegalizationNo || null,
     buyerSignatureDate: f.buyerSignatureDate || null,
     buyerLegalizationNo: f.buyerLegalizationNo || null,
-    propertyStatus: f.propertyStatus || undefined,
+    propertyStatus: occupancyForDeal('vente', f.propertyStatus || 'vendu'),
   };
 }
 
@@ -246,11 +243,10 @@ export function SaleFormFields({
         <option value="promesse">{t('fields.promesse')}</option>
         <option value="acte">{t('fields.acteAuthentique')}</option>
       </Select>
-      <Select label={t('fields.propertyStatus')} value={form.propertyStatus} onChange={(e) => setForm({ ...form, propertyStatus: e.target.value })}>
+      <Select label={t('fields.propertyStatus')} value={form.propertyStatus === 'loué' ? 'vendu' : form.propertyStatus} onChange={(e) => setForm({ ...form, propertyStatus: e.target.value })}>
         <option value="disponible">{t('status.available')}</option>
         <option value="réservé">{t('status.reserved')}</option>
         <option value="vendu">{t('status.sold')}</option>
-        <option value="loué">{t('status.rented')}</option>
       </Select>
       {editMode && (
         <Select label={t('fields.contractStatus')} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>

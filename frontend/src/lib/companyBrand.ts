@@ -7,7 +7,7 @@ export const ECC_COMPANY = {
   gicCredit:
     'Plateforme GIC — développée par Expertise & Consulting Company.',
   loginByline: 'Développement IT · IA · data science · solutions métier',
-  website: 'https://expertise-consulting.ma',
+  website: 'https://expertise-consulting.com/',
   logoSrc: '/ecc-logo.jpeg',
 } as const;
 

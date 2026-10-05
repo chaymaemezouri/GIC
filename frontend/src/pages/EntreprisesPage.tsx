@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, type PaginatedResponse } from '../lib/api';
 import { appAlert, appConfirm } from '../lib/dialog';
@@ -101,7 +102,9 @@ export default function EntreprisesPage() {
             {items.map((item) => (
               <tr key={item.id}>
                 <Td mac className="mac-table-ref">{item.reference}</Td>
-                <Td mac className="font-medium">{item.companyName}</Td>
+                <Td mac className="font-medium">
+                  <Link to={`/entreprises/${item.id}`} className="text-[#007aff] hover:underline">{item.companyName}</Link>
+                </Td>
                 <Td mac>{item.phone || '—'}</Td>
                 <Td mac>{item.email || '—'}</Td>
                 <Td mac className="mac-td-actions">

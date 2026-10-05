@@ -1,5 +1,5 @@
 import { useI18n } from '../i18n/I18nContext';
-import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { occupancyForDeal, propertyDealOf } from '../lib/propertyDeal';
 import { Input, Select } from './ui';
 import { ClientFormPicker } from './ClientFormPicker';
 
@@ -63,10 +63,7 @@ export function rentalToForm(r: Record<string, unknown>): RentalFormData {
     landlordLegalizationNo: String(r.landlordLegalizationNo || ''),
     tenantSignatureDate: dateField(r.tenantSignatureDate),
     tenantLegalizationNo: String(r.tenantLegalizationNo || ''),
-    propertyStatus: occupancyStatusOf({
-      type: (r.property as { type?: string } | undefined)?.type,
-      status: (r.property as { status?: string } | undefined)?.status || 'loué',
-    }),
+    propertyStatus: occupancyForDeal('location', (r.property as { status?: string } | undefined)?.status || 'loué'),
   };
 }
 
@@ -86,7 +83,7 @@ export function rentalFormToBody(f: RentalFormData, editMode = false) {
     monthlyRent: f.monthlyRent,
     discount: f.discount,
     ...bail,
-    propertyStatus: f.propertyStatus || 'loué',
+    propertyStatus: occupancyForDeal('location', f.propertyStatus || 'loué'),
   };
   if (editMode) {
     return { ...common, status: f.status };
@@ -173,10 +170,9 @@ export function RentalFormFields({
       <p className="sm:col-span-2 text-[11px] text-gic-muted -mt-1">
         {t('msg.rentalOpenEndedHint')}
       </p>
-      <Select label={t('fields.propertyStatus')} value={form.propertyStatus} onChange={(e) => setForm({ ...form, propertyStatus: e.target.value })}>
+      <Select label={t('fields.propertyStatus')} value={form.propertyStatus === 'vendu' ? 'loué' : form.propertyStatus} onChange={(e) => setForm({ ...form, propertyStatus: e.target.value })}>
         <option value="disponible">{t('status.available')}</option>
         <option value="réservé">{t('status.reserved')}</option>
-        <option value="vendu">{t('status.sold')}</option>
         <option value="loué">{t('status.rented')}</option>
       </Select>
       {editMode && (

@@ -1161,13 +1161,15 @@ export async function seedFleet(ctx: SeedContext) {
 // ─── Chantiers : tranches, sous-traitants, galerie ──────────────────
 
 const SUBCONTRACTORS = [
-  { companyName: 'Géo Terrassement SARL', corpsEtat: 'Terrassement', amount: 650_000 },
-  { companyName: 'Étanchéité Atlas', corpsEtat: 'Étanchéité', amount: 380_000 },
-  { companyName: 'Alu Concept Maroc', corpsEtat: 'Menuiserie aluminium', amount: 540_000 },
-  { companyName: 'ElecNord Services', corpsEtat: 'Électricité', amount: 460_000 },
-  { companyName: 'Hydro Sanitaire', corpsEtat: 'Plomberie', amount: 320_000 },
-  { companyName: 'Staff Déco', corpsEtat: 'Faux plafonds / staff', amount: 210_000 },
-  { companyName: 'Peinture Moderne', corpsEtat: 'Peinture', amount: 180_000 },
+  { companyName: 'Géo Terrassement SARL', corpsEtat: 'Terrassement', amount: 650_000, ice: '001845120000032', email: 'contact@geo-terrassement.ma', city: 'Casablanca' },
+  { companyName: 'Étanchéité Atlas', corpsEtat: 'Étanchéité', amount: 380_000, ice: '001845120000045', email: 'devis@etancheite-atlas.ma', city: 'Rabat' },
+  { companyName: 'Alu Concept Maroc', corpsEtat: 'Menuiserie', amount: 540_000, ice: '001845120000078', email: 'commercial@alu-concept.ma', city: 'Casablanca' },
+  { companyName: 'ElecNord Services', corpsEtat: 'Électricité', amount: 460_000, ice: '001845120000091', email: 'info@elecnord.ma', city: 'Tanger' },
+  { companyName: 'Hydro Sanitaire', corpsEtat: 'Plomberie', amount: 320_000, ice: '001845120000104', email: 'contact@hydro-sanitaire.ma', city: 'Fès' },
+  { companyName: 'Staff Déco', corpsEtat: 'Faux plafonds', amount: 210_000, ice: '001845120000117', email: 'atelier@staff-deco.ma', city: 'Marrakech' },
+  { companyName: 'Peinture Moderne', corpsEtat: 'Peinture', amount: 180_000, ice: '001845120000120', email: 'chantier@peinture-moderne.ma', city: 'Agadir' },
+  { companyName: 'VRD Atlas Travaux', corpsEtat: 'VRD', amount: 720_000, ice: '001845120000133', email: 'travaux@vrd-atlas.ma', city: 'Casablanca' },
+  { companyName: 'Isolation Thermique Plus', corpsEtat: 'Isolation', amount: 195_000, ice: '001845120000146', email: 'contact@iso-plus.ma', city: 'Rabat' },
 ];
 
 const TRANCHE_REMARKS = ['Bloc A — 24 logements', 'Bloc B — 18 logements + commerces', 'Villas jumelées — 12 unités'];
@@ -1193,20 +1195,98 @@ export async function seedChantierExtras(ctx: SeedContext) {
       });
     }
 
-    for (let k = 0; k < 3; k++) {
-      const s = SUBCONTRACTORS[(c * 2 + k) % SUBCONTRACTORS.length];
+    const progressRows = await prisma.workProgress.findMany({ where: { chantierId: ch.id } });
+    for (let k = 0; k < 5; k++) {
+      const s = SUBCONTRACTORS[(c * 3 + k) % SUBCONTRACTORS.length];
       const id = `sub-${ch.id}-${k + 1}`;
+      const task = progressRows.find((row) => row.taskName === s.corpsEtat)
+        || progressRows.find((row) => row.taskName.toLowerCase().includes(s.corpsEtat.toLowerCase().slice(0, 6)))
+        || progressRows[k % Math.max(1, progressRows.length)]
+        || null;
+      const rawPhases = Array.isArray(task?.phases) ? (task!.phases as Array<{ label?: string; percent?: number }>) : [];
+      const workPhases = rawPhases.filter((p) => String(p.label || '').toLowerCase() !== 'validation');
+      const scope = k % 2 === 0 && workPhases.length ? 'phase' : 'task';
+      const phaseLabel = scope === 'phase' ? String(workPhases[k % workPhases.length]?.label || '') : null;
+      const followSource = scope === 'phase' && phaseLabel
+        ? workPhases.filter((p) => p.label === phaseLabel)
+        : (workPhases.length ? workPhases : [{ label: s.corpsEtat, percent: 50 }]);
+      const amount = Math.round(s.amount * (0.75 + c * 0.08 + k * 0.03));
+      const status = k === 4 && c % 2 === 0 ? 'termine' : c === 4 && k === 3 ? 'suspendu' : 'actif';
+      const paidRatio = status === 'termine' ? 1 : k === 0 ? 0.45 : k === 1 ? 0.22 : k === 2 ? 0.08 : 0;
+      const paidAmount = Math.round(amount * paidRatio);
+      const progressPct = status === 'termine' ? 100 : Math.min(95, 12 + k * 18 + c * 5);
       const data = {
         chantierId: ch.id,
         companyName: s.companyName,
         corpsEtat: s.corpsEtat,
         phone: `0522${pad(480_000 + c * 100 + k, 6)}`,
-        amount: Math.round(s.amount * (0.8 + c * 0.1)),
-        status: k === 2 && c % 2 === 0 ? 'termine' : c === 4 && k === 1 ? 'suspendu' : 'actif',
-        remark: k === 0 ? 'Marché signé — retenue de garantie 10 %' : null,
+        amount,
+        paidAmount,
+        progressPct,
+        status,
+        remark: k === 0 ? 'Marché signé — retenue de garantie 10 %' : k === 1 ? 'Avances à valider sur situation' : null,
+        workProgressId: task?.id || null,
+        scope,
+        phaseLabel,
+        tranche: task?.tranche || ch.tranches[k % Math.max(1, ch.tranches.length)] || null,
+        startDate: utcDaysAgo(90 - k * 12),
+        endDate: utcDaysAgo(-(40 + k * 20)),
       };
       await prisma.chantierSubcontractor.upsert({ where: { id }, update: data, create: { id, ...data } });
+      await prisma.subcontractFollow.deleteMany({ where: { subcontractorId: id } });
+      await prisma.subcontractorPayment.deleteMany({ where: { subcontractorId: id } });
+      for (let f = 0; f < followSource.length; f++) {
+        const phase = followSource[f];
+        const validated = progressPct >= 80 && f === 0;
+        await prisma.subcontractFollow.create({
+          data: {
+            id: `sf-${id}-${f + 1}`,
+            subcontractorId: id,
+            label: String(phase.label || s.corpsEtat),
+            percent: validated ? 100 : Math.max(5, Math.round((phase.percent || progressPct) * (validated ? 1 : 0.6))),
+            validated,
+            validatedAt: validated ? utcDaysAgo(4 + f) : null,
+            sortOrder: f,
+          },
+        });
+      }
+      const payCount = paidAmount > 0 ? (paidRatio >= 0.9 ? 3 : paidRatio >= 0.3 ? 2 : 1) : 0;
+      let remainingPay = paidAmount;
+      const modes = ['especes', 'virement', 'cheque'] as const;
+      for (let p = 0; p < payCount; p++) {
+        const isLast = p === payCount - 1;
+        const part = isLast ? remainingPay : Math.round(paidAmount / payCount);
+        remainingPay -= part;
+        const kind = p === 0 ? 'avance' : p === 1 ? 'situation' : 'solde';
+        const taggedPhase = scope === 'task' ? String(followSource[p % followSource.length]?.label || '') : phaseLabel;
+        await prisma.subcontractorPayment.create({
+          data: {
+            id: `sp-${id}-${p + 1}`,
+            subcontractorId: id,
+            amount: part,
+            kind,
+            paymentMode: modes[p % modes.length],
+            date: utcDaysAgo(30 - p * 7),
+            remark: taggedPhase ? `[phase:${taggedPhase}]` : null,
+          },
+        });
+      }
       subs++;
+    }
+
+    const stockItems = [
+      { name: 'Ciment CPJ 45', quantity: 120 + c * 15, unit: 'sac', tranche: ch.tranches[0] || null },
+      { name: 'Acier HA 12', quantity: 8 + c, unit: 'tonne', tranche: ch.tranches[0] || null },
+      { name: 'Parpaing 20', quantity: 2400 + c * 200, unit: 'u', tranche: ch.tranches[1] || ch.tranches[0] || null },
+    ];
+    for (let si = 0; si < stockItems.length; si++) {
+      const row = stockItems[si];
+      const sid = `stk-${ch.id}-${si + 1}`;
+      await prisma.chantierStockItem.upsert({
+        where: { id: sid },
+        update: row,
+        create: { id: sid, chantierId: ch.id, ...row },
+      });
     }
 
     let cover: string | null = null;
@@ -1239,7 +1319,52 @@ export async function seedChantierExtras(ctx: SeedContext) {
       images++;
     }
   }
-  return { subcontractors: subs, images };
+  let entreprises = 0;
+  for (let i = 0; i < SUBCONTRACTORS.length; i++) {
+    const s = SUBCONTRACTORS[i];
+    const id = `ent-demo-${i + 1}`;
+    const reference = `ENT-2026-${pad(i + 1)}`;
+    const payload = {
+      companyName: s.companyName,
+      phone: `0522${pad(200_000 + i * 111, 6)}`,
+      email: s.email,
+      address: `${s.city} — Zone industrielle`,
+      ice: s.ice,
+      remark: `Corps d’état : ${s.corpsEtat}`,
+      isActive: i !== 8,
+    };
+    const existing = await prisma.entreprise.findFirst({
+      where: { OR: [{ id }, { reference }, { companyName: s.companyName }] },
+    });
+    if (existing) {
+      await prisma.entreprise.update({
+        where: { id: existing.id },
+        data: { ...payload, reference: existing.reference || reference },
+      });
+    } else {
+      await prisma.entreprise.create({ data: { id, reference, ...payload } });
+    }
+    entreprises++;
+  }
+  const bureauRef = 'ENT-2026-000010';
+  const bureau = await prisma.entreprise.findFirst({
+    where: { OR: [{ id: 'ent-demo-bureau' }, { reference: bureauRef }, { companyName: 'Bureau d’études Atlas Ingénierie' }] },
+  });
+  const bureauData = {
+    companyName: 'Bureau d’études Atlas Ingénierie',
+    phone: '0537720010',
+    email: 'contact@atlas-ing.ma',
+    address: 'Technopark — Casablanca',
+    ice: '001845120000159',
+    remark: 'BET structure / VRD — pas encore de marché chantier',
+  };
+  if (bureau) {
+    await prisma.entreprise.update({ where: { id: bureau.id }, data: bureauData });
+  } else {
+    await prisma.entreprise.create({ data: { id: 'ent-demo-bureau', reference: bureauRef, ...bureauData } });
+  }
+  entreprises++;
+  return { subcontractors: subs, images, entreprises };
 }
 
 // ─── Échéanciers ventes / locations ─────────────────────────────────

@@ -4571,6 +4571,11 @@ html[dir="rtl"] .shell-dropdown-right {
 .ecc-brand-name-sm {
   font-weight: 600;
   color: #2563eb;
+  text-decoration: none;
+}
+
+a.ecc-brand-name-sm:hover {
+  text-decoration: underline;
 }
 
 .ecc-brand-sep {
@@ -4585,6 +4590,12 @@ html[dir="rtl"] .shell-dropdown-right {
   border-radius: 14px;
   border: 1px solid rgba(37, 99, 235, 0.15);
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.04), rgba(255, 255, 255, 0.9));
+  text-decoration: none;
+  color: inherit;
+}
+
+a.ecc-brand-inline:hover {
+  border-color: rgba(37, 99, 235, 0.35);
 }
 
 .ecc-brand-inline-title {
@@ -4763,6 +4774,17 @@ html[dir="rtl"] .shell-dropdown-right {
     0 4px 16px rgba(0, 0, 0, 0.04);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+a.login-ecc-panel:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.06),
+    0 8px 20px rgba(0, 0, 0, 0.06);
 }
 
 .login-ecc-logo-wrap {

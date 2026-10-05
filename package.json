@@ -8,7 +8,8 @@
     "build": "npm run build --prefix backend && npm run build --prefix frontend",
     "db:push": "npm run db:push --prefix backend",
     "seed": "npm run seed --prefix backend",
-    "health": "npm run health --prefix backend"
+    "health": "npm run health --prefix backend",
+    "test:smoke": "node backend/scripts/smoke-test.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

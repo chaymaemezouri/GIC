@@ -8,6 +8,7 @@ import {
   deleteEntreprise,
   getEntreprise,
   listEntreprises,
+  listSubcontractsForCompany,
   updateEntreprise,
 } from '../lib/entreprises.js';
 
@@ -40,9 +41,32 @@ router.post('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const item = await getEntreprise(String(req.params.id));
-  if (!item) return res.status(404).json({ message: 'Entreprise introuvable' });
-  res.json(item);
+  try {
+    const item = await getEntreprise(String(req.params.id));
+    if (!item) return res.status(404).json({ message: 'Entreprise introuvable' });
+    let subcontractors: Awaited<ReturnType<typeof listSubcontractsForCompany>> = [];
+    try {
+      subcontractors = await listSubcontractsForCompany(item.companyName);
+    } catch (err) {
+      console.error('[entreprises] sous-traitances', err);
+    }
+    const amount = subcontractors.reduce((s, row) => s + Number(row.amount || 0), 0);
+    const paid = subcontractors.reduce((s, row) => s + Number(row.paidAmount || 0), 0);
+    res.json({
+      ...item,
+      subcontractors,
+      totals: {
+        count: subcontractors.length,
+        amount,
+        paid,
+        remaining: Math.max(0, amount - paid),
+        sites: new Set(subcontractors.map((row) => row.chantierId)).size,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erreur serveur';
+    res.status(500).json({ message });
+  }
 });
 
 router.put('/:id', async (req, res) => {

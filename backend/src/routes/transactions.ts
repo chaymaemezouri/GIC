@@ -39,8 +39,18 @@ function occupancyFromBody(raw: unknown) {
   return null;
 }
 
-async function applyPropertyOccupancy(propertyId: string, explicit?: unknown) {
-  const status = occupancyFromBody(explicit);
+function occupancyForDeal(deal: 'vente' | 'location', raw: unknown) {
+  const status = occupancyFromBody(raw);
+  if (deal === 'location') {
+    if (status === 'vendu') return 'disponible';
+    return status || 'loué';
+  }
+  if (status === 'loué') return 'disponible';
+  return status || 'vendu';
+}
+
+async function applyPropertyOccupancy(propertyId: string, explicit?: unknown, deal: 'vente' | 'location' = 'vente') {
+  const status = occupancyFromBody(explicit) ? occupancyForDeal(deal, explicit) : null;
   if (status) {
     await prisma.property.update({ where: { id: propertyId }, data: { status } });
     return;
@@ -317,7 +327,7 @@ router.post('/sales', async (req, res) => {
     });
     await tx.property.update({
       where: { id: propertyId },
-      data: { status: occupancyFromBody(req.body.propertyStatus) || 'vendu' },
+      data: { status: occupancyForDeal('vente', req.body.propertyStatus) },
     });
     await tx.client.update({
       where: { id: clientId },
@@ -487,7 +497,7 @@ router.put('/sales/:id', async (req, res) => {
   if (req.body.buyerSignatureDate !== undefined) data.buyerSignatureDate = req.body.buyerSignatureDate || null;
   if (req.body.buyerLegalizationNo !== undefined) data.buyerLegalizationNo = req.body.buyerLegalizationNo || null;
   const updated = await prisma.sale.update({ where: { id }, data });
-  await applyPropertyOccupancy(updated.propertyId, req.body.propertyStatus);
+  await applyPropertyOccupancy(updated.propertyId, req.body.propertyStatus, 'vente');
   await audit(req, 'modification', 'Sale', id, updated.reference);
   res.json(updated);
 });
@@ -797,7 +807,7 @@ router.post('/rentals', async (req, res) => {
     });
     await tx.property.update({
       where: { id: propertyId },
-      data: { status: occupancyFromBody(req.body.propertyStatus) || 'loué' },
+      data: { status: occupancyForDeal('location', req.body.propertyStatus) },
     });
     await tx.client.update({
       where: { id: clientId },
@@ -1063,7 +1073,7 @@ router.put('/rentals/:id', async (req, res) => {
   if (req.body.tenantSignatureDate !== undefined) data.tenantSignatureDate = req.body.tenantSignatureDate || null;
   if (req.body.tenantLegalizationNo !== undefined) data.tenantLegalizationNo = req.body.tenantLegalizationNo || null;
   const updated = await prisma.rental.update({ where: { id }, data });
-  await applyPropertyOccupancy(updated.propertyId, req.body.propertyStatus);
+  await applyPropertyOccupancy(updated.propertyId, req.body.propertyStatus, 'location');
   if (
     req.body.startDate != null ||
     req.body.endDate !== undefined ||

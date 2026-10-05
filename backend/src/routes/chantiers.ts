@@ -31,6 +31,7 @@ import {
   normalizeTranche,
   resolveSessionForLine,
 } from '../lib/pointageSessions.js';
+import { createEntreprise, entrepriseMapByName } from '../lib/entreprises.js';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
@@ -3929,7 +3930,11 @@ router.get('/:id/subcontractors', async (req, res) => {
     include: subcontractorInclude(),
     orderBy: { companyName: 'asc' },
   });
-  res.json(items);
+  const map = await entrepriseMapByName();
+  res.json(items.map((item) => ({
+    ...item,
+    entrepriseId: map.get(String(item.companyName || '').trim().toLowerCase())?.id || null,
+  })));
 });
 
 router.post('/:id/subcontractors', async (req, res) => {
@@ -3986,6 +3991,7 @@ router.post('/:id/subcontractors', async (req, res) => {
     },
     include: subcontractorInclude(),
   });
+  await createEntreprise({ companyName, phone: req.body.phone ? String(req.body.phone).trim() : null });
   res.status(201).json(sub);
 });
 

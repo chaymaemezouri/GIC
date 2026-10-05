@@ -49,6 +49,22 @@ function propertyDealType(type: unknown, status?: unknown) {
   return 'vente';
 }
 
+function occupancyForDeal(deal: 'vente' | 'location', status?: unknown) {
+  const st = String(status || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+  if (st === 'reserve') return 'réservé';
+  if (st === 'disponible') return 'disponible';
+  if (deal === 'location') {
+    if (st === 'loue' || st === 'indisponible') return 'loué';
+    return 'disponible';
+  }
+  if (st === 'vendu' || st === 'indisponible') return 'vendu';
+  return 'disponible';
+}
+
 const PROPERTY_LIST_SELECT = {
   id: true,
   reference: true,
@@ -78,10 +94,15 @@ function withPropertyTypes<T extends { id: string; status?: string; type?: strin
   rows: T[],
   types: Map<string, string>,
 ): T[] {
-  return rows.map((row) => ({
-    ...row,
-    type: types.get(row.id) || propertyDealType(row.type, row.status),
-  }));
+  return rows.map((row) => {
+    const type = types.get(row.id) || propertyDealType(row.type, row.status);
+    const deal = type === 'location' ? 'location' as const : 'vente' as const;
+    return {
+      ...row,
+      type,
+      status: occupancyForDeal(deal, row.status),
+    };
+  });
 }
 
 async function persistPropertyType(id: string, type: string) {
@@ -920,7 +941,9 @@ router.get('/properties/:id', async (req, res) => {
   });
   if (!property) return res.status(404).json({ message: 'Bien introuvable' });
   const types = await loadPropertyTypes([property.id]);
-  res.json({ ...property, type: types.get(property.id) || propertyDealType((property as { type?: string }).type, property.status) });
+  const type = types.get(property.id) || propertyDealType((property as { type?: string }).type, property.status);
+  const deal = type === 'location' ? 'location' as const : 'vente' as const;
+  res.json({ ...property, type, status: occupancyForDeal(deal, property.status) });
 });
 
 router.post('/properties', async (req, res) => {
@@ -928,7 +951,7 @@ router.post('/properties', async (req, res) => {
   const deal = propertyDealType(req.body.type, req.body.status);
   const body = { ...req.body };
   delete body.type;
-  if (body.status !== 'réservé') body.status = 'disponible';
+  body.status = occupancyForDeal(deal, body.status || 'disponible');
   const property = await prisma.property.create({
     data: {
       ...body,
@@ -951,14 +974,16 @@ router.put('/properties/:id', async (req, res) => {
   delete data.id;
   const existing = await prisma.property.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ message: 'Bien introuvable' });
-  const deal = data.type != null && data.type !== '' ? propertyDealType(data.type, data.status) : null;
+  const types = await loadPropertyTypes([existing.id]);
+  const currentType = types.get(existing.id) || propertyDealType(undefined, existing.status);
+  const deal = data.type != null && data.type !== ''
+    ? propertyDealType(data.type, data.status)
+    : (currentType === 'location' ? 'location' : 'vente');
   delete data.type;
   if (data.status === 'indisponible') {
-    data.status = (deal || propertyDealType(undefined, existing.status)) === 'location' ? 'loué' : 'vendu';
+    data.status = deal === 'location' ? 'loué' : 'vendu';
   }
-  if (['vendu', 'loué'].includes(existing.status) && data.status && !['vendu', 'loué'].includes(String(data.status))) {
-    delete data.status;
-  }
+  data.status = occupancyForDeal(deal, data.status ?? existing.status);
   if (data.price != null) data.price = Number(data.price);
   if (data.surface != null) data.surface = Number(data.surface);
   if (data.rooms != null) data.rooms = Number(data.rooms);
@@ -967,7 +992,7 @@ router.put('/properties/:id', async (req, res) => {
   const property = await prisma.property.update({ where: { id: req.params.id }, data });
   if (deal) await persistPropertyType(property.id, deal);
   await audit(req, 'modification', 'Property', property.id, property.reference);
-  res.json({ ...property, type: deal || propertyDealType(undefined, property.status) });
+  res.json({ ...property, type: deal, status: occupancyForDeal(deal, property.status) });
 });
 
 router.post('/properties/:id/photo', upload.single('file'), async (req, res) => {

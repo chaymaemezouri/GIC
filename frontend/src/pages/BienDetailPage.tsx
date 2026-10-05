@@ -17,7 +17,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { fileUrl } from '../lib/documentDisplay';
-import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { occupancyForDeal, occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
 
 import {
   BienFormFields, bienToForm, emptyBienForm, flattenProjectFloors,
@@ -115,7 +115,10 @@ export default function BienDetailPage() {
   }
 
   async function updateType(type: string) {
-    await api(`/immobilier/properties/${id}`, { method: 'PUT', body: JSON.stringify({ type }) });
+    await api(`/immobilier/properties/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ type, status: occupancyForDeal(type, bien?.status) }),
+    });
     load();
   }
 

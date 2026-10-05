@@ -74,6 +74,7 @@ const EquipeInternePage = lazy(() => import('./pages/EquipeInternePage'));
 const EquipeInterneDetailPage = lazy(() => import('./pages/EquipeInterneDetailPage'));
 const ReconnusPage = lazy(() => import('./pages/ReconnusPage'));
 const EntreprisesPage = lazy(() => import('./pages/EntreprisesPage'));
+const EntrepriseDetailPage = lazy(() => import('./pages/EntrepriseDetailPage'));
 const ReconnuDetailPage = lazy(() => import('./pages/ReconnuDetailPage'));
 const CaisseBureauPage = lazy(() => import('./pages/CaisseBureauPage'));
 const SupplierPortalPage = lazy(() => import('./pages/SupplierPortalPage'));
@@ -130,6 +131,7 @@ export default function App() {
               <Route path="reconnus" element={<ReconnusPage />} />
               <Route path="reconnus/:id" element={<ReconnuDetailPage />} />
               <Route path="entreprises" element={<EntreprisesPage />} />
+              <Route path="entreprises/:id" element={<EntrepriseDetailPage />} />
               <Route path="mandants" element={<MandantsPage />} />
               <Route path="mandants/:id" element={<MandantDetailPage />} />
               <Route path="projets" element={<ProjetsPage />} />

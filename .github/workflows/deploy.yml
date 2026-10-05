@@ -16,3 +16,5 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             bash /var/www/projects/gic/deploy.sh
+            cd /var/www/projects/gic
+            npm run seed

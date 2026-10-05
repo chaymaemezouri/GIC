@@ -17,6 +17,7 @@ import { resolveRail } from '../lib/sidebarPrefs';
 import { filterCreateGroups } from '../lib/createItems';
 import NewMenu from './NewMenu';
 import EccBrandFooter from './EccBrandFooter';
+import { ECC_COMPANY } from '../lib/companyBrand';
 import MobileNavDrawer from './MobileNavDrawer';
 import MobileBottomBar from './MobileBottomBar';
 import { useI18n } from '../i18n/I18nContext';
@@ -287,15 +288,21 @@ export default function AppLayout() {
   return (
     <div className="min-h-screen bg-gic-bg flex">
       <aside className="hidden lg:flex shell-rail flex-col">
-        <Link to="/" className="shell-rail-brand" title="Expertise & Consulting Company">
+        <a
+          href={ECC_COMPANY.website}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shell-rail-brand"
+          title={ECC_COMPANY.name}
+        >
           <img
-            src="/ecc-logo.jpeg"
-            alt="Expertise & Consulting Company"
+            src={ECC_COMPANY.logoSrc}
+            alt={ECC_COMPANY.name}
             className="shell-rail-brand-logo"
             width={56}
             height={56}
           />
-        </Link>
+        </a>
         <div className="shell-rail-divider" />
         <nav className="shell-rail-nav" aria-label={t('nav.shortcuts')}>
           {rail.map((item) => (

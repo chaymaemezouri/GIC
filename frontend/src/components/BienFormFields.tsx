@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useI18n, tStatic } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
 import { api, fetchProjectList } from '../lib/api';
-import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
-import { Input, Select, StatusPill } from './ui';
+import { occupancyForDeal, occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { Input, Select } from './ui';
 
 export type BienFormData = {
   name: string;
@@ -197,17 +197,30 @@ export function BienFormFields({
       <Input className="sm:col-span-2" label={`${t('fields.nameDesignation')} *`} required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       <Input label={t('fields.city')} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
       <Input label={t('fields.titleDeed')} value={form.titleNumber} onChange={(e) => setForm({ ...form, titleNumber: e.target.value })} />
-      <Select label={t('columns.type')} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+      <Select
+        label={t('columns.type')}
+        value={form.type}
+        onChange={(e) => {
+          const type = e.target.value;
+          setForm({ ...form, type, status: occupancyForDeal(type, form.status) });
+        }}
+      >
         <option value="vente">{t('status.forSale')}</option>
         <option value="location">{t('status.forRent')}</option>
       </Select>
-      <div>
-        <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.status')}</p>
-        <div className="flex min-h-[38px] items-center rounded-xl border border-gic-border bg-gray-50/80 px-3">
-          <StatusPill status={shownStatus} quiet />
-        </div>
-        <p className="mt-1 text-[10px] text-gic-muted">{t('fields.propertyStatusHint')}</p>
-      </div>
+      <Select
+        label={t('fields.status')}
+        value={shownStatus}
+        onChange={(e) => setForm({ ...form, status: occupancyForDeal(form.type, e.target.value) })}
+      >
+        <option value="disponible">{t('status.available')}</option>
+        <option value="réservé">{t('status.reserved')}</option>
+        {form.type === 'location' ? (
+          <option value="loué">{t('status.rented')}</option>
+        ) : (
+          <option value="vendu">{t('status.sold')}</option>
+        )}
+      </Select>
 
       {cascade && (
         <>

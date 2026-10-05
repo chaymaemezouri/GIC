@@ -24,13 +24,20 @@ export function availabilityStatusOf(status: string) {
   return status || 'disponible';
 }
 
-/** Statut réel du bien : disponible | réservé | vendu | loué */
-export function occupancyStatusOf(p: { type?: string | null; status?: string | null }) {
-  const value = fold(p.status);
-  if (value === 'vendu') return 'vendu';
-  if (value === 'loue') return 'loué';
+/** Statut réel du bien, cohérent avec le type (vente ≠ loué, location ≠ vendu). */
+export function occupancyForDeal(deal: PropertyDeal | string | null | undefined, status?: string | null) {
+  const kind: PropertyDeal = fold(deal) === 'location' || deal === 'location' ? 'location' : 'vente';
+  const value = fold(status);
   if (value === 'reserve') return 'réservé';
   if (value === 'disponible') return 'disponible';
-  if (value === 'indisponible') return propertyDealOf(p) === 'location' ? 'loué' : 'vendu';
-  return p.status || 'disponible';
+  if (kind === 'location') {
+    if (value === 'loue' || value === 'indisponible') return 'loué';
+    return 'disponible';
+  }
+  if (value === 'vendu' || value === 'indisponible') return 'vendu';
+  return 'disponible';
+}
+
+export function occupancyStatusOf(p: { type?: string | null; status?: string | null }) {
+  return occupancyForDeal(propertyDealOf(p), p.status);
 }

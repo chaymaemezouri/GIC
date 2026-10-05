@@ -23,6 +23,7 @@ import {
   utcDaysAgo,
   type SeedContext,
 } from './seedModules.js';
+import { STANDARD_TRANCHE_LOTS, buildStandardLotPhases } from '../src/lib/tasks.js';
 
 const prisma = new PrismaClient();
 
@@ -65,7 +66,9 @@ const PROJECTS = [
   { id: 'proj-agadir', name: 'Baie d\'Agadir', city: 'Agadir', desc: 'Appartements vue mer — Founty' },
 ];
 
-const PROPERTY_STATUSES = ['disponible', 'disponible', 'disponible', 'réservé', 'vendu', 'loué', 'indisponible'] as const;
+const PROPERTY_SALE_STATUSES = ['disponible', 'disponible', 'réservé', 'vendu'] as const;
+const PROPERTY_RENT_STATUSES = ['disponible', 'disponible', 'réservé', 'loué'] as const;
+const PAYMENT_MODES = ['especes', 'virement', 'cheque'] as const;
 
 const WORKER_CATEGORIES = ['Maçon', 'Manœuvre', 'Chef d\'équipe', 'Électricien', 'Plombier', 'Coffreur', 'Peintre', 'Ferrailleur'];
 const CHAUFFEUR_CATEGORY = 'Chauffeur';
@@ -88,7 +91,8 @@ const CHANTIERS = [
   { id: 'chant-rabat', name: 'Résidence Al Bahia', city: 'Tanger', progress: 74, workers: 87, manager: 'Mohamed El Amrani', budget: 4800000, projectId: 'proj-rabat', tranches: ['Tranche 1', 'Tranche 2'] },
   { id: 'chant-tanger', name: 'Marina View — Gros œuvre', city: 'Tanger', progress: 48, workers: 22, manager: 'Omar Fassi', budget: 5500000, projectId: 'proj-tanger', tranches: ['Tranche 1', 'Tranche 2', 'Tranche 3'] },
   { id: 'chant-marrakech', name: 'Oasis Marrakech Phase 1', city: 'Marrakech', progress: 78, workers: 15, manager: 'Nadia Cherkaoui', budget: 4100000, projectId: 'proj-marrakech', tranches: ['Tranche 1', 'Tranche 2'] },
-  { id: 'chant-fes', name: 'Horizon Fès — VRD', city: 'Fès', progress: 15, workers: 8, manager: 'Youssef Alaoui', budget: 1800000, projectId: 'proj-fes', tranches: [] as string[] },
+  { id: 'chant-fes', name: 'Horizon Fès — VRD', city: 'Fès', progress: 15, workers: 8, manager: 'Youssef Alaoui', budget: 1800000, projectId: 'proj-fes', tranches: ['Tranche 1'] },
+  { id: 'chant-agadir', name: 'Baie d\'Agadir — Gros œuvre', city: 'Agadir', progress: 22, workers: 14, manager: 'Hamza Idrissi', budget: 2600000, projectId: 'proj-agadir', tranches: ['Tranche 1', 'Tranche 2'] },
 ];
 
 const TASKS = [
@@ -672,6 +676,9 @@ async function main() {
     { id: 'ocm-5', direction: 'entree', amount: 150, purpose: 'alimentation', designation: 'Rendu monnaies', reconnuId: 'rec-hassan', reconnuName: null, days: 1 },
     { id: 'ocm-6', direction: 'sortie', amount: 180, purpose: 'aleatoire', designation: 'Taxi urgent', reconnuId: null, reconnuName: 'Ahmed Chauffeur (externe)', days: 2 },
     { id: 'ocm-7', direction: 'sortie', amount: 95, purpose: 'travail', designation: 'Courses pharmacie', reconnuId: null, reconnuName: 'Laila Bensaid', days: 0 },
+    { id: 'ocm-8', direction: 'sortie', amount: 1200, purpose: 'chantier', designation: 'Avance caisse chantier Atlas', reconnuId: 'rec-sara', reconnuName: null, days: 5, chantierId: 'demo-chantier' },
+    { id: 'ocm-9', direction: 'sortie', amount: 450, purpose: 'chantier', designation: 'Petit matériel Horizon Fès', reconnuId: 'rec-youssef', reconnuName: null, days: 4, chantierId: 'chant-fes' },
+    { id: 'ocm-10', direction: 'entree', amount: 2000, purpose: 'alimentation', designation: 'Renfort caisse bureau', reconnuId: null, reconnuName: null, days: 6, chantierId: null as string | null },
   ];
   for (const m of officeMoves) {
     await prisma.officeCashMovement.upsert({
@@ -684,6 +691,7 @@ async function main() {
         workLabel: m.purpose === 'travail' ? 'Entretien' : null,
         reconnuId: m.reconnuId,
         reconnuName: m.reconnuName,
+        chantierId: 'chantierId' in m ? m.chantierId : null,
         date: daysAgo(m.days),
       },
       create: {
@@ -695,6 +703,7 @@ async function main() {
         workLabel: m.purpose === 'travail' ? 'Entretien' : null,
         reconnuId: m.reconnuId,
         reconnuName: m.reconnuName,
+        chantierId: 'chantierId' in m ? m.chantierId : null,
         date: daysAgo(m.days),
         remark: null,
       },
@@ -849,20 +858,23 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   }
 
   // Biens (~90 : 15 par projet)
-  const propertyIds: { id: string; status: string; price: number; projectId: string }[] = [];
+  const propertyIds: { id: string; status: string; price: number; projectId: string; type: 'vente' | 'location' }[] = [];
   let bienNum = 0;
   for (const proj of PROJECTS) {
     for (let i = 1; i <= 15; i++) {
       bienNum++;
       const ref = `BIEN-2026-${pad(bienNum)}`;
-      const status = randomItem(PROPERTY_STATUSES, bienNum);
+      const type: 'vente' | 'location' = bienNum % 3 === 0 ? 'location' : 'vente';
+      const status = type === 'location'
+        ? randomItem(PROPERTY_RENT_STATUSES, bienNum)
+        : randomItem(PROPERTY_SALE_STATUSES, bienNum);
       const surface = 55 + (bienNum % 8) * 12;
       const price = Math.round((800000 + bienNum * 45000) / 1000) * 1000;
       const floorId = `fl-${proj.id}-${(i % 2) + 1}-${(i % 4) + 1}`;
 
       const prop = await prisma.property.upsert({
         where: { reference: ref },
-        update: { status, price },
+        update: { status, price, type },
         create: {
           reference: ref,
           name: `Appartement ${String.fromCharCode(65 + (i % 6))}${i} — ${proj.name.split(' ')[0]}`,
@@ -870,25 +882,29 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
           surface,
           rooms: 2 + (i % 4),
           status,
+          type,
           price,
           projectId: proj.id,
           floorId,
-          description: `${surface} m² — ${2 + (i % 4)} chambres`,
+          description: `${surface} m² — ${2 + (i % 4)} chambres — à ${type === 'location' ? 'louer' : 'vendre'}`,
         },
       });
-      propertyIds.push({ id: prop.id, status, price, projectId: proj.id });
+      propertyIds.push({ id: prop.id, status, price, projectId: proj.id, type });
     }
   }
 
   // Ventes — une vente par acheteur + ventes prospects (onglet Ventes / Biens / Paiements)
   const saleStatuses = ['signée', 'en_cours', 'en_cours_paiement', 'soldée', 'en_cours_paiement'];
   let saleNum = 0;
-  let propIdx = 0;
+  const saleProperties = propertyIds.filter((p) => p.type === 'vente');
+  const rentalProperties = propertyIds.filter((p) => p.type === 'location');
+  let salePropIdx = 0;
+  let rentalPropIdx = 0;
 
   async function seedSale(clientIndex: number, extra = false) {
     saleNum++;
     const ref = `VTE-2026-${pad(saleNum)}`;
-    const prop = propertyIds[propIdx++];
+    const prop = saleProperties[salePropIdx++];
     if (!prop) return;
     const clientId = clientIds[clientIndex];
     const salePrice = prop.price;
@@ -899,7 +915,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
 
     const sale = await prisma.sale.upsert({
       where: { reference: ref },
-      update: { clientId, propertyId: prop.id, totalPaid, remaining, status },
+      update: { clientId, propertyId: prop.id, totalPaid, remaining, status, advance },
       create: {
         reference: ref,
         clientId,
@@ -919,21 +935,23 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
 
     await prisma.property.update({
       where: { id: prop.id },
-      data: { status: status === 'soldée' ? 'vendu' : 'réservé' },
+      data: { type: 'vente', status: status === 'soldée' ? 'vendu' : 'réservé' },
     });
 
     for (let p = 1; p <= 4; p++) {
       const receipt = `REC-VTE-${pad(saleNum)}-${p}`;
+      const mode = PAYMENT_MODES[(saleNum + p) % PAYMENT_MODES.length];
       await prisma.payment.upsert({
         where: { receiptNo: receipt },
-        update: { saleId: sale.id },
+        update: { saleId: sale.id, operationType: mode },
         create: {
           receiptNo: receipt,
           saleId: sale.id,
           date: daysAgo(80 - saleNum * 2 - p * 4),
-          amount: Math.round(totalPaid / (5 - p + 1)) || advance,
+          amount: p === 1 ? advance : Math.round(totalPaid / (5 - p + 1)) || advance,
           nature: p === 1 ? 'Avance' : p === 4 ? 'Solde' : 'Échéance',
-          operationType: p % 2 === 0 ? 'virement' : 'cheque',
+          operationType: mode,
+          bank: mode === 'especes' ? null : MAROC_BANKS[(saleNum + p) % MAROC_BANKS.length],
           payerName: `Client ${clientIndex + 1}`,
         },
       });
@@ -952,7 +970,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   async function seedRental(clientIndex: number) {
     rentalNum++;
     const ref = `LOC-2026-${pad(rentalNum)}`;
-    const prop = propertyIds[propIdx++];
+    const prop = rentalProperties[rentalPropIdx++];
     if (!prop) return;
     const monthlyRent = 4500 + rentalNum * 280;
     const monthsPaid = (rentalNum % 5) + 2;
@@ -975,20 +993,22 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
       },
     });
 
-    await prisma.property.update({ where: { id: prop.id }, data: { status: 'loué' } });
+    await prisma.property.update({ where: { id: prop.id }, data: { type: 'location', status: 'loué' } });
 
     for (let p = 1; p <= 3; p++) {
       const receipt = `REC-LOC-${pad(rentalNum)}-${p}`;
+      const mode = PAYMENT_MODES[(rentalNum + p) % PAYMENT_MODES.length];
       await prisma.payment.upsert({
         where: { receiptNo: receipt },
-        update: { rentalId: rental.id },
+        update: { rentalId: rental.id, operationType: mode },
         create: {
           receiptNo: receipt,
           rentalId: rental.id,
           date: daysAgo(60 - rentalNum - p * 10),
           amount: monthlyRent,
-          nature: 'Loyer mensuel',
-          operationType: p % 2 === 0 ? 'virement' : 'especes',
+          nature: p === 1 ? 'Avance' : 'Loyer mensuel',
+          operationType: mode,
+          bank: mode === 'especes' ? null : MAROC_BANKS[(rentalNum + p) % MAROC_BANKS.length],
         },
       });
     }
@@ -1162,9 +1182,13 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
       const percent = isRabat
         ? refPercents[t % refPercents.length]
         : Math.min(100, Math.max(0, c.progress - 20 + (t * 7) % 40));
+      const lot = STANDARD_TRANCHE_LOTS.find((row) => row.name === TASKS[t]);
+      const phases = lot
+        ? buildStandardLotPhases(lot)
+        : [{ percent: 50, label: TASKS[t] }, { percent: 100, label: 'Validation' }];
       await prisma.workProgress.upsert({
         where: { id: `wp-${c.id}-${t}` },
-        update: { percent, tranche, groupe, etage: etage || null },
+        update: { percent, tranche, groupe, etage: etage || null, phases },
         create: {
           id: `wp-${c.id}-${t}`,
           chantierId: ch.id,
@@ -1173,6 +1197,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
           tranche,
           groupe,
           etage: etage || null,
+          phases,
         },
       });
     }
@@ -1282,11 +1307,13 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   }
 
   // Paie mensuelle seed (ouvriers au mois — période courante, à payer)
+  await prisma.workforcePayrollRecord.deleteMany({ where: { reference: { startsWith: 'MO-M-' } } });
   for (let mi = 0; mi < monthlyWorkforceIds.length; mi++) {
     const wid = monthlyWorkforceIds[mi];
     const worker = await prisma.workforce.findUnique({ where: { id: wid } });
     if (!worker) continue;
     const brut = worker.monthlySalary || 5000;
+    const monthlyRef = `MO-M-${periodYear}${pad(periodMonth, 2)}-${payrollRefSuffix(wid)}`;
     await prisma.workforcePayrollRecord.upsert({
       where: {
         workforceId_periodYear_periodMonth_chantierId_tranche: {
@@ -1298,6 +1325,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
         },
       },
       update: {
+        reference: monthlyRef,
         brut,
         netDue: brut,
         amountPaid: mi % 3 === 0 ? brut : mi % 3 === 1 ? Math.round(brut * 0.4) : 0,
@@ -1306,7 +1334,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
         paymentMode: 'virement',
       },
       create: {
-        reference: `MO-M-${pad(mi + 1, 4)}`,
+        reference: monthlyRef,
         workforceId: wid,
         periodYear,
         periodMonth,
@@ -1387,16 +1415,19 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     });
   }
 
+  await prisma.workforcePayrollRecord.deleteMany({ where: { reference: { startsWith: 'CH-M-' } } });
   for (let mi = 0; mi < monthlyChauffeurIds.length; mi++) {
     const wid = monthlyChauffeurIds[mi];
     const worker = await prisma.workforce.findUnique({ where: { id: wid } });
     if (!worker) continue;
     const brut = worker.monthlySalary || 6500;
+    const monthlyRef = `CH-M-${periodYear}${pad(periodMonth, 2)}-${payrollRefSuffix(wid)}`;
     await prisma.workforcePayrollRecord.upsert({
       where: {
         workforceId_periodYear_periodMonth_chantierId_tranche: { workforceId: wid, periodYear, periodMonth, chantierId: '', tranche: '' },
       },
       update: {
+        reference: monthlyRef,
         brut,
         netDue: brut,
         amountPaid: 0,
@@ -1405,7 +1436,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
         paymentMode: 'virement',
       },
       create: {
-        reference: `CH-M-${pad(mi + 1, 4)}`,
+        reference: monthlyRef,
         workforceId: wid,
         periodYear,
         periodMonth,
@@ -1674,6 +1705,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     { id: 'ACH-2026', prefix: 'ACH', year: 2026, value: purchaseStats.purchases },
     { id: 'COL-2026', prefix: 'COL', year: 2026, value: 8 },
     { id: 'REC-2026', prefix: 'REC', year: 2026, value: 4 },
+    { id: 'ENT-2026', prefix: 'ENT', year: 2026, value: 10 },
   ];
   for (const c of counters) {
     await prisma.counter.upsert({
@@ -1744,7 +1776,8 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   console.log('Biens            : 90');
   console.log('Ventes           : 35 (liées aux clients)');
   console.log('Locations        : 13 (liées aux clients)');
-  console.log(`Chantiers        : 5 (tranches, ${chantierExtras.subcontractors} sous-traitants, galeries photos)`);
+  console.log(`Chantiers        : 6 (tranches, ${chantierExtras.subcontractors} sous-traitants, ${chantierExtras.entreprises} entreprises, galeries)`);
+  console.log('Entreprises      : fiches ST + BET — contrats, phases, avances');
   console.log(`Pointage         : ${sessionIds.size} pointages journaliers (chantier / tranche) sur 14 jours`);
   console.log(`Ouvriers         : ${WORKER_COUNT} (affectés chantier + tranche)`);
   console.log('Chauffeurs       : 6 (+ pointages, salaires CH-*, conducteurs attitrés)');
@@ -1759,7 +1792,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   console.log(`Documents        : 30 GED + documents engins / factures achats (${demoFiles} aperçus PDF de démonstration)`);
   console.log('Bureau d\'ordre   : 20');
   console.log('Notifications    : 12');
-  console.log('Reconnus         : 4 (+ 5 mouvements caisse bureau)');
+  console.log('Reconnus         : 4 (+ 10 mouvements caisse bureau, dont chantiers)');
   console.log('\nRelancez : cd backend && npx prisma db push && npm run seed\n');
 }
 

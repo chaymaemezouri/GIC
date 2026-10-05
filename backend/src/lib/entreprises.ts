@@ -114,6 +114,25 @@ export async function deleteEntreprise(id: string) {
   await prisma.$executeRawUnsafe(`DELETE FROM Entreprise WHERE id = ?`, id);
 }
 
+export async function listSubcontractsForCompany(companyName: string) {
+  const needle = companyName.trim().toLowerCase();
+  if (!needle) return [];
+  const rows = await prisma.chantierSubcontractor.findMany({
+    include: {
+      chantier: { select: { id: true, name: true } },
+      follows: { orderBy: { sortOrder: 'asc' } },
+      payments: { orderBy: { date: 'desc' } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  return rows.filter((row) => String(row.companyName || '').trim().toLowerCase() === needle);
+}
+
+export async function entrepriseMapByName() {
+  const list = await listEntreprises();
+  return new Map(list.map((row) => [row.companyName.trim().toLowerCase(), row]));
+}
+
 export async function backfillEntreprisesFromSubcontracts() {
   const names = await prisma.chantierSubcontractor.findMany({
     select: { companyName: true, phone: true },
