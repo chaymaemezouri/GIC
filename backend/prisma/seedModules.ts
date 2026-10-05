@@ -4,6 +4,7 @@ import type { Engin, Prisma, PrismaClient } from '@prisma/client';
 import { normalizeLines, summarizeLines, recomputePurchase, syncPaymentMovement, round2 } from '../src/lib/purchaseWorkflow.js';
 import { removeAutomaticMovement, syncEnginExpenseMovement } from '../src/lib/cashSync.js';
 import { inclusiveDays, plannedCostOf, refreshEnginStatus, suggestAssignmentCost } from '../src/lib/enginCosts.js';
+import { stockSnapshot } from '../src/lib/materielStock.js';
 
 export type SeedChantier = {
   id: string;
@@ -651,6 +652,118 @@ const MAINT_TYPES: Array<{ type: string; label: string }> = [
 ];
 const USAGE_REMARKS = ['Travaux selon planning', 'Intervention demandée par le chef de chantier', 'Arrêt 1 h pour ravitaillement', 'Météo favorable — cadence normale', 'Travail en double poste'];
 
+type MaterielSiteMove = {
+  type: 'affectation' | 'desaffectation' | 'transfert' | 'maintenance' | 'retour';
+  q: number;
+  days: number;
+  tr?: number;
+  fromTr?: number;
+  remark: string;
+};
+
+/** Quantités dépôt + mouvements chantier (onglet Matériel du chantier). */
+const MATERIEL_SITE: Record<string, { qty: number; moves: MaterielSiteMove[] }> = {
+  'MAT-2026-000001': {
+    qty: 4,
+    moves: [
+      { type: 'affectation', q: 2, days: 55, tr: 0, remark: 'Sortie magasin — gâchage mortier T1' },
+      { type: 'affectation', q: 1, days: 28, tr: 1, remark: 'Renfort tranche 2' },
+    ],
+  },
+  'MAT-2026-000002': {
+    qty: 2,
+    moves: [
+      { type: 'affectation', q: 1, days: 48, tr: 0, remark: 'Alimentation base vie' },
+    ],
+  },
+  'MAT-2026-000003': {
+    qty: 2,
+    moves: [
+      { type: 'affectation', q: 1, days: 18, tr: 1, remark: 'Piquage et démolition ponctuelle' },
+    ],
+  },
+  'MAT-2026-000004': {
+    qty: 8,
+    moves: [
+      { type: 'affectation', q: 6, days: 42, tr: 0, remark: 'Coulage voiles et poteaux' },
+      { type: 'transfert', q: 2, days: 12, fromTr: 0, tr: 1, remark: 'Répartition vers tranche 2' },
+    ],
+  },
+  'MAT-2026-000005': {
+    qty: 3,
+    moves: [
+      { type: 'affectation', q: 2, days: 36, tr: 2, remark: 'Compactage remblais périphériques' },
+    ],
+  },
+  'MAT-2026-000006': {
+    qty: 2,
+    moves: [
+      { type: 'affectation', q: 1, days: 80, tr: 1, remark: 'Reprise de dalle' },
+      { type: 'desaffectation', q: 1, days: 42, fromTr: 1, remark: 'Retour atelier — moteur grillé' },
+      { type: 'maintenance', q: 1, days: 38, remark: 'Diagnostic Hilti — hors service' },
+    ],
+  },
+  'MAT-2026-000007': {
+    qty: 3,
+    moves: [
+      { type: 'affectation', q: 2, days: 14, tr: 2, remark: 'Sciage joints et raccordements' },
+    ],
+  },
+  'MAT-2026-000008': {
+    qty: 40,
+    moves: [
+      { type: 'affectation', q: 28, days: 50, tr: 1, remark: 'Montage échafaudage façade bloc B' },
+      { type: 'transfert', q: 8, days: 10, fromTr: 1, tr: 2, remark: 'Déplacement vers villas jumelées' },
+    ],
+  },
+  'MAT-2026-000009': {
+    qty: 18,
+    moves: [
+      { type: 'affectation', q: 12, days: 70, tr: 0, remark: 'Banches voiles R+2' },
+      { type: 'transfert', q: 4, days: 20, fromTr: 0, tr: 1, remark: 'Suite coffrage tranche 2' },
+      { type: 'desaffectation', q: 2, days: 6, fromTr: 0, remark: 'Retour magasin — surplus' },
+    ],
+  },
+};
+
+async function seedMaterielSiteStock(ctx: SeedContext, enginId: string, code: string | null) {
+  const chantier = ctx.chantiers[0];
+  if (!chantier) return;
+  const plan = (code && MATERIEL_SITE[code]) || {
+    qty: 4,
+    moves: [{ type: 'affectation' as const, q: 2, days: 21, tr: 0, remark: 'Affectation chantier Atlas' }],
+  };
+  const tranches = chantier.tranches;
+  const place = (i?: number) => (tranches.length ? tranches[(i ?? 0) % tranches.length] : null);
+  await ctx.prisma.materielMovement.deleteMany({ where: { enginId } });
+  await ctx.prisma.engin.update({ where: { id: enginId }, data: { quantity: plan.qty } });
+  const created: Array<{ movementType: string; quantity: number; chantierId?: string | null; tranche?: string | null; fromChantierId?: string | null; fromTranche?: string | null }> = [];
+  for (let i = 0; i < plan.moves.length; i++) {
+    const m = plan.moves[i];
+    const row = {
+      movementType: m.type,
+      quantity: m.q,
+      date: utcDaysAgo(m.days),
+      remark: m.remark,
+      chantierId: m.type === 'desaffectation' || m.type === 'maintenance' ? null : chantier.id,
+      tranche: m.type === 'desaffectation' || m.type === 'maintenance' ? null : place(m.tr),
+      fromChantierId: m.type === 'desaffectation' || m.type === 'transfert' ? chantier.id : null,
+      fromTranche: m.type === 'desaffectation' || m.type === 'transfert' ? place(m.fromTr) : null,
+    };
+    if (m.type === 'maintenance' && !row.fromChantierId) {
+      /* depuis le dépôt */
+    }
+    created.push(row);
+    const snap = stockSnapshot(plan.qty, created);
+    if (!snap.ok) throw new Error(`${code || enginId} mouvement ${i + 1} : ${snap.message}`);
+    await ctx.prisma.materielMovement.create({
+      data: { id: `mm-${code || enginId.slice(-8)}-${i + 1}`, enginId, ...row },
+    });
+  }
+  const final = stockSnapshot(plan.qty, created);
+  if (final.ok) await ctx.prisma.engin.update({ where: { id: enginId }, data: { quantity: final.owned } });
+}
+
 async function resetEnginActivity(ctx: SeedContext, enginId: string) {
   const { prisma } = ctx;
   const [fuel, maint, exp] = await Promise.all([
@@ -663,6 +776,7 @@ async function resetEnginActivity(ctx: SeedContext, enginId: string) {
   for (const e of exp) await removeAutomaticMovement('engin_depense', e.id);
   await prisma.enginUsage.deleteMany({ where: { enginId } });
   await prisma.enginAssignment.deleteMany({ where: { enginId } });
+  await prisma.materielMovement.deleteMany({ where: { enginId } });
   await prisma.enginExpense.deleteMany({ where: { enginId } });
   await prisma.fuelLog.deleteMany({ where: { enginId } });
   await prisma.document.deleteMany({
@@ -748,6 +862,7 @@ export async function seedFleet(ctx: SeedContext) {
       gpsNumber: f.kind === 'engin' ? `GPS-${pad(idx + 1, 4)}` : null,
       gpsMountDate: f.kind === 'engin' ? (acquisitionDate ? addDays(acquisitionDate, 10) : utcDaysAgo(rental?.startDays ?? 0)) : null,
       workPassport: f.kind === 'engin' ? `PO-${pad(idx + 1, 4)}` : null,
+      quantity: f.kind === 'materiel' ? (MATERIEL_SITE[f.code]?.qty ?? 4) : 1,
       insuranceExpiry,
       vignetteExpiry: f.mat ? utcDaysAgo(-95 + idx) : null,
       visitExpiry,
@@ -790,8 +905,9 @@ export async function seedFleet(ctx: SeedContext) {
     const usageRows: Prisma.EnginUsageCreateManyInput[] = [];
     for (let k = 0; k < f.plans.length; k++) {
       const p = f.plans[k];
-      const chantier = chantiers[p.ch];
-      const tranche = chantier.tranches.length ? chantier.tranches[(p.tr ?? 0) % chantier.tranches.length] : null;
+      const chantier = chantiers[0];
+      if (!chantier) continue;
+      const tranche = chantier.tranches.length ? chantier.tranches[(p.tr ?? k) % chantier.tranches.length] : null;
       const startDate = utcDaysAgo(p.start);
       const endDate = p.end == null ? null : utcDaysAgo(p.end);
       const s = suggestAssignmentCost(engin, startDate);
@@ -1071,7 +1187,7 @@ export async function seedFleet(ctx: SeedContext) {
             enginId: engin.id,
             date,
             driverName: driver?.name ?? 'Chauffeur du loueur',
-            mission: at ? `${at.chantier.name} — ${f.plans.find((p) => chantiers[p.ch].id === at.chantier.id)?.remark ?? 'Travaux'}` : 'Déplacement parc',
+            mission: at ? `${at.chantier.name} — ${f.designation}` : 'Déplacement parc',
             usage: f.groupe,
             chantierId: at?.chantier.id ?? null,
             tranche: at?.tranche ?? null,
@@ -1145,6 +1261,10 @@ export async function seedFleet(ctx: SeedContext) {
       stats.documents++;
     }
 
+    if (f.kind === 'materiel') {
+      await seedMaterielSiteStock(ctx, engin.id, f.code);
+    }
+
     await refreshEnginStatus(engin.id);
   }
 
@@ -1196,7 +1316,7 @@ export async function seedChantierExtras(ctx: SeedContext) {
     }
 
     const progressRows = await prisma.workProgress.findMany({ where: { chantierId: ch.id } });
-    for (let k = 0; k < 5; k++) {
+    for (let k = 0; k < SUBCONTRACTORS.length; k++) {
       const s = SUBCONTRACTORS[(c * 3 + k) % SUBCONTRACTORS.length];
       const id = `sub-${ch.id}-${k + 1}`;
       const task = progressRows.find((row) => row.taskName === s.corpsEtat)

@@ -36,7 +36,7 @@ const LIST_GETS = [
   '/api/chantiers/stats',
   '/api/chantiers/workforce?limit=20',
   '/api/chantiers/pointage?limit=20',
-  '/api/chantiers/pointage/sessions?chantierId=demo-chantier',
+  '/api/chantiers/pointage/sessions?chantierId=chant-atlas',
   '/api/chantiers/avancement',
   '/api/chantiers/salaries?limit=20',
   '/api/chantiers/tasks/standard',

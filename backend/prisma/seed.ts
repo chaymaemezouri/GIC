@@ -58,19 +58,18 @@ const MAROC_BANKS = [
 ] as const;
 
 const PROJECTS = [
-  { id: 'demo-project', name: 'Résidence Atlas', city: 'Casablanca', desc: 'Programme haut standing — Maarif & Sidi Maarouf' },
-  { id: 'proj-rabat', name: 'Les Jardins de Rabat', city: 'Rabat', desc: 'Villas et appartements — Hay Riad' },
-  { id: 'proj-tanger', name: 'Marina View', city: 'Tanger', desc: 'Front de mer — Malabata' },
-  { id: 'proj-marrakech', name: 'Oasis Marrakech', city: 'Marrakech', desc: 'Résidence golf — Palmeraie' },
-  { id: 'proj-fes', name: 'Horizon Fès', city: 'Fès', desc: 'Lotissement premium — Route Immouzer' },
-  { id: 'proj-agadir', name: 'Baie d\'Agadir', city: 'Agadir', desc: 'Appartements vue mer — Founty' },
+  {
+    id: 'proj-atlas',
+    name: 'Résidence Atlas',
+    city: 'Casablanca',
+    desc: 'Programme haut standing — Maarif & Sidi Maarouf · 3 blocs, 48 lots, commercialisation et chantier actifs',
+  },
 ];
 
 const PROPERTY_SALE_STATUSES = ['disponible', 'disponible', 'réservé', 'vendu'] as const;
 const PROPERTY_RENT_STATUSES = ['disponible', 'disponible', 'réservé', 'loué'] as const;
 const PAYMENT_MODES = ['especes', 'virement', 'cheque'] as const;
 
-const WORKER_CATEGORIES = ['Maçon', 'Manœuvre', 'Chef d\'équipe', 'Électricien', 'Plombier', 'Coffreur', 'Peintre', 'Ferrailleur'];
 const CHAUFFEUR_CATEGORY = 'Chauffeur';
 /** Ouvriers générés (≈ 1/5 payés au mois, hors pointage) */
 const WORKER_COUNT = 60;
@@ -87,19 +86,20 @@ const SUPPLIERS = [
 ];
 
 const CHANTIERS = [
-  { id: 'demo-chantier', name: 'Chantier Atlas Bloc A', city: 'Casablanca', progress: 35, workers: 12, manager: 'Hassan Tazi', budget: 3200000, projectId: 'demo-project', tranches: ['Tranche 1', 'Tranche 2'] },
-  { id: 'chant-rabat', name: 'Résidence Al Bahia', city: 'Tanger', progress: 74, workers: 87, manager: 'Mohamed El Amrani', budget: 4800000, projectId: 'proj-rabat', tranches: ['Tranche 1', 'Tranche 2'] },
-  { id: 'chant-tanger', name: 'Marina View — Gros œuvre', city: 'Tanger', progress: 48, workers: 22, manager: 'Omar Fassi', budget: 5500000, projectId: 'proj-tanger', tranches: ['Tranche 1', 'Tranche 2', 'Tranche 3'] },
-  { id: 'chant-marrakech', name: 'Oasis Marrakech Phase 1', city: 'Marrakech', progress: 78, workers: 15, manager: 'Nadia Cherkaoui', budget: 4100000, projectId: 'proj-marrakech', tranches: ['Tranche 1', 'Tranche 2'] },
-  { id: 'chant-fes', name: 'Horizon Fès — VRD', city: 'Fès', progress: 15, workers: 8, manager: 'Youssef Alaoui', budget: 1800000, projectId: 'proj-fes', tranches: ['Tranche 1'] },
-  { id: 'chant-agadir', name: 'Baie d\'Agadir — Gros œuvre', city: 'Agadir', progress: 22, workers: 14, manager: 'Hamza Idrissi', budget: 2600000, projectId: 'proj-agadir', tranches: ['Tranche 1', 'Tranche 2'] },
+  {
+    id: 'chant-atlas',
+    name: 'Résidence Atlas — Gros œuvre',
+    city: 'Casablanca',
+    progress: 58,
+    workers: 60,
+    manager: 'Karim Tazi',
+    budget: 8_500_000,
+    projectId: 'proj-atlas',
+    tranches: ['Tranche 1', 'Tranche 2', 'Tranche 3'],
+  },
 ];
 
-const TASKS = [
-  'Terrassement', 'Fondations', 'Gros œuvre', 'Coffrage', 'Ferraillage', 'Coulage béton',
-  'Électricité', 'Plomberie', 'Menuiserie', 'Carrelage', 'Peinture', 'Faux plafonds',
-  'Étanchéité', 'Isolation', 'Revêtement sol', 'Clôture', 'VRD', 'Aménagement paysager', 'Nettoyage fin',
-];
+const WORKER_CATEGORIES = ['Maçon', 'Manœuvre', 'Chef d\'équipe', 'Électricien', 'Plombier', 'Coffreur', 'Peintre', 'Ferrailleur'];
 
 function daysAgo(n: number) {
   const d = new Date();
@@ -121,10 +121,11 @@ function computeWorkerNet(
   return { brut, advances, bonuses, netDue: brut + bonuses - advances };
 }
 
-/** Suffixe stable par ouvrier (worker-12 → W0012, demo-* → W0001), indépendant de l'ordre de tri */
+/** Suffixe stable : worker-12 → W0012, chauffeur-2 → C0002 */
 function payrollRefSuffix(workforceId: string) {
+  const kind = workforceId.startsWith('chauffeur') ? 'C' : workforceId.startsWith('agent') ? 'A' : 'W';
   const n = Number(workforceId.match(/-(\d+)$/)?.[1] ?? 1);
-  return `W${pad(n, 4)}`;
+  return `${kind}${pad(n, 4)}`;
 }
 
 async function seedWorkforcePayrollBatch(
@@ -207,9 +208,9 @@ async function seedFinanceLedger() {
   const pointageTo = new Date();
   pointageTo.setHours(23, 59, 59, 999);
 
-  // Supprimer les anciens mouvements manuels (legacy seed)
+  // Uniquement les mouvements manuels du seed (ids mv-*), jamais la caisse production
   await prisma.cashMovement.deleteMany({
-    where: { OR: [{ id: { startsWith: 'mv-' } }, { isAutomatic: false, sourceType: null }] },
+    where: { id: { startsWith: 'mv-' } },
   });
 
   // Encaissements ventes/locations → crédit caisse
@@ -228,7 +229,7 @@ async function seedFinanceLedger() {
 
   // Main-d'œuvre — bulletins de paie variés (payé / partiel / en attente), hors chauffeurs
   const workers = await prisma.workforce.findMany({
-    where: { isActive: true, NOT: { category: CHAUFFEUR_CATEGORY } },
+    where: { isActive: true, id: { startsWith: 'worker-' }, NOT: { category: CHAUFFEUR_CATEGORY } },
     orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     take: 20,
   });
@@ -252,7 +253,7 @@ async function seedFinanceLedger() {
 
   // Chauffeurs — bulletins de paie (pointage validé → salaires → décaissements caisse)
   const chauffeurs = await prisma.workforce.findMany({
-    where: { isActive: true, category: CHAUFFEUR_CATEGORY },
+    where: { isActive: true, category: CHAUFFEUR_CATEGORY, id: { startsWith: 'chauffeur-' } },
     orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
   });
 
@@ -668,47 +669,6 @@ async function main() {
       create: { ...r, isActive: true },
     });
   }
-  const officeMoves = [
-    { id: 'ocm-1', direction: 'entree', amount: 5000, purpose: 'alimentation', designation: 'Alimentation caisse bureau', reconnuId: null as string | null, reconnuName: null as string | null, days: 14 },
-    { id: 'ocm-2', direction: 'sortie', amount: 350, purpose: 'travail', designation: 'Nettoyage bureaux', reconnuId: 'rec-fatima', reconnuName: null, days: 10 },
-    { id: 'ocm-3', direction: 'sortie', amount: 220, purpose: 'aleatoire', designation: 'Fournitures bureau', reconnuId: 'rec-hassan', reconnuName: null, days: 7 },
-    { id: 'ocm-4', direction: 'sortie', amount: 800, purpose: 'chantier', designation: 'Avance courses chantier', reconnuId: 'rec-sara', reconnuName: null, days: 3 },
-    { id: 'ocm-5', direction: 'entree', amount: 150, purpose: 'alimentation', designation: 'Rendu monnaies', reconnuId: 'rec-hassan', reconnuName: null, days: 1 },
-    { id: 'ocm-6', direction: 'sortie', amount: 180, purpose: 'aleatoire', designation: 'Taxi urgent', reconnuId: null, reconnuName: 'Ahmed Chauffeur (externe)', days: 2 },
-    { id: 'ocm-7', direction: 'sortie', amount: 95, purpose: 'travail', designation: 'Courses pharmacie', reconnuId: null, reconnuName: 'Laila Bensaid', days: 0 },
-    { id: 'ocm-8', direction: 'sortie', amount: 1200, purpose: 'chantier', designation: 'Avance caisse chantier Atlas', reconnuId: 'rec-sara', reconnuName: null, days: 5, chantierId: 'demo-chantier' },
-    { id: 'ocm-9', direction: 'sortie', amount: 450, purpose: 'chantier', designation: 'Petit matériel Horizon Fès', reconnuId: 'rec-youssef', reconnuName: null, days: 4, chantierId: 'chant-fes' },
-    { id: 'ocm-10', direction: 'entree', amount: 2000, purpose: 'alimentation', designation: 'Renfort caisse bureau', reconnuId: null, reconnuName: null, days: 6, chantierId: null as string | null },
-  ];
-  for (const m of officeMoves) {
-    await prisma.officeCashMovement.upsert({
-      where: { id: m.id },
-      update: {
-        direction: m.direction,
-        amount: m.amount,
-        purpose: m.purpose,
-        designation: m.designation,
-        workLabel: m.purpose === 'travail' ? 'Entretien' : null,
-        reconnuId: m.reconnuId,
-        reconnuName: m.reconnuName,
-        chantierId: 'chantierId' in m ? m.chantierId : null,
-        date: daysAgo(m.days),
-      },
-      create: {
-        id: m.id,
-        direction: m.direction,
-        amount: m.amount,
-        purpose: m.purpose,
-        designation: m.designation,
-        workLabel: m.purpose === 'travail' ? 'Entretien' : null,
-        reconnuId: m.reconnuId,
-        reconnuName: m.reconnuName,
-        chantierId: 'chantierId' in m ? m.chantierId : null,
-        date: daysAgo(m.days),
-        remark: null,
-      },
-    });
-  }
 
   // Location + projets + hiérarchie
   const location = await prisma.location.upsert({
@@ -740,7 +700,7 @@ async function main() {
       create: { id: `tr-${p.id}`, name: 'Tranche 1', projectId: proj.id },
     });
 
-    for (let b = 1; b <= 2; b++) {
+    for (let b = 1; b <= 3; b++) {
       const bloc = await prisma.bloc.upsert({
         where: { id: `bl-${p.id}-${b}` },
         update: {},
@@ -766,7 +726,7 @@ async function main() {
   // Agents
   const agentIds: string[] = [];
   for (let i = 1; i <= 6; i++) {
-    const id = i === 1 ? 'demo-agent' : `agent-${i}`;
+    const id = `agent-${i}`;
     const agent = await prisma.agent.upsert({
       where: { id },
       update: {},
@@ -861,16 +821,16 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   const propertyIds: { id: string; status: string; price: number; projectId: string; type: 'vente' | 'location' }[] = [];
   let bienNum = 0;
   for (const proj of PROJECTS) {
-    for (let i = 1; i <= 15; i++) {
+    for (let i = 1; i <= 48; i++) {
       bienNum++;
       const ref = `BIEN-2026-${pad(bienNum)}`;
-      const type: 'vente' | 'location' = bienNum % 3 === 0 ? 'location' : 'vente';
+      const type: 'vente' | 'location' = i <= 35 ? 'vente' : 'location';
       const status = type === 'location'
         ? randomItem(PROPERTY_RENT_STATUSES, bienNum)
         : randomItem(PROPERTY_SALE_STATUSES, bienNum);
       const surface = 55 + (bienNum % 8) * 12;
       const price = Math.round((800000 + bienNum * 45000) / 1000) * 1000;
-      const floorId = `fl-${proj.id}-${(i % 2) + 1}-${(i % 4) + 1}`;
+      const floorId = `fl-${proj.id}-${(i % 3) + 1}-${(i % 4) + 1}`;
 
       const prop = await prisma.property.upsert({
         where: { reference: ref },
@@ -1173,73 +1133,96 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     });
     chantierIds.push(ch.id);
 
-    for (let t = 0; t < TASKS.length; t++) {
-      const isRabat = c.id === 'chant-rabat';
-      const tranche = c.tranches.length ? c.tranches[Math.floor((t * c.tranches.length) / TASKS.length)] : null;
-      const groupe = isRabat ? (t % 2 === 0 ? 'GH1' : 'GH2') : `Groupe ${(t % 3) + 1}`;
-      const etage = isRabat && t % 3 === 0 ? ['RDC', 'Étage 1', 'Étage 2', 'Étage 3'][t % 4] : undefined;
-      const refPercents = [100, 92, 78, 73, 65, 58, 47, 32, 20, 8];
-      const percent = isRabat
-        ? refPercents[t % refPercents.length]
-        : Math.min(100, Math.max(0, c.progress - 20 + (t * 7) % 40));
-      const lot = STANDARD_TRANCHE_LOTS.find((row) => row.name === TASKS[t]);
-      const phases = lot
-        ? buildStandardLotPhases(lot)
-        : [{ percent: 50, label: TASKS[t] }, { percent: 100, label: 'Validation' }];
-      await prisma.workProgress.upsert({
-        where: { id: `wp-${c.id}-${t}` },
-        update: { percent, tranche, groupe, etage: etage || null, phases },
-        create: {
-          id: `wp-${c.id}-${t}`,
-          chantierId: ch.id,
-          taskName: TASKS[t],
-          percent,
-          tranche,
-          groupe,
-          etage: etage || null,
-          phases,
-        },
-      });
+    const chefUser = await prisma.user.findUnique({ where: { email: 'chef@gic.ma' }, select: { id: true } });
+    if (chefUser) {
+      await prisma.chantier.update({ where: { id: ch.id }, data: { managerUserId: chefUser.id } });
     }
 
-    if (c.id === 'demo-chantier') {
-      await prisma.chantierCamera.upsert({
-        where: { id: 'cam-atlas-1' },
-        update: {},
-        create: {
-          id: 'cam-atlas-1',
-          chantierId: ch.id,
-          name: 'Entrée principale',
-          zone: 'Portail',
-          url: 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=800&q=80',
-        },
-      });
-      await prisma.chantierCamera.upsert({
-        where: { id: 'cam-atlas-2' },
-        update: {},
-        create: {
-          id: 'cam-atlas-2',
-          chantierId: ch.id,
-          name: 'Zone gros œuvre',
-          zone: 'Bloc A — RDC',
-          url: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=800&q=80',
-        },
-      });
+    let lotIndex = 0;
+    for (const trancheName of c.tranches) {
+      for (const lot of STANDARD_TRANCHE_LOTS) {
+        const phases = buildStandardLotPhases(lot);
+        const percent = Math.min(100, Math.max(8, 92 - lotIndex * 4 - c.tranches.indexOf(trancheName) * 8));
+        const wpId = `wp-${c.id}-${trancheName.replace(/\s+/g, '')}-${lot.name.replace(/\s+/g, '')}`.slice(0, 80);
+        const groupe = `Groupe ${String.fromCharCode(65 + (lotIndex % 4))}`;
+        const etage = ['RDC', 'Étage 1', 'Étage 2', 'Étage 3'][lotIndex % 4];
+        await prisma.workProgress.upsert({
+          where: { id: wpId },
+          update: { percent, tranche: trancheName, groupe, etage, phases, taskName: lot.name },
+          create: {
+            id: wpId,
+            chantierId: ch.id,
+            taskName: lot.name,
+            percent,
+            tranche: trancheName,
+            groupe,
+            etage,
+            phases,
+          },
+        });
+        lotIndex++;
+      }
     }
-    if (c.id === 'chant-rabat') {
+
+    const cameras = [
+      { id: 'cam-atlas-1', name: 'Entrée principale', zone: 'Portail', url: 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=800&q=80' },
+      { id: 'cam-atlas-2', name: 'Zone gros œuvre', zone: 'Bloc A — RDC', url: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=800&q=80' },
+      { id: 'cam-atlas-3', name: 'Vue d’ensemble grue', zone: 'Grue principale', url: 'https://images.unsplash.com/photo-1590856029826-c752a731c597?w=800&q=80' },
+    ];
+    for (const cam of cameras) {
       await prisma.chantierCamera.upsert({
-        where: { id: 'cam-rabat-1' },
-        update: {},
-        create: {
-          id: 'cam-rabat-1',
-          chantierId: ch.id,
-          name: 'Vue d\'ensemble',
-          zone: 'Grue principale',
-          url: 'https://images.unsplash.com/photo-1590856029826-c752a731c597?w=800&q=80',
-        },
+        where: { id: cam.id },
+        update: { chantierId: ch.id, name: cam.name, zone: cam.zone, url: cam.url },
+        create: { ...cam, chantierId: ch.id },
       });
     }
   }
+
+  const officeMoves = [
+    { id: 'ocm-1', direction: 'entree', amount: 5000, purpose: 'alimentation', designation: 'Alimentation caisse bureau', reconnuId: null as string | null, reconnuName: null as string | null, days: 14 },
+    { id: 'ocm-2', direction: 'sortie', amount: 350, purpose: 'travail', designation: 'Nettoyage bureaux', reconnuId: 'rec-fatima', reconnuName: null, days: 10 },
+    { id: 'ocm-3', direction: 'sortie', amount: 220, purpose: 'aleatoire', designation: 'Fournitures bureau', reconnuId: 'rec-hassan', reconnuName: null, days: 7 },
+    { id: 'ocm-4', direction: 'sortie', amount: 800, purpose: 'chantier', designation: 'Avance courses chantier', reconnuId: 'rec-sara', reconnuName: null, days: 3 },
+    { id: 'ocm-5', direction: 'entree', amount: 150, purpose: 'alimentation', designation: 'Rendu monnaies', reconnuId: 'rec-hassan', reconnuName: null, days: 1 },
+    { id: 'ocm-6', direction: 'sortie', amount: 180, purpose: 'aleatoire', designation: 'Taxi urgent', reconnuId: null, reconnuName: 'Ahmed Chauffeur (externe)', days: 2 },
+    { id: 'ocm-7', direction: 'sortie', amount: 95, purpose: 'travail', designation: 'Courses pharmacie', reconnuId: null, reconnuName: 'Laila Bensaid', days: 0 },
+    { id: 'ocm-8', direction: 'sortie', amount: 1200, purpose: 'chantier', designation: 'Avance caisse chantier Atlas', reconnuId: 'rec-sara', reconnuName: null, days: 5, chantierId: 'chant-atlas' },
+    { id: 'ocm-9', direction: 'sortie', amount: 450, purpose: 'chantier', designation: 'Petit matériel base vie Atlas', reconnuId: 'rec-youssef', reconnuName: null, days: 4, chantierId: 'chant-atlas' },
+    { id: 'ocm-10', direction: 'entree', amount: 2000, purpose: 'alimentation', designation: 'Renfort caisse bureau', reconnuId: null, reconnuName: null, days: 6, chantierId: null as string | null },
+  ];
+  for (const m of officeMoves) {
+    await prisma.officeCashMovement.upsert({
+      where: { id: m.id },
+      update: {
+        direction: m.direction,
+        amount: m.amount,
+        purpose: m.purpose,
+        designation: m.designation,
+        workLabel: m.purpose === 'travail' ? 'Entretien' : null,
+        reconnuId: m.reconnuId,
+        reconnuName: m.reconnuName,
+        chantierId: 'chantierId' in m ? m.chantierId : null,
+        date: daysAgo(m.days),
+      },
+      create: {
+        id: m.id,
+        direction: m.direction,
+        amount: m.amount,
+        purpose: m.purpose,
+        designation: m.designation,
+        workLabel: m.purpose === 'travail' ? 'Entretien' : null,
+        reconnuId: m.reconnuId,
+        reconnuName: m.reconnuName,
+        chantierId: 'chantierId' in m ? m.chantierId : null,
+        date: daysAgo(m.days),
+        remark: null,
+      },
+    });
+  }
+
+  // Pas de wipe : le seed est additif (production conservée). Atlas est upsert.
+
+  // Affectation chantier / tranche de chaque ouvrier — utilisée pour les pointages journaliers
 
   // Affectation chantier / tranche de chaque ouvrier — utilisée pour les pointages journaliers
   const placement = new Map<string, { chantierId: string; tranche: string | null }>();
@@ -1254,7 +1237,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   const workforceIds: string[] = [];
   const monthlyWorkforceIds: string[] = [];
   for (let i = 1; i <= WORKER_COUNT; i++) {
-    const id = i === 1 ? 'demo-worker' : `worker-${i}`;
+    const id = `worker-${i}`;
     const isMonthly = i % 5 === 0;
     const bankName = isMonthly ? MAROC_BANKS[i % MAROC_BANKS.length] : null;
     const rib = isMonthly ? `007${pad(780000000 + i * 1111, 21)}`.slice(0, 24) : null;
@@ -1357,7 +1340,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   const chauffeurNames: string[] = [];
   const monthlyChauffeurIds: string[] = [];
   for (let i = 1; i <= 6; i++) {
-    const id = i === 1 ? 'demo-chauffeur' : `chauffeur-${i}`;
+    const id = `chauffeur-${i}`;
     const firstName = randomItem(FIRST_NAMES, i + 40);
     const lastName = randomItem(LAST_NAMES, i + 35);
     const isMonthly = i === 2 || i === 5;
@@ -1376,10 +1359,10 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
       },
       create: {
         id,
-        reference: `CH-${pad(i, 4)}`,
+        reference: `CHF-${pad(i, 4)}`,
         firstName,
         lastName,
-        cin: `C${pad(200000 + i, 6)}`,
+        cin: `CH${pad(900000 + i, 6)}`,
         phone1: `06${pad(50000000 + i * 44444, 8)}`.slice(0, 10),
         category: CHAUFFEUR_CATEGORY,
         groupe: i <= 3 ? 'Transport A' : 'Transport B',
@@ -1645,7 +1628,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     { title: 'Pointage du jour', message: 'Validez les pointages avant 18h', type: 'chantier', link: '/pointage' },
     { title: 'Engin en maintenance', message: 'JCB Mini-pelle — maintenance en cours', type: 'alert', link: '/engins' },
     { title: 'Nouveau client', message: 'Un prospect a été converti en acheteur', type: 'success', link: '/clients' },
-    { title: 'Chantier Rabat', message: 'Avancement 62 % — objectif mensuel atteint', type: 'chantier', link: '/chantiers/chant-rabat' },
+    { title: 'Chantier Atlas', message: 'Avancement 58 % — lots et sous-traitance à jour', type: 'chantier', link: '/chantiers/chant-atlas' },
     { title: 'Location à échéance', message: '2 baux arrivent à terme ce mois', type: 'warning', link: '/locations' },
     { title: 'Devis fournisseur', message: 'Béton Atlas a déposé un nouveau devis', type: 'achat', link: '/achats' },
     { title: 'Mouvement de caisse', message: 'Solde caisse principale mis à jour', type: 'finance', link: '/balance' },
@@ -1698,7 +1681,7 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   // Compteurs
   const counters = [
     { id: 'CLI-2026', prefix: 'CLI', year: 2026, value: 45 },
-    { id: 'BIEN-2026', prefix: 'BIEN', year: 2026, value: 90 },
+    { id: 'BIEN-2026', prefix: 'BIEN', year: 2026, value: 48 },
     { id: 'VTE-2026', prefix: 'VTE', year: 2026, value: 35 },
     { id: 'LOC-2026', prefix: 'LOC', year: 2026, value: 13 },
     { id: 'FRN-2026', prefix: 'FRN', year: 2026, value: 8 },
@@ -1772,11 +1755,11 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
   console.log('Équipe interne   : 8 collaborateurs — paie mensuelle/hebdo/journalière/trimestrielle');
   console.log('Salaires         : MO (/salaires) + équipe interne (/salaires-equipe-interne) séparés');
   console.log('Clients          : 45 (fiches complètes : ventes, locations, docs, mandants, agent, historique)');
-  console.log('Projets          : 6 (+ hiérarchie tranches/blocs/lots/étages)');
-  console.log('Biens            : 90');
+  console.log('Projets          : 1 (Résidence Atlas — 3 blocs, 48 lots, ventes + locations)');
+  console.log('Biens            : 48');
   console.log('Ventes           : 35 (liées aux clients)');
   console.log('Locations        : 13 (liées aux clients)');
-  console.log(`Chantiers        : 6 (tranches, ${chantierExtras.subcontractors} sous-traitants, ${chantierExtras.entreprises} entreprises, galeries)`);
+  console.log(`Chantiers        : 1 (Résidence Atlas — Gros œuvre : ${chantierExtras.subcontractors} sous-traitants, ${chantierExtras.entreprises} entreprises, 3 tranches, lots complets)`);
   console.log('Entreprises      : fiches ST + BET — contrats, phases, avances');
   console.log(`Pointage         : ${sessionIds.size} pointages journaliers (chantier / tranche) sur 14 jours`);
   console.log(`Ouvriers         : ${WORKER_COUNT} (affectés chantier + tranche)`);
