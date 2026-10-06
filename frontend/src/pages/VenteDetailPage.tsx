@@ -6,7 +6,7 @@ import {
   ArrowLeft, Pencil, Ban, Printer, Wallet, ExternalLink, FileText, Home, User, Building2,
   Info, Calendar, History, Upload, Trash2,
 } from 'lucide-react';
-import { api, fetchClientList, fetchDropdownOptions, fetchPropertyList, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
+import { api, fetchClientList, fetchPropertyList, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
 import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th,
   PageBackLink,
@@ -45,7 +45,6 @@ export default function VenteDetailPage() {
   const [docUploading, setDocUploading] = useState(false);
   const [clients, setClients] = useState<any[]>([]);
   const [properties, setProperties] = useState<any[]>([]);
-  const [paymentNatures, setPaymentNatures] = useState<{ value: string; label?: string }[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
@@ -58,6 +57,32 @@ export default function VenteDetailPage() {
   const [createNewSale, setCreateNewSale] = useState(false);
   const [form, setForm] = useState<SaleFormData>(emptySaleForm());
   const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null as File | null });
+
+  function roundMad(n: number) {
+    return Math.round(Number(n || 0) * 100) / 100;
+  }
+
+  function openPayModal() {
+    if (!sale) return;
+    setPayForm({
+      amount: '',
+      operationType: 'especes',
+      payerName: '',
+      bank: '',
+      nature: 'acompte',
+      proof: null,
+    });
+    setPayOpen(true);
+  }
+
+  function changePayNature(nature: string) {
+    const reste = sale ? roundMad(Math.max(0, Number(sale.remaining || 0))) : 0;
+    setPayForm((prev) => ({
+      ...prev,
+      nature,
+      amount: nature === 'solde' && reste > 0 ? String(reste) : nature === 'acompte' ? '' : prev.amount,
+    }));
+  }
 
   function load() {
     if (!id) return;
@@ -79,7 +104,6 @@ export default function VenteDetailPage() {
     load();
     fetchClientList().then(setClients);
     fetchPropertyList().then(setProperties);
-    fetchDropdownOptions('payment_nature').then(setPaymentNatures).catch(() => setPaymentNatures([]));
   }, [id]);
 
   useEffect(() => {
@@ -150,10 +174,21 @@ export default function VenteDetailPage() {
 
   async function addPayment(e: React.FormEvent) {
     e.preventDefault();
+    if (!sale) return;
+    const reste = roundMad(Math.max(0, Number(sale.remaining || 0)));
+    const amount = payForm.nature === 'solde' ? reste : roundMad(Number(payForm.amount));
+    if (!(amount > 0)) {
+      await appAlert(t('fields.amountMadRequired'));
+      return;
+    }
+    if (amount > reste + 0.01) {
+      await appAlert(`${t('fields.remaining')}: ${formatMad(reste)}`);
+      return;
+    }
     try {
       const fd = new FormData();
-      fd.append('saleId', id);
-      fd.append('amount', payForm.amount);
+      fd.append('saleId', id!);
+      fd.append('amount', String(amount));
       fd.append('operationType', payForm.operationType);
       fd.append('nature', payForm.nature || 'acompte');
       if (payForm.payerName) fd.append('payerName', payForm.payerName);
@@ -267,7 +302,7 @@ export default function VenteDetailPage() {
         </div>
         <div className="mac-page-actions">
           {canPay && (
-            <Btn icon={Wallet} onClick={() => setPayOpen(true)}>{t('tabs.payments')}</Btn>
+            <Btn icon={Wallet} onClick={openPayModal}>{t('tabs.paymentByAdvance')}</Btn>
           )}
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={() => printSaleReceipt(sale)} />
@@ -317,8 +352,8 @@ export default function VenteDetailPage() {
             ariaLabel={t('detail.sectionsSaleAria')}
             items={[
               { id: 'infos', label: t('tabs.informations'), icon: Info },
-              { id: 'echeancier', label: t('tabs.paymentSchedule'), icon: Calendar, badge: sale.schedules?.length || 0 },
-              { id: 'paiements', label: t('tabs.payments'), icon: Wallet, badge: sale.payments?.length || 0 },
+              { id: 'echeancier', label: t('tabs.paymentBySchedule'), icon: Calendar, badge: sale.schedules?.length || 0 },
+              { id: 'paiements', label: t('tabs.paymentByAdvance'), icon: Wallet, badge: sale.payments?.length || 0 },
               { id: 'documents', label: t('tabs.documents'), icon: FileText, badge: documents.length || sale.documents?.length || 0 },
               { id: 'historique', label: t('tabs.history'), icon: History },
             ]}
@@ -453,9 +488,9 @@ export default function VenteDetailPage() {
         {tab === 'paiements' && (
           <div className="mt-1">
             <div className="flex items-center justify-between gap-2 mb-3">
-              <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('detail.paymentHistory')}</p>
+              <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('tabs.paymentByAdvance')}</p>
               {canPay && (
-                <Btn icon={Wallet} onClick={() => setPayOpen(true)}>{t('actions.newPayment')}</Btn>
+                <Btn icon={Wallet} onClick={openPayModal}>{t('actions.newPayment')}</Btn>
               )}
             </div>
             {(sale.payments || []).length === 0 ? (
@@ -582,30 +617,31 @@ export default function VenteDetailPage() {
         footer={<><Btn variant="secondary" onClick={() => setPayOpen(false)}>{t('common.cancel')}</Btn><Btn form="pay-detail-form" type="submit">{t('common.validate')}</Btn></>}
       >
         <form id="pay-detail-form" onSubmit={addPayment} className="grid gap-3">
-          <Input label={t('fields.amountMadRequired')} required type="number" min="0" step="0.01" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} />
+          <p className="text-[12px] text-gic-muted">
+            {t('msg.scheduleSalesOptionalHint')}
+            {sale ? ` · ${t('fields.remaining')}: ${formatMad(sale.remaining)}` : ''}
+          </p>
+          <Select label={t('detail.stPayKind')} value={payForm.nature} onChange={(e) => changePayNature(e.target.value)}>
+            <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
+            <option value="solde">{t('fields.paymentNatureTotal')}</option>
+          </Select>
+          <Input
+            label={t('fields.amountMadRequired')}
+            required
+            type="number"
+            min="0.01"
+            step="0.01"
+            max={sale ? roundMad(Math.max(0, Number(sale.remaining || 0))) : undefined}
+            value={payForm.amount}
+            onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+            readOnly={payForm.nature === 'solde'}
+          />
           <Select label={t('fields.mode')} value={payForm.operationType} onChange={(e) => setPayForm({ ...payForm, operationType: e.target.value })}>
             <option value="especes">{t('fields.modeCash')}</option>
             <option value="virement">{t('fields.modeTransfer')}</option>
             <option value="cheque">{t('fields.modeCheck')}</option>
             <option value="carte">{t('fields.modeCard')}</option>
           </Select>
-          {paymentNatures.length > 0 ? (
-            <Select label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })}>
-              <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
-              {paymentNatures.map((n) => (
-                <option key={n.value} value={n.value}>{n.label || n.value}</option>
-              ))}
-              {payForm.nature && !['acompte', ...paymentNatures.map((n) => n.value)].includes(payForm.nature) && (
-                <option value={payForm.nature}>{payForm.nature}</option>
-              )}
-            </Select>
-          ) : (
-            <Select label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })}>
-              <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
-              <option value="echeance">{t('fields.paymentNatureInstallment')}</option>
-              <option value="solde">{t('fields.paymentNatureBalance')}</option>
-            </Select>
-          )}
           <Input label={t('fields.payerName')} value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} />
           {isBankPaymentMode(payForm.operationType) && (
             <Input label={t('fields.bankRef')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />

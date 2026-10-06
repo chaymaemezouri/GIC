@@ -99,27 +99,77 @@ async function syncRentalMonthSchedules(
   return recalculateRentalBalances(rentalId);
 }
 
-async function recalculateRentalBalances(rentalId: string) {
-  const schedules = await prisma.paymentSchedule.findMany({ where: { rentalId } });
-  const unpaid = schedules.filter((s) => s.status !== 'paid');
-  const paidSum = schedules.filter((s) => s.status === 'paid').reduce((a, s) => a + s.amount, 0);
-  const remaining = unpaid.reduce((a, s) => a + s.amount, 0);
+function roundMad(n: number) {
+  return Math.round(Number(n || 0) * 100) / 100;
+}
 
-  // Prefer sum of linked payments if any; else paid schedule amounts
+function schedulePaidTotal(payments: Array<{ amount: number }>) {
+  return roundMad(payments.reduce((sum, pay) => sum + Number(pay.amount || 0), 0));
+}
+
+function scheduleStatusFromPaid(amount: number, paid: number) {
+  if (paid <= 0.001) return 'pending' as const;
+  if (paid + 0.01 >= amount) return 'paid' as const;
+  return 'partial' as const;
+}
+
+async function refreshScheduleFromPayments(scheduleId: string) {
+  const schedule = await prisma.paymentSchedule.findUnique({
+    where: { id: scheduleId },
+    include: { payments: true },
+  });
+  if (!schedule) return null;
+  const paid = schedulePaidTotal(schedule.payments);
+  const status = scheduleStatusFromPaid(schedule.amount, paid);
+  return prisma.paymentSchedule.update({
+    where: { id: scheduleId },
+    data: {
+      status,
+      paidAt: status === 'paid' ? (schedule.paidAt || new Date()) : null,
+    },
+    include: { payments: { orderBy: { date: 'desc' } } },
+  });
+}
+
+async function recalculateRentalBalances(rentalId: string) {
+  const schedules = await prisma.paymentSchedule.findMany({
+    where: { rentalId },
+    include: { payments: true },
+  });
+  let remaining = 0;
+  for (const row of schedules) {
+    const paid = schedulePaidTotal(row.payments);
+    const status = scheduleStatusFromPaid(row.amount, paid);
+    if (status !== row.status || (status === 'paid') !== !!row.paidAt) {
+      await prisma.paymentSchedule.update({
+        where: { id: row.id },
+        data: {
+          status,
+          paidAt: status === 'paid' ? (row.paidAt || new Date()) : null,
+        },
+      });
+    }
+    if (status !== 'paid') remaining += Math.max(0, roundMad(row.amount - paid));
+  }
+
   const paymentAgg = await prisma.payment.aggregate({
     where: { rentalId },
     _sum: { amount: true },
   });
-  const totalPaid = paymentAgg._sum.amount ?? paidSum;
+  const totalPaid = roundMad(paymentAgg._sum.amount || 0);
 
   await prisma.rental.update({
     where: { id: rentalId },
     data: {
       totalPaid,
-      remaining,
+      remaining: roundMad(remaining),
     },
   });
-  return prisma.paymentSchedule.findMany({ where: { rentalId }, orderBy: { dueDate: 'asc' } });
+  return prisma.paymentSchedule.findMany({
+    where: { rentalId },
+    orderBy: { dueDate: 'asc' },
+    include: { payments: { orderBy: { date: 'desc' } } },
+  });
 }
 
 function buildSaleWhere(q: string, status: string, clientId: string) {
@@ -423,7 +473,10 @@ router.get('/sales/:id', async (req, res) => {
       },
       payments: { orderBy: { date: 'desc' } },
       documents: true,
-      schedules: { orderBy: { dueDate: 'asc' } },
+      schedules: {
+        orderBy: { dueDate: 'asc' },
+        include: { payments: { orderBy: { date: 'desc' } } },
+      },
     },
   });
   if (!sale) return res.status(404).json({ message: 'Vente introuvable' });
@@ -432,7 +485,11 @@ router.get('/sales/:id', async (req, res) => {
 
 router.get('/sales/:id/schedules', async (req, res) => {
   const saleId = String(req.params.id);
-  const items = await prisma.paymentSchedule.findMany({ where: { saleId }, orderBy: { dueDate: 'asc' } });
+  const items = await prisma.paymentSchedule.findMany({
+    where: { saleId },
+    orderBy: { dueDate: 'asc' },
+    include: { payments: { orderBy: { date: 'desc' } } },
+  });
   res.json(items);
 });
 
@@ -886,7 +943,10 @@ router.get('/rentals/:id', async (req, res) => {
       },
       payments: { orderBy: { date: 'desc' } },
       documents: true,
-      schedules: { orderBy: { dueDate: 'asc' } },
+      schedules: {
+        orderBy: { dueDate: 'asc' },
+        include: { payments: { orderBy: { date: 'desc' } } },
+      },
     },
   });
   if (!rental) return res.status(404).json({ message: 'Location introuvable' });
@@ -895,7 +955,11 @@ router.get('/rentals/:id', async (req, res) => {
 
 router.get('/rentals/:id/schedules', async (req, res) => {
   const rentalId = String(req.params.id);
-  const items = await prisma.paymentSchedule.findMany({ where: { rentalId }, orderBy: { dueDate: 'asc' } });
+  const items = await prisma.paymentSchedule.findMany({
+    where: { rentalId },
+    orderBy: { dueDate: 'asc' },
+    include: { payments: { orderBy: { date: 'desc' } } },
+  });
   res.json(items);
 });
 
@@ -965,62 +1029,248 @@ router.post('/rentals/:id/schedules/sync', async (req, res) => {
   res.json(items);
 });
 
+async function assertScheduleOrder(
+  parent: { rentalId?: string | null; saleId?: string | null },
+  scheduleId: string,
+  mode: 'pay' | 'cancel',
+) {
+  const where = parent.rentalId
+    ? { rentalId: parent.rentalId }
+    : parent.saleId
+      ? { saleId: parent.saleId }
+      : null;
+  if (!where) return { error: 'Échéance introuvable' as const, siblings: [], idx: -1 };
+  const siblings = await prisma.paymentSchedule.findMany({
+    where,
+    orderBy: { dueDate: 'asc' },
+    select: { id: true, dueDate: true, status: true, label: true },
+  });
+  const idx = siblings.findIndex((row) => row.id === scheduleId);
+  if (idx < 0) return { error: 'Échéance introuvable' as const, siblings, idx: -1 };
+  if (mode === 'pay') {
+    const previousUnpaid = siblings.slice(0, idx).find((row) => row.status !== 'paid');
+    if (previousUnpaid) {
+      return {
+        error: `Payez d’abord ${previousUnpaid.label || monthLabelFr(new Date(previousUnpaid.dueDate))} avant cette échéance` as const,
+        siblings,
+        idx,
+      };
+    }
+  } else {
+    const laterPaid = siblings.slice(idx + 1).find((row) => row.status === 'paid' || row.status === 'partial');
+    if (laterPaid) {
+      return {
+        error: `Annulez d’abord ${laterPaid.label || monthLabelFr(new Date(laterPaid.dueDate))} avant cette échéance` as const,
+        siblings,
+        idx,
+      };
+    }
+  }
+  return { error: null, siblings, idx };
+}
+
+router.post('/schedules/:id/advance', async (req, res) => {
+  const id = String(req.params.id);
+  const schedule = await prisma.paymentSchedule.findUnique({
+    where: { id },
+    include: { rental: true, sale: true, payments: true },
+  });
+  if (!schedule) return res.status(404).json({ message: 'Échéance introuvable' });
+  if (!schedule.rentalId && !schedule.saleId) {
+    return res.status(400).json({ message: 'Échéance non liée' });
+  }
+  if (schedule.rentalId && schedule.rental?.status === 'terminée') {
+    return res.status(400).json({ message: 'Location terminée' });
+  }
+  if (schedule.saleId && schedule.sale && ['résiliée', 'annulée', 'soldée'].includes(schedule.sale.status)) {
+    return res.status(400).json({ message: 'Vente non éligible au paiement' });
+  }
+  if (schedule.status === 'paid') {
+    return res.status(400).json({ message: 'Cette échéance est déjà payée' });
+  }
+
+  const order = await assertScheduleOrder(schedule, id, 'pay');
+  if (order.error) return res.status(400).json({ message: order.error });
+
+  const already = schedulePaidTotal(schedule.payments);
+  const reste = roundMad(Math.max(0, schedule.amount - already));
+  const amount = roundMad(Number(req.body.amount));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ message: 'Montant invalide' });
+  }
+  if (amount > reste + 0.01) {
+    return res.status(400).json({ message: `Le montant dépasse le reste à payer (${reste.toLocaleString('fr-MA')} MAD)` });
+  }
+  if (schedule.saleId && schedule.sale && amount > Number(schedule.sale.remaining) + 0.01) {
+    return res.status(400).json({
+      message: `Le montant dépasse le reste de la vente (${Number(schedule.sale.remaining).toLocaleString('fr-MA')} MAD)`,
+    });
+  }
+
+  const operationType = String(req.body.operationType || 'especes');
+  const payerName = req.body.payerName != null ? String(req.body.payerName) : null;
+  const bank = req.body.bank != null ? String(req.body.bank) : null;
+  const receiptNo = await nextReference('REC');
+  const payAmount = Math.min(amount, reste);
+  const created = await prisma.$transaction(async (tx) => {
+    const payment = await tx.payment.create({
+      data: {
+        receiptNo,
+        rentalId: schedule.rentalId,
+        saleId: schedule.saleId,
+        scheduleId: id,
+        amount: payAmount,
+        nature: schedule.saleId
+          ? (payAmount + 0.01 >= reste ? 'echeance' : 'acompte')
+          : (schedule.label || `Avance loyer ${monthLabelFr(new Date(schedule.dueDate))}`),
+        operationType,
+        payerName,
+        bank,
+        date: req.body.date ? new Date(String(req.body.date)) : new Date(),
+      },
+    });
+    if (schedule.saleId) await applySalePaymentDelta(tx, schedule.saleId, payAmount);
+    return payment;
+  });
+  await refreshScheduleFromPayments(id);
+  if (schedule.rentalId) await recalculateRentalBalances(schedule.rentalId);
+  await audit(req, 'paiement', 'PaymentSchedule', id, `${schedule.label || id} · avance ${payAmount}`);
+  const full = await prisma.payment.findUnique({
+    where: { id: created.id },
+    include: { sale: { select: { reference: true } }, rental: { select: { reference: true } } },
+  });
+  if (full) await syncEncaissementMovement(full, req);
+  const updated = await prisma.paymentSchedule.findUnique({
+    where: { id },
+    include: { payments: { orderBy: { date: 'desc' } } },
+  });
+  res.status(201).json(updated);
+});
+
 router.put('/schedules/:id/toggle-paid', async (req, res) => {
   const id = String(req.params.id);
   const schedule = await prisma.paymentSchedule.findUnique({
     where: { id },
-    include: { rental: true, payments: true },
+    include: { rental: true, sale: true, payments: true },
   });
   if (!schedule) return res.status(404).json({ message: 'Échéance introuvable' });
-  if (!schedule.rentalId || !schedule.rental) {
-    return res.status(400).json({ message: 'Réservé aux loyers de location' });
+  if (!schedule.rentalId && !schedule.saleId) {
+    return res.status(400).json({ message: 'Échéance non liée' });
   }
-  if (schedule.rental.status === 'terminée') {
+  if (schedule.rentalId && schedule.rental?.status === 'terminée') {
     return res.status(400).json({ message: 'Location terminée' });
   }
+  if (schedule.saleId && schedule.sale && ['résiliée', 'annulée'].includes(schedule.sale.status)) {
+    return res.status(400).json({ message: 'Vente non éligible' });
+  }
 
-  const markPaid = schedule.status !== 'paid';
+  const forceCancel = req.body.cancel === true || req.body.clear === true;
+  const markPaid = forceCancel ? false : schedule.status !== 'paid';
   const operationType = String(req.body.operationType || 'especes');
   const payerName = req.body.payerName != null ? String(req.body.payerName) : null;
   const bank = req.body.bank != null ? String(req.body.bank) : null;
 
+  const order = await assertScheduleOrder(schedule, id, markPaid ? 'pay' : 'cancel');
+  if (order.error) return res.status(400).json({ message: order.error });
+
   if (markPaid) {
-    const receiptNo = await nextReference('REC');
-    await prisma.$transaction(async (tx) => {
-      await tx.paymentSchedule.update({
-        where: { id },
-        data: { status: 'paid', paidAt: new Date() },
+    const already = schedulePaidTotal(schedule.payments);
+    const reste = roundMad(Math.max(0, schedule.amount - already));
+    if (reste > 0) {
+      if (schedule.saleId && schedule.sale && reste > Number(schedule.sale.remaining) + 0.01) {
+        return res.status(400).json({
+          message: `Le reste de la vente est insuffisant (${Number(schedule.sale.remaining).toLocaleString('fr-MA')} MAD)`,
+        });
+      }
+      const receiptNo = await nextReference('REC');
+      const created = await prisma.$transaction(async (tx) => {
+        const payment = await tx.payment.create({
+          data: {
+            receiptNo,
+            rentalId: schedule.rentalId,
+            saleId: schedule.saleId,
+            scheduleId: id,
+            amount: reste,
+            nature: schedule.saleId
+              ? 'echeance'
+              : (schedule.label || `Loyer ${monthLabelFr(new Date(schedule.dueDate))}`),
+            operationType,
+            payerName,
+            bank,
+            date: new Date(schedule.dueDate),
+          },
+        });
+        if (schedule.saleId) await applySalePaymentDelta(tx, schedule.saleId, reste);
+        return payment;
       });
-      await tx.payment.create({
-        data: {
-          receiptNo,
-          rentalId: schedule.rentalId,
-          scheduleId: id,
-          amount: schedule.amount,
-          nature: schedule.label || `Loyer ${monthLabelFr(new Date(schedule.dueDate))}`,
-          operationType,
-          payerName,
-          bank,
-          date: new Date(schedule.dueDate),
-        },
+      const full = await prisma.payment.findUnique({
+        where: { id: created.id },
+        include: { sale: { select: { reference: true } }, rental: { select: { reference: true } } },
       });
-    });
-    await audit(req, 'paiement', 'PaymentSchedule', id, schedule.label || receiptNo);
+      if (full) await syncEncaissementMovement(full, req);
+      await audit(req, 'paiement', 'PaymentSchedule', id, schedule.label || receiptNo);
+    }
+    await refreshScheduleFromPayments(id);
   } else {
+    const payments = [...schedule.payments];
     await prisma.$transaction(async (tx) => {
+      for (const pay of payments) {
+        if (schedule.saleId) await applySalePaymentDelta(tx, schedule.saleId, -pay.amount);
+      }
       await tx.payment.deleteMany({ where: { scheduleId: id } });
       await tx.paymentSchedule.update({
         where: { id },
         data: { status: 'pending', paidAt: null },
       });
     });
+    for (const pay of payments) {
+      await removeAutomaticMovement('encaissement', pay.id);
+    }
     await audit(req, 'annulation', 'PaymentSchedule', id, schedule.label || id);
   }
 
-  await recalculateRentalBalances(schedule.rentalId);
+  if (schedule.rentalId) await recalculateRentalBalances(schedule.rentalId);
   const updated = await prisma.paymentSchedule.findUnique({
     where: { id },
-    include: { payments: true },
+    include: { payments: { orderBy: { date: 'desc' } } },
+  });
+  res.json(updated);
+});
+
+router.delete('/schedules/:id/payments/:payId', async (req, res) => {
+  const id = String(req.params.id);
+  const payId = String(req.params.payId);
+  const schedule = await prisma.paymentSchedule.findUnique({
+    where: { id },
+    include: { rental: true, sale: true, payments: true },
+  });
+  if (!schedule) return res.status(404).json({ message: 'Échéance introuvable' });
+  if (!schedule.rentalId && !schedule.saleId) {
+    return res.status(400).json({ message: 'Échéance non liée' });
+  }
+  if (schedule.rentalId && schedule.rental?.status === 'terminée') {
+    return res.status(400).json({ message: 'Location terminée' });
+  }
+  if (schedule.saleId && schedule.sale && ['résiliée', 'annulée'].includes(schedule.sale.status)) {
+    return res.status(400).json({ message: 'Vente non éligible' });
+  }
+  const pay = schedule.payments.find((row) => row.id === payId);
+  if (!pay) return res.status(404).json({ message: 'Paiement introuvable' });
+
+  const order = await assertScheduleOrder(schedule, id, 'cancel');
+  if (order.error) return res.status(400).json({ message: order.error });
+
+  await prisma.$transaction(async (tx) => {
+    if (schedule.saleId) await applySalePaymentDelta(tx, schedule.saleId, -pay.amount);
+    await tx.payment.delete({ where: { id: payId } });
+  });
+  await removeAutomaticMovement('encaissement', payId);
+  await refreshScheduleFromPayments(id);
+  if (schedule.rentalId) await recalculateRentalBalances(schedule.rentalId);
+  await audit(req, 'annulation', 'Payment', payId, schedule.label || pay.receiptNo);
+  const updated = await prisma.paymentSchedule.findUnique({
+    where: { id },
+    include: { payments: { orderBy: { date: 'desc' } } },
   });
   res.json(updated);
 });
@@ -1519,6 +1769,14 @@ router.post('/payments', upload.single('proof'), async (req, res) => {
     const sale = await prisma.sale.findUnique({ where: { id: saleId } });
     if (!sale || ['résiliée', 'annulée'].includes(sale.status)) {
       return res.status(400).json({ message: 'Vente non éligible au paiement' });
+    }
+    if (sale.status === 'soldée' || Number(sale.remaining) <= 0) {
+      return res.status(400).json({ message: 'Cette vente est déjà soldée' });
+    }
+    if (Number(amount) > Number(sale.remaining) + 0.01) {
+      return res.status(400).json({
+        message: `Le montant dépasse le reste à payer (${Number(sale.remaining).toLocaleString('fr-MA')} MAD)`,
+      });
     }
   }
   if (rentalId) {
