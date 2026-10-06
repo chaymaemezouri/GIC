@@ -1726,6 +1726,8 @@ router.put('/payments/:id', upload.single('proof'), async (req, res) => {
     return row;
   });
 
+  if (payment.scheduleId && delta !== 0) await refreshScheduleFromPayments(payment.scheduleId);
+  if (payment.rentalId && delta !== 0) await recalculateRentalBalances(payment.rentalId);
   await audit(req, 'modification', 'Payment', id, `${payment.receiptNo} — ${newAmount} MAD`);
   const full = await prisma.payment.findUnique({
     where: { id },
@@ -1742,6 +1744,7 @@ router.delete('/payments/:id', async (req, res) => {
 
   const payment = await prisma.payment.findUnique({ where: { id } });
   if (!payment) return res.status(404).json({ message: 'Paiement introuvable' });
+  const scheduleId = payment.scheduleId;
 
   await prisma.$transaction(async (tx) => {
     if (payment.saleId) await applySalePaymentDelta(tx, payment.saleId, -payment.amount);
@@ -1749,6 +1752,8 @@ router.delete('/payments/:id', async (req, res) => {
     await tx.payment.delete({ where: { id } });
   });
 
+  if (scheduleId) await refreshScheduleFromPayments(scheduleId);
+  if (payment.rentalId) await recalculateRentalBalances(payment.rentalId);
   await removeAutomaticMovement('encaissement', id);
   await audit(req, 'suppression', 'Payment', id, `${payment.receiptNo} — ${motif}`);
   res.json({ ok: true });

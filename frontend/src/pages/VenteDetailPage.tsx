@@ -49,6 +49,9 @@ export default function VenteDetailPage() {
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [editPayId, setEditPayId] = useState<string | null>(null);
+  const [deletePayId, setDeletePayId] = useState<string | null>(null);
+  const [deletePayMotif, setDeletePayMotif] = useState('');
   const [resiliateOpen, setResiliateOpen] = useState(false);
   const [resiliateMotif, setResiliateMotif] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -62,8 +65,17 @@ export default function VenteDetailPage() {
     return Math.round(Number(n || 0) * 100) / 100;
   }
 
+  function payRoom() {
+    if (!sale) return 0;
+    const reste = roundMad(Math.max(0, Number(sale.remaining || 0)));
+    if (!editPayId) return reste;
+    const current = (sale.payments || []).find((p: { id: string }) => p.id === editPayId);
+    return roundMad(reste + Number(current?.amount || 0));
+  }
+
   function openPayModal() {
     if (!sale) return;
+    setEditPayId(null);
     setPayForm({
       amount: '',
       operationType: 'especes',
@@ -75,12 +87,33 @@ export default function VenteDetailPage() {
     setPayOpen(true);
   }
 
+  function openEditPayment(p: {
+    id: string;
+    amount: number;
+    operationType?: string | null;
+    payerName?: string | null;
+    bank?: string | null;
+    nature?: string | null;
+  }) {
+    setEditPayId(p.id);
+    const nature = p.nature === 'solde' ? 'solde' : 'acompte';
+    setPayForm({
+      amount: String(roundMad(Number(p.amount || 0))),
+      operationType: p.operationType || 'especes',
+      payerName: p.payerName || '',
+      bank: p.bank || '',
+      nature,
+      proof: null,
+    });
+    setPayOpen(true);
+  }
+
   function changePayNature(nature: string) {
-    const reste = sale ? roundMad(Math.max(0, Number(sale.remaining || 0))) : 0;
+    const room = payRoom();
     setPayForm((prev) => ({
       ...prev,
       nature,
-      amount: nature === 'solde' && reste > 0 ? String(reste) : nature === 'acompte' ? '' : prev.amount,
+      amount: nature === 'solde' && room > 0 ? String(room) : nature === 'acompte' && !editPayId ? '' : prev.amount,
     }));
   }
 
@@ -175,28 +208,68 @@ export default function VenteDetailPage() {
   async function addPayment(e: React.FormEvent) {
     e.preventDefault();
     if (!sale) return;
-    const reste = roundMad(Math.max(0, Number(sale.remaining || 0)));
-    const amount = payForm.nature === 'solde' ? reste : roundMad(Number(payForm.amount));
+    const room = payRoom();
+    const amount = payForm.nature === 'solde' ? room : roundMad(Number(payForm.amount));
     if (!(amount > 0)) {
       await appAlert(t('fields.amountMadRequired'));
       return;
     }
-    if (amount > reste + 0.01) {
-      await appAlert(`${t('fields.remaining')}: ${formatMad(reste)}`);
+    if (amount > room + 0.01) {
+      await appAlert(`${t('fields.remaining')}: ${formatMad(room)}`);
       return;
     }
     try {
-      const fd = new FormData();
-      fd.append('saleId', id!);
-      fd.append('amount', String(amount));
-      fd.append('operationType', payForm.operationType);
-      fd.append('nature', payForm.nature || 'acompte');
-      if (payForm.payerName) fd.append('payerName', payForm.payerName);
-      if (payForm.bank) fd.append('bank', payForm.bank);
-      if (payForm.proof) fd.append('proof', payForm.proof);
-      await uploadForm('/transactions/payments', fd);
+      if (editPayId) {
+        if (payForm.proof) {
+          const fd = new FormData();
+          fd.append('amount', String(amount));
+          fd.append('operationType', payForm.operationType);
+          fd.append('nature', payForm.nature || 'acompte');
+          if (payForm.payerName) fd.append('payerName', payForm.payerName);
+          if (payForm.bank) fd.append('bank', payForm.bank);
+          fd.append('proof', payForm.proof);
+          await uploadForm(`/transactions/payments/${editPayId}`, fd, 'PUT');
+        } else {
+          await api(`/transactions/payments/${editPayId}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              amount,
+              operationType: payForm.operationType,
+              nature: payForm.nature || 'acompte',
+              payerName: payForm.payerName || null,
+              bank: payForm.bank || null,
+            }),
+          });
+        }
+      } else {
+        const fd = new FormData();
+        fd.append('saleId', id!);
+        fd.append('amount', String(amount));
+        fd.append('operationType', payForm.operationType);
+        fd.append('nature', payForm.nature || 'acompte');
+        if (payForm.payerName) fd.append('payerName', payForm.payerName);
+        if (payForm.bank) fd.append('bank', payForm.bank);
+        if (payForm.proof) fd.append('proof', payForm.proof);
+        await uploadForm('/transactions/payments', fd);
+      }
       setPayOpen(false);
+      setEditPayId(null);
       setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null });
+      load();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function confirmDeletePayment() {
+    if (!deletePayId || !deletePayMotif.trim()) return;
+    try {
+      await api(`/transactions/payments/${deletePayId}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ motif: deletePayMotif }),
+      });
+      setDeletePayId(null);
+      setDeletePayMotif('');
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -536,6 +609,17 @@ export default function VenteDetailPage() {
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions">
                           <MacActionBtn icon={Printer} tone="gray" title={t('actions.printReceipt')} onClick={() => printPaymentReceipt(p)} />
+                          {!closed && (
+                            <>
+                              <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEditPayment(p)} />
+                              <MacActionBtn
+                                icon={Trash2}
+                                tone="red"
+                                title={t('common.delete')}
+                                onClick={() => { setDeletePayId(p.id); setDeletePayMotif(''); }}
+                              />
+                            </>
+                          )}
                         </div>
                       </Td>
                     </tr>
@@ -613,13 +697,21 @@ export default function VenteDetailPage() {
         </form>
       </Modal>
 
-      <Modal open={payOpen} title={t('actions.savePayment')} onClose={() => setPayOpen(false)}
-        footer={<><Btn variant="secondary" onClick={() => setPayOpen(false)}>{t('common.cancel')}</Btn><Btn form="pay-detail-form" type="submit">{t('common.validate')}</Btn></>}
+      <Modal
+        open={payOpen}
+        title={editPayId ? t('actions.editPayment') : t('actions.savePayment')}
+        onClose={() => { setPayOpen(false); setEditPayId(null); }}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => { setPayOpen(false); setEditPayId(null); }}>{t('common.cancel')}</Btn>
+            <Btn form="pay-detail-form" type="submit">{editPayId ? t('common.save') : t('common.validate')}</Btn>
+          </>
+        }
       >
         <form id="pay-detail-form" onSubmit={addPayment} className="grid gap-3">
           <p className="text-[12px] text-gic-muted">
             {t('msg.scheduleSalesOptionalHint')}
-            {sale ? ` · ${t('fields.remaining')}: ${formatMad(sale.remaining)}` : ''}
+            {sale ? ` · ${t('fields.remaining')}: ${formatMad(payRoom())}` : ''}
           </p>
           <Select label={t('detail.stPayKind')} value={payForm.nature} onChange={(e) => changePayNature(e.target.value)}>
             <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
@@ -631,7 +723,7 @@ export default function VenteDetailPage() {
             type="number"
             min="0.01"
             step="0.01"
-            max={sale ? roundMad(Math.max(0, Number(sale.remaining || 0))) : undefined}
+            max={payRoom() || undefined}
             value={payForm.amount}
             onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
             readOnly={payForm.nature === 'solde'}
@@ -656,6 +748,26 @@ export default function VenteDetailPage() {
             />
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={!!deletePayId}
+        title={t('common.delete')}
+        onClose={() => { setDeletePayId(null); setDeletePayMotif(''); }}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => { setDeletePayId(null); setDeletePayMotif(''); }}>{t('common.cancel')}</Btn>
+            <Btn variant="danger" onClick={confirmDeletePayment} disabled={!deletePayMotif.trim()}>{t('common.delete')}</Btn>
+          </>
+        }
+      >
+        <p className="text-[12px] text-gic-muted mb-3">{t('msg.confirmDelete')}</p>
+        <textarea
+          className="w-full h-24 rounded-xl border border-gic-border p-3 text-[12px]"
+          placeholder={t('msg.motifDeletePlaceholder')}
+          value={deletePayMotif}
+          onChange={(e) => setDeletePayMotif(e.target.value)}
+        />
       </Modal>
 
       <Modal open={resiliateOpen} title={t('actions.resiliateSale')} onClose={() => setResiliateOpen(false)}
