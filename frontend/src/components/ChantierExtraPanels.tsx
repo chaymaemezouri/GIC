@@ -6,6 +6,7 @@ import { api, formatDate, formatMad } from '../lib/api';
 import { Btn, Input, MacActionBtn, Modal, Select, TableWrap, Td, Th } from './ui';
 import { useI18n } from '../i18n/I18nContext';
 import { paymentPhaseOf } from './TaskSubcontractEditor';
+import ProgressSteps from './ProgressSteps';
 
 export type StFollow = { id: string; label: string; percent: number; validated: boolean };
 export type StPay = { id: string; amount: number; kind: string; paymentMode?: string | null; date: string; remark?: string | null };
@@ -48,13 +49,19 @@ export function stScopeLine(item: Subcontractor, wholeSite: string, wholeTask: s
   return `${item.tranche || wholeSite} · ${what}${period}`;
 }
 
+function payKindLabel(kind: string, t: (key: string) => string) {
+  if (kind === 'solde') return t('detail.stKindTotal');
+  if (kind === 'situation') return t('detail.stKindSituation');
+  return t('columns.advance');
+}
+
 export function SubcontractContractView({
   item,
-  onToggleFollow,
+  onSetProgress,
   onAddPayment,
 }: {
   item: Subcontractor;
-  onToggleFollow: (follow: StFollow) => void;
+  onSetProgress: (follow: StFollow, percent: number) => void;
   onAddPayment: (payload: { amount: number; kind: string; paymentMode: string; phaseLabel: string | null }) => void;
 }) {
   const { t } = useI18n();
@@ -66,10 +73,12 @@ export function SubcontractContractView({
       percent: Number(item.progressPct || 0),
       validated: Number(item.progressPct || 0) >= 100,
     }];
+  const showPhaseNav = phaseRows.length > 1;
   const [phaseKey, setPhaseKey] = useState<string>(() => phaseRows[0]?.label || '');
   const [payAmount, setPayAmount] = useState('');
   const [payMode, setPayMode] = useState('especes');
   const [payKind, setPayKind] = useState('avance');
+  const reste = Math.round(Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)) * 100) / 100;
 
   useEffect(() => {
     const first = (item.follows?.[0]?.label)
@@ -77,111 +86,141 @@ export function SubcontractContractView({
       || item.corpsEtat
       || '';
     setPhaseKey(first);
+    setPayKind('avance');
+    setPayAmount('');
   }, [item.id]);
 
+  useEffect(() => {
+    if (payKind === 'solde') setPayAmount(reste > 0 ? String(reste) : '');
+  }, [payKind, reste]);
+
   const selectedFollow = phaseRows.find((row) => row.label === phaseKey) || phaseRows[0] || null;
-  const phasePays = (item.payments || []).filter((pay) => {
-    if (!phaseKey) return true;
+  const progressPct = Math.max(0, Math.min(100, Math.round(Number(selectedFollow?.percent ?? item.progressPct ?? 0))));
+
+  function paymentMatchesPhase(pay: StPay, label: string) {
     const tagged = paymentPhaseOf(pay);
-    if (item.scope === 'phase') return true;
-    if (!tagged) return false;
-    return tagged === phaseKey;
-  });
-  const advances = phasePays.filter((pay) => pay.kind === 'avance');
-  const otherPays = phasePays.filter((pay) => pay.kind !== 'avance');
+    if (item.scope === 'phase') {
+      const only = item.phaseLabel || label;
+      return tagged ? tagged === only : true;
+    }
+    if (!label) return !tagged;
+    return tagged === label;
+  }
+
+  const phasePays = (item.payments || []).filter((pay) => paymentMatchesPhase(pay, phaseKey));
+
+  function changePayKind(kind: string) {
+    setPayKind(kind);
+    if (kind === 'solde') setPayAmount(reste > 0 ? String(reste) : '');
+    else setPayAmount('');
+  }
 
   async function submitPay(e: React.FormEvent) {
     e.preventDefault();
+    const amount = payKind === 'solde' ? reste : Number(payAmount);
+    if (!(amount > 0)) return;
     onAddPayment({
-      amount: Number(payAmount),
+      amount,
       kind: payKind,
       paymentMode: payMode,
       phaseLabel: phaseKey || null,
     });
+    setPayKind('avance');
     setPayAmount('');
   }
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[220px_1fr]">
-      <div className="mac-section-card !p-2 space-y-1">
-        <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gic-muted">{t('detail.stByPhase')}</p>
-        {phaseRows.length === 0 ? (
-          <p className="px-2 py-3 text-[12px] text-gic-muted">{t('detail.stNoPhase')}</p>
-        ) : phaseRows.map((follow) => (
-          <button
-            key={follow.id}
-            type="button"
-            className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[12px] ${
-              phaseKey === follow.label ? 'bg-[#007aff]/10 text-[#007aff]' : 'hover:bg-black/[0.04]'
-            }`}
-            onClick={() => setPhaseKey(follow.label)}
-          >
-            <span className="min-w-0 truncate font-medium">{follow.label}</span>
-            <span className={`mac-chip ml-2 shrink-0 ${follow.validated ? 'mac-chip-green' : 'mac-chip-gray'}`}>
-              {Math.round(follow.percent || 0)} %
-            </span>
-          </button>
-        ))}
-      </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="mac-section-card space-y-3">
-          <p className="text-[12px] font-semibold text-gic-ink">{t('detail.stPhaseRealization')}</p>
-          {selectedFollow ? (
-            <>
-              <p className="text-[22px] font-semibold tracking-tight">{Math.round(selectedFollow.percent || 0)} %</p>
-              <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.06]">
-                <div className="h-full rounded-full bg-[#34c759]" style={{ width: `${Math.min(100, selectedFollow.percent || 0)}%` }} />
-              </div>
-              <span className={`mac-chip ${selectedFollow.validated ? 'mac-chip-green' : 'mac-chip-gray'}`}>
-                {selectedFollow.validated ? t('pointageMgmt.validated') : t('pointageMgmt.draft')}
+    <div className={`grid gap-3 ${showPhaseNav ? 'lg:grid-cols-[220px_1fr]' : ''}`}>
+      {showPhaseNav && (
+        <div className="mac-section-card !p-2 space-y-1">
+          <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gic-muted">{t('detail.stByPhase')}</p>
+          {phaseRows.map((follow) => (
+            <button
+              key={follow.id}
+              type="button"
+              className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[12px] ${
+                phaseKey === follow.label ? 'bg-[#007aff]/10 text-[#007aff]' : 'hover:bg-black/[0.04]'
+              }`}
+              onClick={() => setPhaseKey(follow.label)}
+            >
+              <span className="min-w-0 truncate font-medium">{follow.label}</span>
+              <span className={`mac-chip ml-2 shrink-0 ${follow.percent >= 100 ? 'mac-chip-green' : 'mac-chip-gray'}`}>
+                {Math.round(follow.percent || 0)} %
               </span>
-              {selectedFollow.id !== 'all' && (
-                <Btn variant="secondary" className="!py-1.5 !text-[11px]" onClick={() => onToggleFollow(selectedFollow)}>
-                  {selectedFollow.validated ? t('detail.unvalidatePhase') : t('detail.validatePhase')}
-                </Btn>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="space-y-3">
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="mac-section-card space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[12px] font-semibold text-gic-ink">{t('detail.stPhaseRealization')}</p>
+              {selectedFollow && (
+                <span className={`mac-chip ${progressPct >= 100 ? 'mac-chip-green' : 'mac-chip-gray'}`}>
+                  {progressPct >= 100 ? t('pointageMgmt.validated') : t('pointageMgmt.draft')}
+                </span>
               )}
-            </>
-          ) : (
-            <p className="text-[12px] text-gic-muted">{t('detail.stSelectPhase')}</p>
-          )}
+            </div>
+            {selectedFollow && (
+              <>
+                <ProgressSteps
+                  percent={progressPct}
+                  onChange={(pct) => onSetProgress(selectedFollow, pct)}
+                  size="sm"
+                />
+                <div className="h-2 overflow-hidden rounded-full bg-black/[0.06]">
+                  <div
+                    className={`h-full rounded-full transition-all ${progressPct >= 100 ? 'bg-[#34c759]' : 'bg-[#007aff]'}`}
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+          <div className="mac-section-card space-y-2">
+            <p className="text-[12px] font-semibold text-gic-ink">{t('detail.stAddPayment')}</p>
+            <form onSubmit={submitPay} className="grid gap-2 pt-1">
+              <Input
+                label={t('fields.amountMad')}
+                type="number"
+                min="0.01"
+                step="0.01"
+                max={reste > 0 ? reste : undefined}
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                readOnly={payKind === 'solde'}
+                required
+              />
+              <Select label={t('fields.mode')} value={payMode} onChange={(e) => setPayMode(e.target.value)}>
+                <option value="especes">{t('fields.modeCash')}</option>
+                <option value="virement">{t('fields.modeTransfer')}</option>
+                <option value="cheque">{t('fields.modeCheck')}</option>
+              </Select>
+              <Select label={t('detail.stPayKind')} value={payKind} onChange={(e) => changePayKind(e.target.value)}>
+                <option value="avance">{t('columns.advance')}</option>
+                <option value="solde">{t('detail.stKindTotal')}</option>
+              </Select>
+              <Btn type="submit" disabled={payKind === 'solde' && reste <= 0}>{t('detail.stAddPayment')}</Btn>
+            </form>
+          </div>
         </div>
         <div className="mac-section-card space-y-2">
-          <p className="text-[12px] font-semibold text-gic-ink">{t('detail.stPhasePayments')}</p>
+          <p className="text-[12px] font-semibold text-gic-ink">{t('detail.paymentsTitle')}</p>
           <ul className="space-y-1.5 text-[12px]">
-            {otherPays.map((pay) => (
+            {phasePays.length === 0 && <li className="text-gic-muted">{t('detail.stNoAdvanceYet')}</li>}
+            {phasePays.map((pay) => (
               <li key={pay.id} className="flex justify-between gap-2 border-b border-black/[0.04] pb-1.5 last:border-0">
-                <span className="text-gic-muted">{formatDate(pay.date)} · {pay.kind}</span>
+                <span className="text-gic-muted">
+                  {formatDate(pay.date)}
+                  {' · '}
+                  {payKindLabel(pay.kind, t)}
+                  {pay.paymentMode ? ` · ${pay.paymentMode}` : ''}
+                </span>
                 <span className="font-medium">{formatMad(pay.amount)}</span>
               </li>
             ))}
-            {otherPays.length === 0 && <li className="text-gic-muted">{t('common.empty')}</li>}
           </ul>
-        </div>
-        <div className="mac-section-card space-y-2">
-          <p className="text-[12px] font-semibold text-gic-ink">{t('detail.stPhaseAdvances')}</p>
-          <ul className="space-y-1.5 text-[12px]">
-            {advances.map((pay) => (
-              <li key={pay.id} className="flex justify-between gap-2 border-b border-black/[0.04] pb-1.5 last:border-0">
-                <span className="text-gic-muted">{formatDate(pay.date)}</span>
-                <span className="font-medium">{formatMad(pay.amount)}</span>
-              </li>
-            ))}
-            {advances.length === 0 && <li className="text-gic-muted">{t('detail.stNoAdvanceYet')}</li>}
-          </ul>
-          <form onSubmit={submitPay} className="grid gap-2 pt-1">
-            <Input label={t('fields.amountMad')} type="number" min="0" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} required />
-            <Select label={t('fields.mode')} value={payMode} onChange={(e) => setPayMode(e.target.value)}>
-              <option value="especes">{t('fields.modeCash')}</option>
-              <option value="virement">{t('fields.modeTransfer')}</option>
-              <option value="cheque">{t('fields.modeCheck')}</option>
-            </Select>
-            <Select label={t('fields.operationType')} value={payKind} onChange={(e) => setPayKind(e.target.value)}>
-              <option value="avance">{t('columns.advance')}</option>
-              <option value="situation">{t('siteOps.progress')}</option>
-              <option value="solde">{t('detail.stKindSolde')}</option>
-            </Select>
-            <Btn type="submit">{t('detail.addAdvance')}</Btn>
-          </form>
         </div>
       </div>
     </div>
@@ -218,13 +257,18 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
     setOpen(true);
   }
 
-  async function toggleFollow(follow: StFollow) {
+  async function setFollowProgress(follow: StFollow, percent: number) {
     if (!detail) return;
     try {
-      const updated = await api<Subcontractor>(`/chantiers/${chantierId}/subcontractors/${detail.id}/follows/${follow.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ validated: !follow.validated }),
-      });
+      const updated = follow.id === 'all'
+        ? await api<Subcontractor>(`/chantiers/${chantierId}/subcontractors/${detail.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ progressPct: percent, status: percent >= 100 ? 'termine' : 'actif' }),
+        })
+        : await api<Subcontractor>(`/chantiers/${chantierId}/subcontractors/${detail.id}/follows/${follow.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ percent }),
+        });
       setDetail(updated);
       load();
     } catch (err) {
@@ -335,7 +379,7 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
         </div>
         <Btn icon={Plus} onClick={openCreate}>{t('common.add')}</Btn>
       </div>
-      {items.length > 0 && (
+      {items.length > 0 && !detail && (
         <div className="mac-kpi-grid mac-kpi-grid-4">
           <div className="mac-section-card !py-3">
             <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('fields.company')}</p>
@@ -378,14 +422,26 @@ export function ChantierSubcontractorsPanel({ chantierId }: { chantierId: string
                 {isStOpen(detail) ? t('detail.stOpen') : t('detail.stDone')}
               </span>
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-4 text-[12px]">
-              <div><span className="text-gic-muted">{t('fields.corpsEtat')}</span><p className="font-medium">{detail.corpsEtat || '—'}</p></div>
-              <div><span className="text-gic-muted">{t('fields.amount')}</span><p className="font-medium">{formatMad(detail.amount || 0)}</p></div>
-              <div><span className="text-gic-muted">{t('siteOps.paid')}</span><p className="font-medium">{formatMad(detail.paidAmount || 0)}</p></div>
-              <div><span className="text-gic-muted">{t('siteOps.progress')}</span><p className="font-medium">{Math.round(Number(detail.progressPct || 0))} %</p></div>
+            <div className="mt-3 mac-kpi-grid mac-kpi-grid-4">
+              <div className="mac-section-card !py-3 !shadow-none border border-black/[0.04]">
+                <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('fields.corpsEtat')}</p>
+                <p className="text-[16px] font-semibold">{detail.corpsEtat || '—'}</p>
+              </div>
+              <div className="mac-section-card !py-3 !shadow-none border border-black/[0.04]">
+                <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('fields.amount')}</p>
+                <p className="text-[16px] font-semibold">{formatMad(detail.amount || 0)}</p>
+              </div>
+              <div className="mac-section-card !py-3 !shadow-none border border-black/[0.04]">
+                <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('siteOps.paid')}</p>
+                <p className="text-[16px] font-semibold text-[#34c759]">{formatMad(detail.paidAmount || 0)}</p>
+              </div>
+              <div className="mac-section-card !py-3 !shadow-none border border-black/[0.04]">
+                <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('siteOps.moneyLeft')}</p>
+                <p className="text-[16px] font-semibold text-[#ff3b30]">{formatMad(Math.max(0, Number(detail.amount || 0) - Number(detail.paidAmount || 0)))}</p>
+              </div>
             </div>
           </div>
-          <SubcontractContractView item={detail} onToggleFollow={toggleFollow} onAddPayment={addPayment} />
+          <SubcontractContractView item={detail} onSetProgress={setFollowProgress} onAddPayment={addPayment} />
         </div>
       ) : loading ? (
         <p className="py-8 text-center text-[12px] text-gic-muted">{t('common.loading')}</p>

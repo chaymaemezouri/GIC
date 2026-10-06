@@ -2798,7 +2798,11 @@ router.put('/progress/:progressId/subcontract', async (req, res) => {
       ? (await prisma.chantierSubcontractor.update({ where: { id: current.id }, data })).id
       : (await prisma.chantierSubcontractor.create({ data: { ...data, chantierId: task.chantierId, workProgressId: task.id, status: 'actif' } })).id;
     const follows = current?.follows || [];
-    const wanted = phaseList.map((phase, index) => ({ label: String(phase.label || `Phase ${index + 1}`), percent: Number(phase.percent) || 0, sortOrder: index }));
+    const wanted = phaseList.map((phase, index) => ({
+      label: String(phase.label || `Phase ${index + 1}`),
+      percent: 0,
+      sortOrder: index,
+    }));
     const keep = new Set(wanted.map((phase) => phase.label));
     const stale = follows.filter((follow) => !keep.has(follow.label));
     if (stale.length) await prisma.subcontractFollow.deleteMany({ where: { id: { in: stale.map((follow) => follow.id) } } });
@@ -2851,7 +2855,7 @@ router.put('/progress/:progressId/subcontract', async (req, res) => {
             chantierId: task.chantierId,
             workProgressId: task.id,
             status: 'actif',
-            follows: { create: [{ label: row.label, percent: 100, sortOrder: 0 }] },
+            follows: { create: [{ label: row.label, percent: 0, sortOrder: 0 }] },
           },
         });
         await refreshSubcontract(created.id);
@@ -3910,9 +3914,9 @@ async function refreshSubcontract(id: string) {
   if (!sub) return null;
   const paidAmount = sub.payments.reduce((s, p) => s + p.amount, 0);
   const progressPct = sub.follows.length
-    ? Math.round((sub.follows.filter((f) => f.validated).length / sub.follows.length) * 100)
+    ? Math.round(sub.follows.reduce((sum, f) => sum + Number(f.percent || 0), 0) / sub.follows.length)
     : sub.progressPct;
-  const done = progressPct >= 100;
+  const done = (progressPct || 0) >= 100;
   return prisma.chantierSubcontractor.update({
     where: { id },
     data: {
@@ -3963,13 +3967,13 @@ router.post('/:id/subcontractors', async (req, res) => {
     if (scope === 'phase') {
       const phase = phases.find((p) => String(p.label || '') === phaseLabel) || (phaseLabel ? { label: phaseLabel, percent: 100 } : null);
       if (!phase) return res.status(400).json({ message: 'Choisissez une phase' });
-      follows.push({ label: String(phase.label), percent: Number(phase.percent) || 0, sortOrder: 0 });
+      follows.push({ label: String(phase.label), percent: 0, sortOrder: 0 });
       phaseLabel = String(phase.label);
     } else if (phases.length) {
-      phases.forEach((p, i) => follows.push({ label: String(p.label || `Phase ${i + 1}`), percent: Number(p.percent) || 0, sortOrder: i }));
+      phases.forEach((p, i) => follows.push({ label: String(p.label || `Phase ${i + 1}`), percent: 0, sortOrder: i }));
       phaseLabel = null;
     } else {
-      follows.push({ label: task.taskName, percent: 100, sortOrder: 0 });
+      follows.push({ label: task.taskName, percent: 0, sortOrder: 0 });
       phaseLabel = null;
     }
   }
@@ -4003,10 +4007,24 @@ router.put('/:id/subcontractors/:subId/follows/:followId', async (req, res) => {
     },
   });
   if (!follow) return res.status(404).json({ message: 'Phase introuvable' });
-  const validated = req.body.validated !== false;
+  const data: { percent?: number; validated: boolean; validatedAt: Date | null } = {
+    validated: follow.validated,
+    validatedAt: follow.validatedAt,
+  };
+  if (req.body.percent !== undefined) {
+    const percent = Math.max(0, Math.min(100, Number(req.body.percent)));
+    if (!Number.isFinite(percent)) return res.status(400).json({ message: 'Avancement invalide' });
+    data.percent = percent;
+    data.validated = percent >= 100;
+    data.validatedAt = percent >= 100 ? new Date() : null;
+  } else if (req.body.validated !== undefined) {
+    data.validated = !!req.body.validated;
+    data.validatedAt = data.validated ? new Date() : null;
+    if (data.validated) data.percent = 100;
+  }
   await prisma.subcontractFollow.update({
     where: { id: follow.id },
-    data: { validated, validatedAt: validated ? new Date() : null },
+    data,
   });
   res.json(await refreshSubcontract(String(req.params.subId)));
 });
@@ -4098,7 +4116,7 @@ router.put('/:id/subcontractors/:subId', async (req, res) => {
     where: { id: String(req.params.subId), chantierId: String(req.params.id) },
   });
   if (!sub) return res.status(404).json({ message: 'Sous-traitant introuvable' });
-  const updated = await prisma.chantierSubcontractor.update({
+  await prisma.chantierSubcontractor.update({
     where: { id: sub.id },
     data: {
       companyName: req.body.companyName != null ? String(req.body.companyName).trim() : undefined,
@@ -4111,7 +4129,7 @@ router.put('/:id/subcontractors/:subId', async (req, res) => {
       remark: req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark).trim() : null) : undefined,
     },
   });
-  res.json(updated);
+  res.json(await refreshSubcontract(sub.id));
 });
 
 router.delete('/:id/subcontractors/:subId', async (req, res) => {

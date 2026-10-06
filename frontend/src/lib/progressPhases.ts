@@ -32,9 +32,11 @@ export type TaskPhaseContext = {
     phone?: string | null;
     amount?: number | null;
     paidAmount?: number | null;
+    progressPct?: number | null;
     startDate?: string | null;
     endDate?: string | null;
     payments?: Array<{ id: string; amount: number; kind: string; paymentMode?: string | null; date: string }>;
+    follows?: Array<{ id: string; label: string; percent: number; validated?: boolean }>;
   }>;
   progressId?: string;
   chantierId?: string;

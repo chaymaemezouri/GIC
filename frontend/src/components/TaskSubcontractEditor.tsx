@@ -6,6 +6,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { Btn, Input, MacActionBtn, Select } from './ui';
 
 export type SubPayment = { id: string; amount: number; kind: string; paymentMode?: string | null; date: string; remark?: string | null };
+export type StFollowRow = { id: string; label: string; percent: number; validated?: boolean };
 export type TaskSubcontract = {
   id: string;
   chantierId?: string;
@@ -13,11 +14,13 @@ export type TaskSubcontract = {
   phone?: string | null;
   amount?: number | null;
   paidAmount?: number | null;
+  progressPct?: number | null;
   scope?: string;
   phaseLabel?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   payments?: SubPayment[];
+  follows?: StFollowRow[];
 };
 
 export type SubDraft = {
@@ -377,15 +380,15 @@ export function PaymentBox({
   const [mode, setMode] = useState('virement');
   const paidAll = Number(contract.paidAmount || 0);
   const cap = Number(contract.amount || 0);
-  const left = Math.max(0, cap - paidAll);
+  const left = Math.round(Math.max(0, cap - paidAll) * 100) / 100;
   const history = (contract.payments || []).filter((pay) => !phaseLabel || paymentPhaseOf(pay) === phaseLabel || (!paymentPhaseOf(pay) && !phaseLabel));
   const paidOnPhase = history.reduce((sum, pay) => sum + Number(pay.amount || 0), 0);
   const editingPay = history.find((pay) => pay.id === editId);
-  const room = cap > 0 ? left + Number(editingPay?.amount || 0) : undefined;
+  const room = cap > 0 ? Math.round((left + Number(editingPay?.amount || 0)) * 100) / 100 : undefined;
 
   function kindText(value: string) {
-    if (value === 'situation') return t('siteOps.progress');
-    if (value === 'solde') return t('detail.stKindSolde');
+    if (value === 'situation') return t('detail.stKindSituation');
+    if (value === 'solde') return t('detail.stKindTotal');
     return t('columns.advance');
   }
 
@@ -396,16 +399,25 @@ export function PaymentBox({
     setMode('virement');
   }
 
+  function changeKind(next: string) {
+    setKind(next);
+    if (editId) return;
+    if (next === 'solde') setAmount(left > 0 ? String(left) : '');
+    else setAmount('');
+  }
+
   function startEdit(pay: SubPayment) {
     setEditing(true);
     setEditId(pay.id);
-    setAmount(String(pay.amount));
+    setAmount(String(Math.round(Number(pay.amount) * 100) / 100));
     setKind(pay.kind || 'avance');
     setMode(pay.paymentMode || 'virement');
   }
 
   async function savePay() {
     if (!contract.chantierId) return;
+    const payloadAmount = !editId && kind === 'solde' ? left : Number(amount);
+    if (!(payloadAmount > 0)) return;
     try {
       const updated = await api<TaskSubcontract>(
         editId
@@ -414,7 +426,7 @@ export function PaymentBox({
         {
           method: editId ? 'PUT' : 'POST',
           body: JSON.stringify({
-            amount: Number(amount),
+            amount: payloadAmount,
             kind,
             paymentMode: mode,
             phaseLabel: phaseLabel || undefined,
@@ -502,19 +514,19 @@ export function PaymentBox({
             step="0.01"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
+            readOnly={!editId && kind === 'solde'}
           />
           <Select label={t('fields.mode')} value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="especes">{t('fields.modeCash')}</option>
             <option value="virement">{t('fields.modeTransfer')}</option>
             <option value="cheque">{t('fields.modeCheck')}</option>
           </Select>
-          <Select label={t('fields.operationType')} value={kind} onChange={(e) => setKind(e.target.value)}>
+          <Select label={t('detail.stPayKind')} value={kind} onChange={(e) => changeKind(e.target.value)}>
             <option value="avance">{t('columns.advance')}</option>
-            <option value="situation">{t('siteOps.progress')}</option>
-            <option value="solde">{t('detail.stKindSolde')}</option>
+            <option value="solde">{t('detail.stKindTotal')}</option>
           </Select>
           <div className="flex items-end">
-            <Btn type="button" onClick={savePay}>{editId ? t('common.save') : t('detail.addAdvance')}</Btn>
+            <Btn type="button" onClick={savePay}>{editId ? t('common.save') : t('detail.stAddPayment')}</Btn>
           </div>
         </div>
       )}

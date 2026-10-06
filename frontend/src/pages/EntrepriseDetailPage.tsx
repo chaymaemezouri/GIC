@@ -82,14 +82,19 @@ export default function EntrepriseDetailPage() {
     }
   }
 
-  async function toggleFollow(follow: StFollow) {
+  async function setFollowProgress(follow: StFollow, percent: number) {
     if (!detail?.chantierId && !detail?.chantier?.id) return;
     const chantierId = detail.chantierId || detail.chantier?.id;
     try {
-      const updated = await api<Subcontractor>(`/chantiers/${chantierId}/subcontractors/${detail.id}/follows/${follow.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ validated: !follow.validated }),
-      });
+      const updated = follow.id === 'all'
+        ? await api<Subcontractor>(`/chantiers/${chantierId}/subcontractors/${detail.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ progressPct: percent, status: percent >= 100 ? 'termine' : 'actif' }),
+        })
+        : await api<Subcontractor>(`/chantiers/${chantierId}/subcontractors/${detail.id}/follows/${follow.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ percent }),
+        });
       setDetail({ ...updated, chantierId, chantier: detail.chantier });
       load();
     } catch (err) {
@@ -211,12 +216,14 @@ export default function EntrepriseDetailPage() {
         </div>
       </div>
 
+      {!detail && (
       <div className="mac-kpi-grid mac-kpi-grid-4 mb-4">
         <KpiCard title={t('pages.entrepriseSites')} value={String(totals.sites ?? sites.length)} icon={Building2} tone="teal" compact />
         <KpiCard title={t('pages.entrepriseSubcontracts')} value={String(totals.count)} icon={Building2} tone="violet" compact />
         <KpiCard title={t('siteOps.paid')} value={formatMad(totals.paid)} icon={Wallet} tone="emerald" compact />
         <KpiCard title={t('siteOps.moneyLeft')} value={formatMad(totals.remaining)} icon={Wallet} tone="coral" compact />
       </div>
+      )}
 
       <DetailShell
         nav={
@@ -259,22 +266,37 @@ export default function EntrepriseDetailPage() {
                   )}
                 </div>
                 <div className="mac-section-card">
-                  <p className="text-[16px] font-semibold">{detail.companyName}</p>
-                  <p className="text-[12px] text-gic-muted">
-                    {detail.chantier?.name || '—'} · {stScopeLine(detail, t('msg.wholeSite'), t('detail.subcontractWhole'))}
-                  </p>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-4 text-[12px]">
-                    <div><span className="text-gic-muted">{t('fields.amount')}</span><p className="font-medium">{formatMad(detail.amount || 0)}</p></div>
-                    <div><span className="text-gic-muted">{t('siteOps.paid')}</span><p className="font-medium">{formatMad(detail.paidAmount || 0)}</p></div>
-                    <div><span className="text-gic-muted">{t('siteOps.progress')}</span><p className="font-medium">{Math.round(Number(detail.progressPct || 0))} %</p></div>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <span className={`mac-chip ${isStOpen(detail) ? 'mac-chip-orange' : 'mac-chip-green'}`}>
-                        {isStOpen(detail) ? t('detail.stOpen') : t('detail.stDone')}
-                      </span>
+                      <p className="text-[16px] font-semibold">{detail.companyName}</p>
+                      <p className="text-[12px] text-gic-muted">
+                        {detail.chantier?.name || '—'} · {stScopeLine(detail, t('msg.wholeSite'), t('detail.subcontractWhole'))}
+                      </p>
+                    </div>
+                    <span className={`mac-chip ${isStOpen(detail) ? 'mac-chip-orange' : 'mac-chip-green'}`}>
+                      {isStOpen(detail) ? t('detail.stOpen') : t('detail.stDone')}
+                    </span>
+                  </div>
+                  <div className="mt-3 mac-kpi-grid mac-kpi-grid-4">
+                    <div className="mac-section-card !py-3 !shadow-none border border-black/[0.04]">
+                      <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('fields.corpsEtat')}</p>
+                      <p className="text-[16px] font-semibold">{detail.corpsEtat || '—'}</p>
+                    </div>
+                    <div className="mac-section-card !py-3 !shadow-none border border-black/[0.04]">
+                      <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('fields.amount')}</p>
+                      <p className="text-[16px] font-semibold">{formatMad(detail.amount || 0)}</p>
+                    </div>
+                    <div className="mac-section-card !py-3 !shadow-none border border-black/[0.04]">
+                      <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('siteOps.paid')}</p>
+                      <p className="text-[16px] font-semibold text-[#34c759]">{formatMad(detail.paidAmount || 0)}</p>
+                    </div>
+                    <div className="mac-section-card !py-3 !shadow-none border border-black/[0.04]">
+                      <p className="text-[10px] uppercase tracking-wide text-gic-muted">{t('siteOps.moneyLeft')}</p>
+                      <p className="text-[16px] font-semibold text-[#ff3b30]">{formatMad(Math.max(0, Number(detail.amount || 0) - Number(detail.paidAmount || 0)))}</p>
                     </div>
                   </div>
                 </div>
-                <SubcontractContractView item={detail} onToggleFollow={toggleFollow} onAddPayment={addPayment} />
+                <SubcontractContractView item={detail} onSetProgress={setFollowProgress} onAddPayment={addPayment} />
               </>
             ) : rows.length === 0 ? (
               <div className="mac-section-card py-10 text-center text-[12px] text-gic-muted">

@@ -262,12 +262,21 @@ function toContract(item: NonNullable<TaskPhaseContext['subcontracts']>[number],
     phone: item.phone,
     amount: item.amount,
     paidAmount: item.paidAmount,
+    progressPct: item.progressPct,
     scope: item.scope,
     phaseLabel: item.phaseLabel,
     startDate: item.startDate,
     endDate: item.endDate,
     payments: item.payments,
+    follows: item.follows,
   };
+}
+
+function followForPhase(contract: TaskSubcontract, phaseLabel: string) {
+  const follows = contract.follows || [];
+  if (!follows.length) return null;
+  return follows.find((f) => f.label === phaseLabel)
+    || (contract.scope === 'phase' ? follows[0] : null);
 }
 
 function PhaseSubcontractPanel({
@@ -295,6 +304,7 @@ function PhaseSubcontractPanel({
   const [endDate, setEndDate] = useState(current?.endDate ? String(current.endDate).slice(0, 10) : '');
   const [saving, setSaving] = useState(false);
   const [contract, setContract] = useState<TaskSubcontract | null>((current || wholeContract)?.id ? toContract((current || wholeContract)!, task.chantierId) : null);
+  const [savingProgress, setSavingProgress] = useState(false);
 
   useEffect(() => {
     if (!task.chantierId) return;
@@ -329,6 +339,32 @@ function PhaseSubcontractPanel({
   ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
   const stOn = choice !== NONE;
   const companyName = choice === NEW ? newName.trim() : choice === NONE ? '' : choice;
+  const stFollow = contract ? followForPhase(contract, phaseLabel) : null;
+  const stProgress = Math.max(0, Math.min(100, Math.round(Number(
+    stFollow?.percent ?? (contract?.scope === 'phase' ? contract?.progressPct : 0) ?? 0,
+  ))));
+
+  async function setStProgress(percent: number) {
+    if (!contract?.id || !contract.chantierId) return;
+    setSavingProgress(true);
+    try {
+      const updated = stFollow
+        ? await api<TaskSubcontract>(`/chantiers/${contract.chantierId}/subcontractors/${contract.id}/follows/${stFollow.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ percent }),
+        })
+        : await api<TaskSubcontract>(`/chantiers/${contract.chantierId}/subcontractors/${contract.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ progressPct: percent, status: percent >= 100 ? 'termine' : 'actif' }),
+        });
+      setContract(toContract({ ...updated, chantierId: contract.chantierId }, contract.chantierId));
+      onSaved?.();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSavingProgress(false);
+    }
+  }
 
   async function save() {
     if (!task.progressId) return;
@@ -444,10 +480,27 @@ function PhaseSubcontractPanel({
         <Btn type="button" onClick={save} disabled={saving}>{t('detail.stSaveContract')}</Btn>
       )}
       {contract?.id && contract.chantierId && (
+        <div className={`rounded-md bg-white/70 p-2 space-y-2${savingProgress ? ' opacity-60' : ''}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[12px] font-semibold text-gic-ink">{t('detail.stPhaseRealization')}</p>
+            <span className={`mac-chip ${stProgress >= 100 ? 'mac-chip-green' : 'mac-chip-gray'}`}>
+              {stProgress >= 100 ? t('pointageMgmt.validated') : t('pointageMgmt.draft')}
+            </span>
+          </div>
+          <ProgressSteps percent={stProgress} onChange={setStProgress} size="sm" />
+          <div className="h-2 overflow-hidden rounded-full bg-black/[0.06]">
+            <div
+              className={`h-full rounded-full transition-all ${stProgress >= 100 ? 'bg-[#34c759]' : 'bg-[#007aff]'}`}
+              style={{ width: `${stProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {contract?.id && contract.chantierId && (
         <PaymentBox
           contract={contract}
           phaseLabel={contract.scope === 'phase' ? undefined : phaseLabel}
-          onPaid={(updated) => { setContract(updated); onSaved?.(); }}
+          onPaid={(updated) => { setContract(toContract({ ...updated, chantierId: contract.chantierId }, contract.chantierId)); onSaved?.(); }}
         />
       )}
     </div>
