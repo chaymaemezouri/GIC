@@ -468,7 +468,11 @@ export default function ProjectDetailPage() {
     api(`/immobilier/properties/${propertyId}`).then((full) => {
       setEditBienId(propertyId);
       setBienFloorLock(null);
-      setBienForm(bienToForm(full));
+      const isRent = propertyDealOf(full) === 'location';
+      const deals = (isRent ? rentals : sales) as Array<{ status?: string; client?: { id?: string }; property?: { id: string } }>;
+      const linked = deals.filter((d) => d.property?.id === propertyId);
+      const deal = linked.find((d) => !['résiliée', 'annulée', 'terminée'].includes(String(d.status || ''))) || linked[0];
+      setBienForm({ ...bienToForm(full), clientId: deal?.client?.id || '' });
       setBienError('');
       setBienOpen(true);
       if (!options?.keepTab) setTab('biens');
@@ -497,6 +501,7 @@ export default function ProjectDetailPage() {
       setEditBienId(null);
       setBienFloorLock(null);
       load();
+      loadDeals();
     } catch (err) {
       setBienError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -1314,6 +1319,7 @@ export default function ProjectDetailPage() {
               <thead>
                 <tr>
                   <Th mac>{t('columns.reference')}</Th>
+                  <Th mac>{t('columns.contractRef')}</Th>
                   <Th mac>{t('columns.designation')}</Th>
                   <Th mac>{t('columns.type')}</Th>
                   <Th mac>{t('columns.status')}</Th>
@@ -1322,9 +1328,27 @@ export default function ProjectDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {(project.properties || []).map((p: any) => (
+                {(project.properties || []).map((p: any) => {
+                  const isRent = propertyDealOf(p) === 'location';
+                  const deals = (isRent ? rentals : sales) as Array<{ id: string; reference: string; status?: string; property?: { id: string } }>;
+                  const linked = deals.filter((d) => d.property?.id === p.id);
+                  const deal = linked.find((d) => !['résiliée', 'annulée', 'terminée'].includes(String(d.status || ''))) || linked[0];
+                  return (
                   <tr key={p.id} className="cursor-pointer hover:bg-gray-50/60" onClick={() => openEditBien(p.id)}>
                     <Td mac className="font-medium text-gic-violet">{p.reference}</Td>
+                    <Td mac>
+                      {deal ? (
+                        <Link
+                          to={isRent ? `/locations/${deal.id}` : `/ventes/${deal.id}`}
+                          className="mac-table-ref"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {deal.reference}
+                        </Link>
+                      ) : (
+                        <span className="text-gic-muted">—</span>
+                      )}
+                    </Td>
                     <Td mac>{p.name}</Td>
                     <Td mac>
                       <StatusPill status={propertyDealOf(p) === 'location' ? 'à louer' : 'à vendre'} quiet />
@@ -1340,7 +1364,8 @@ export default function ProjectDetailPage() {
                       </div>
                     </Td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </TableWrap>
           )}
@@ -1349,13 +1374,13 @@ export default function ProjectDetailPage() {
 
       {tab === 'ventes' && id && (
         <div className="mt-1">
-          <VentesPage projectId={id} embedded onChanged={loadDeals} />
+          <VentesPage projectId={id} embedded onChanged={() => { loadDeals(); load(); }} />
         </div>
       )}
 
       {tab === 'locations' && id && (
         <div className="mt-1">
-          <LocationsPage projectId={id} embedded onChanged={loadDeals} />
+          <LocationsPage projectId={id} embedded onChanged={() => { loadDeals(); load(); }} />
         </div>
       )}
 

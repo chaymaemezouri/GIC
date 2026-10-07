@@ -946,13 +946,79 @@ router.get('/properties/:id', async (req, res) => {
   res.json({ ...property, type, status: occupancyForDeal(deal, property.status) });
 });
 
+async function ensurePropertyContract(
+  property: { id: string; price: number | null; paymentPlan?: string | null },
+  deal: 'vente' | 'location',
+  status: string,
+  clientId: string,
+) {
+  if (deal === 'vente' && status === 'vendu') {
+    const active = await prisma.sale.findFirst({
+      where: { propertyId: property.id, status: { notIn: ['annulée', 'résiliée'] } },
+    });
+    if (active || !clientId) return;
+    const price = Number(property.price || 0);
+    const reference = await nextReference('VNT');
+    await prisma.sale.create({
+      data: {
+        reference,
+        clientId,
+        propertyId: property.id,
+        salePrice: price,
+        netPrice: price,
+        totalPaid: 0,
+        remaining: price,
+        paymentPlan: property.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
+        status: 'en_cours',
+        contractDate: new Date(),
+      },
+    });
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { isBuyer: true, isProspect: false },
+    });
+    return;
+  }
+  if (deal === 'location' && status === 'loué') {
+    const active = await prisma.rental.findFirst({
+      where: { propertyId: property.id, status: { notIn: ['terminée'] } },
+    });
+    if (active || !clientId) return;
+    const rent = Number(property.price || 0);
+    const reference = await nextReference('LOC');
+    const startDate = new Date();
+    await prisma.rental.create({
+      data: {
+        reference,
+        clientId,
+        propertyId: property.id,
+        monthlyRent: rent,
+        remaining: rent,
+        status: 'active',
+        contractDate: startDate,
+        startDate,
+      },
+    });
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { isTenant: true, isProspect: false },
+    });
+  }
+}
+
 router.post('/properties', async (req, res) => {
   const reference = await nextReference('BIEN');
   const deal = propertyDealType(req.body.type, req.body.status);
+  const clientId = String(req.body.clientId || '').trim();
   const body = { ...req.body };
   delete body.type;
+  delete body.clientId;
   body.status = occupancyForDeal(deal, body.status || 'disponible');
   body.paymentPlan = deal === 'vente' && body.paymentPlan === 'echeancier' ? 'echeancier' : 'avance';
+  const needsContract = (deal === 'vente' && body.status === 'vendu') || (deal === 'location' && body.status === 'loué');
+  if (needsContract && !clientId) {
+    return res.status(400).json({ message: 'Choisissez un client pour générer la référence du contrat' });
+  }
   const property = await prisma.property.create({
     data: {
       ...body,
@@ -965,14 +1031,17 @@ router.post('/properties', async (req, res) => {
     },
   });
   await persistPropertyType(property.id, deal);
+  await ensurePropertyContract(property, deal, body.status, clientId);
   await audit(req, 'création', 'Property', property.id, reference);
   res.status(201).json({ ...property, type: deal });
 });
 
 router.put('/properties/:id', async (req, res) => {
   const data = { ...req.body };
+  const clientId = String(req.body.clientId || '').trim();
   delete data.reference;
   delete data.id;
+  delete data.clientId;
   const existing = await prisma.property.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ message: 'Bien introuvable' });
   const types = await loadPropertyTypes([existing.id]);
@@ -993,8 +1062,18 @@ router.put('/properties/:id', async (req, res) => {
   if (data.rooms != null) data.rooms = Number(data.rooms);
   if (data.projectId === '') data.projectId = null;
   if (data.floorId === '') data.floorId = null;
+  const needsContract = (deal === 'vente' && data.status === 'vendu') || (deal === 'location' && data.status === 'loué');
+  if (needsContract && !clientId) {
+    const active = deal === 'vente'
+      ? await prisma.sale.findFirst({ where: { propertyId: existing.id, status: { notIn: ['annulée', 'résiliée'] } } })
+      : await prisma.rental.findFirst({ where: { propertyId: existing.id, status: { notIn: ['terminée'] } } });
+    if (!active) {
+      return res.status(400).json({ message: 'Choisissez un client pour générer la référence du contrat' });
+    }
+  }
   const property = await prisma.property.update({ where: { id: req.params.id }, data });
   if (deal) await persistPropertyType(property.id, deal);
+  await ensurePropertyContract(property, deal, data.status, clientId);
   await audit(req, 'modification', 'Property', property.id, property.reference);
   res.json({ ...property, type: deal, status: occupancyForDeal(deal, property.status) });
 });

@@ -4,6 +4,7 @@ import type { TranslateFn } from '../i18n/types';
 import { api, fetchProjectList } from '../lib/api';
 import { occupancyForDeal, occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
 import { Input, Select } from './ui';
+import { ClientFormPicker } from './ClientFormPicker';
 
 export type BienFormData = {
   name: string;
@@ -11,6 +12,7 @@ export type BienFormData = {
   status: string;
   type: string;
   paymentPlan: 'avance' | 'echeancier';
+  clientId: string;
   surface: string;
   rooms: string;
   price: string;
@@ -28,6 +30,7 @@ export function emptyBienForm(): BienFormData {
     status: 'disponible',
     type: 'vente',
     paymentPlan: 'avance',
+    clientId: '',
     surface: '',
     rooms: '',
     price: '',
@@ -47,6 +50,7 @@ export function bienToForm(p: Record<string, unknown>): BienFormData {
     status,
     type: propertyDealOf({ type: p.type != null ? String(p.type) : '', status }),
     paymentPlan: p.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
+    clientId: String(p.clientId || ''),
     surface: p.surface != null ? String(p.surface) : '',
     rooms: p.rooms != null ? String(p.rooms) : '',
     price: p.price != null ? String(p.price) : '',
@@ -229,6 +233,17 @@ export function BienFormFields({
           <option value="vendu">{t('status.sold')}</option>
         )}
       </Select>
+      {(shownStatus === 'vendu' || shownStatus === 'loué') && (
+        <div className="sm:col-span-2">
+          <ClientFormPicker
+            label={form.type === 'location' ? `${t('fields.tenant')} *` : `${t('fields.buyer')} *`}
+            required
+            value={form.clientId}
+            onChange={(clientId) => setForm({ ...form, clientId })}
+          />
+          <p className="mt-1 text-[11px] text-gic-muted">{t('fields.contractClientHint')}</p>
+        </div>
+      )}
       {form.type === 'vente' && (
         <div className="sm:col-span-2 grid gap-1">
           <Select

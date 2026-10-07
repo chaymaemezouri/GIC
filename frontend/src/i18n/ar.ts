@@ -932,6 +932,7 @@ const ar: Dict = {
     salePaymentPlanAdvanceHint: 'بدون أقساط: السلف فقط حتى السداد الكامل. ستُخفى تبويبة الأقساط.',
     salePaymentPlanScheduleHint: 'مع أقساط: الأداء حسب الجدول (سلف ممكنة على كل قسط). تُستبدل تبويبة السلف الحرة بالسجل التفصيلي.',
     propertyPaymentPlanHint: 'يُطبَّق افتراضياً عند بيع هذا العقار.',
+    contractClientHint: 'مطلوب لإنشاء مرجع العقد (بيع أو كراء).',
     advancePaymentMode: 'طريقة أداء التسبيق',
     saleDocuments: 'وثائق البيع',
     saleDocumentsHint: 'وعد البيع، بطاقة التعريف، إثبات التسبيق…',
@@ -1138,6 +1139,7 @@ const ar: Dict = {
   },
   columns: {
     ref: 'المرجع',
+    contractRef: 'مرجع العقد',
     name: 'الاسم',
     firstName: 'الاسم الشخصي',
     lastName: 'الاسم العائلي',

@@ -932,6 +932,7 @@ const fr: Dict = {
     salePaymentPlanAdvanceHint: 'Sans échéancier : les avances seules jusqu’au paiement total. L’onglet échéancier sera masqué.',
     salePaymentPlanScheduleHint: 'Avec échéancier : paiements par échéances (avances possibles sur chaque échéance). L’onglet avances libres sera remplacé par l’historique détaillé.',
     propertyPaymentPlanHint: 'Appliqué par défaut à la vente de ce bien.',
+    contractClientHint: 'Obligatoire pour générer la référence du contrat (vente ou location).',
     advancePaymentMode: 'Mode de l’avance',
     saleDocuments: 'Documents de la vente',
     saleDocumentsHint: 'Compromis, CIN, justificatif d’avance…',
@@ -1138,6 +1139,7 @@ const fr: Dict = {
   },
   columns: {
     ref: 'Réf.',
+    contractRef: 'Réf. contrat',
     name: 'Nom',
     firstName: 'Prénom',
     lastName: 'Nom',
