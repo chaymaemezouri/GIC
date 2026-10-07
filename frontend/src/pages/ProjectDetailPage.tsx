@@ -813,8 +813,8 @@ export default function ProjectDetailPage() {
     biens: `${t('tabs.properties')} (${project?.properties?.length ?? 0})`,
     galerie: `${t('tabs.gallery')} (${imageCount})`,
     chantiers: `${t('nav.sites')} (${chantierCount})`,
-    ventes: `${t('tabs.sales')} (${sales.length})`,
-    locations: `${t('tabs.rentals')} (${rentals.length})`,
+    ventes: `${t('tabs.sales')} (${(project?.properties || []).filter((p: { type?: string; status?: string }) => propertyDealOf(p) === 'vente').length})`,
+    locations: `${t('tabs.rentals')} (${(project?.properties || []).filter((p: { type?: string; status?: string }) => propertyDealOf(p) === 'location').length})`,
   };
 
   if (!project && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
@@ -971,8 +971,8 @@ export default function ProjectDetailPage() {
                 items: [
                   { id: 'structure', label: t('tabs.structure'), icon: Layers },
                   { id: 'biens', label: t('tabs.properties'), icon: Home, badge: project.properties?.length ?? 0 },
-                  { id: 'ventes', label: t('tabs.sales'), icon: Building2, badge: sales.length },
-                  { id: 'locations', label: t('tabs.rentals'), icon: KeyRound, badge: rentals.length },
+                  { id: 'ventes', label: t('tabs.sales'), icon: Building2, badge: (project.properties || []).filter((p: { type?: string; status?: string }) => propertyDealOf(p) === 'vente').length },
+                  { id: 'locations', label: t('tabs.rentals'), icon: KeyRound, badge: (project.properties || []).filter((p: { type?: string; status?: string }) => propertyDealOf(p) === 'location').length },
                 ],
               },
               {

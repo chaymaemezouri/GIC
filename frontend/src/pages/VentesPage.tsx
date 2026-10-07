@@ -17,6 +17,7 @@ import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection'
 import { printSaleReceipt } from '../lib/printSale';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
+import { propertyDealOf } from '../lib/propertyDeal';
 
 type Sale = {
   id: string;
@@ -26,10 +27,52 @@ type Sale = {
   netPrice: number;
   totalPaid: number;
   remaining: number;
+  pending?: boolean;
   client: { id: string; firstName: string; lastName: string; reference: string };
   property: { id: string; name: string; reference: string };
   _count?: { schedules?: number };
 };
+
+type CatalogProperty = {
+  id: string;
+  reference: string;
+  name: string;
+  status: string;
+  type?: string;
+  paymentPlan?: string | null;
+  price?: number | null;
+};
+
+function withUnsoldProperties(sales: Sale[], props: CatalogProperty[]): Sale[] {
+  const byProperty = new Map(sales.map((s) => [s.property.id, s]));
+  const seen = new Set<string>();
+  const rows: Sale[] = [];
+  for (const p of props.filter((row) => propertyDealOf(row) === 'vente')) {
+    seen.add(p.id);
+    const sale = byProperty.get(p.id);
+    if (sale) {
+      rows.push(sale);
+      continue;
+    }
+    const price = Number(p.price || 0);
+    rows.push({
+      id: `bien:${p.id}`,
+      reference: '',
+      status: p.status || 'disponible',
+      paymentPlan: p.paymentPlan,
+      netPrice: price,
+      totalPaid: 0,
+      remaining: price,
+      pending: true,
+      client: { id: '', firstName: '', lastName: '', reference: '' },
+      property: { id: p.id, name: p.name, reference: p.reference },
+    });
+  }
+  for (const s of sales) {
+    if (!seen.has(s.property.id)) rows.push(s);
+  }
+  return rows;
+}
 
 function salePaymentPlan(s: Sale): 'avance' | 'echeancier' {
   if (s.paymentPlan === 'echeancier') return 'echeancier';
@@ -124,7 +167,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
     qs.set('sort', sortVal);
     qs.set('order', orderVal);
     qs.set('page', String(pageNum));
-    qs.set('limit', String(PAGE_SIZE));
+    qs.set('limit', String(projectId ? 100 : PAGE_SIZE));
     return qs.toString();
   }
 
@@ -161,14 +204,18 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
     Promise.all([
       api<PaginatedResponse<Sale>>(`/transactions/sales?${buildListQuery(pageNum, overrides)}`),
       api<Stats>(`/transactions/sales/stats?${statsQs}`),
+      projectId
+        ? fetchPropertyList<CatalogProperty>({ projectId, limit: 100 })
+        : Promise.resolve(null),
     ])
-      .then(([res, st]) => {
-        setItems(res.items);
-        setPage(res.page);
-        setPages(res.pages);
-        setTotal(res.total);
+      .then(([res, st, catalog]) => {
+        const rows = catalog ? withUnsoldProperties(res.items, catalog) : res.items;
+        setItems(rows);
+        setPage(catalog ? 1 : res.page);
+        setPages(catalog ? 1 : res.pages);
+        setTotal(catalog ? rows.length : res.total);
         setStats(st);
-        syncUrl(res.page);
+        syncUrl(catalog ? 1 : res.page);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('msg.serverError')))
       .finally(() => setLoading(false));
@@ -208,8 +255,14 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
     };
   }, [showFilters]);
 
-  function openCreate() {
-    setForm(emptySaleForm());
+  function openCreate(propertyId = '') {
+    const p = properties.find((row) => row.id === propertyId);
+    setForm({
+      ...emptySaleForm(),
+      propertyId,
+      salePrice: p?.price != null ? String(p.price) : '',
+      paymentPlan: p?.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
+    });
     setError('');
     setOpen(true);
   }
@@ -318,7 +371,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
       <div className="mac-action-group">
         <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
       </div>
-      <Btn icon={Plus} onClick={openCreate}>{t('actions.newSale')}</Btn>
+      <Btn icon={Plus} onClick={() => openCreate()}>{t('actions.newSale')}</Btn>
     </>
   );
 
@@ -478,7 +531,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
         ) : items.length === 0 ? (
-          <EmptyState title={t('msg.emptySales')} action={<Btn icon={Plus} onClick={openCreate}>{t('actions.newSale')}</Btn>} />
+          <EmptyState title={t('msg.emptySales')} action={<Btn icon={Plus} onClick={() => openCreate()}>{t('actions.newSale')}</Btn>} />
         ) : (
           <TableWrap mac>
             <thead>
@@ -500,16 +553,26 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
                 <tr
                   key={s.id}
                   className="cursor-pointer"
-                  onClick={() => navigate(`/ventes/${s.id}`)}
+                  onClick={() => (s.pending ? openCreate(s.property.id) : navigate(`/ventes/${s.id}`))}
                 >
                   <SelectTd selection={selection} row={s} />
                   <Td mac>
-                    <Link to={`/ventes/${s.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{s.reference}</Link>
+                    {s.pending ? (
+                      <span className="text-gic-muted">—</span>
+                    ) : (
+                      <Link to={`/ventes/${s.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{s.reference}</Link>
+                    )}
                   </Td>
                   <Td mac>
-                    <Link to={`/clients/${s.client.id}`} className="hover:text-[#007aff]" onClick={(e) => e.stopPropagation()}>
-                      {s.client.firstName} {s.client.lastName}
-                    </Link>
+                    {s.pending || !s.client.id ? (
+                      <button type="button" className="text-[12px] text-[#007aff] hover:underline" onClick={(e) => { e.stopPropagation(); openCreate(s.property.id); }}>
+                        {t('fields.selectClient')}
+                      </button>
+                    ) : (
+                      <Link to={`/clients/${s.client.id}`} className="hover:text-[#007aff]" onClick={(e) => e.stopPropagation()}>
+                        {s.client.firstName} {s.client.lastName}
+                      </Link>
+                    )}
                   </Td>
                   <Td mac className="mac-table-muted">
                     <Link to={`/biens/${s.property.id}`} className="hover:text-[#007aff]" onClick={(e) => e.stopPropagation()}>{s.property.name}</Link>
@@ -525,9 +588,9 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
                   <Td mac><StatusPill status={s.status} quiet /></Td>
                   <Td mac className="mac-td-actions">
                     <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
-                      <MacActionBtn icon={Eye} tone="blue" title={t('actions.fiche360')} onClick={() => navigate(`/ventes/${s.id}`)} />
-                      <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => navigate(`/ventes/${s.id}`, { state: { edit: true } })} />
-                      {s.remaining > 0 && !['résiliée', 'annulée', 'soldée'].includes(s.status) && (
+                      <MacActionBtn icon={Eye} tone="blue" title={t('actions.fiche360')} onClick={() => navigate(s.pending ? `/biens/${s.property.id}` : `/ventes/${s.id}`)} />
+                      <MacActionBtn icon={Pencil} tone="orange" title={s.pending ? t('actions.newSale') : t('common.edit')} onClick={() => (s.pending ? openCreate(s.property.id) : navigate(`/ventes/${s.id}`, { state: { edit: true } }))} />
+                      {!s.pending && s.remaining > 0 && !['résiliée', 'annulée', 'soldée'].includes(s.status) && (
                         <MacActionBtn
                           icon={Wallet}
                           tone="green"
@@ -541,13 +604,15 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
                           }}
                         />
                       )}
+                      {!s.pending && (
                       <MacActionBtn
                         icon={Printer}
                         tone="gray"
                         title={t('common.print')}
                         onClick={() => api(`/transactions/sales/${s.id}`).then(printSaleReceipt)}
                       />
-                      {!['résiliée', 'annulée', 'soldée'].includes(s.status) && (
+                      )}
+                      {!s.pending && !['résiliée', 'annulée', 'soldée'].includes(s.status) && (
                         <MacActionBtn
                           icon={Ban}
                           tone="red"

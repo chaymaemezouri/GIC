@@ -17,6 +17,7 @@ import { printRentalReceipt } from '../lib/printRental';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
+import { propertyDealOf } from '../lib/propertyDeal';
 
 type Rental = {
   id: string;
@@ -25,9 +26,49 @@ type Rental = {
   monthlyRent: number;
   totalPaid: number;
   remaining: number;
+  pending?: boolean;
   client: { id: string; firstName: string; lastName: string; reference: string };
   property: { id: string; name: string; reference: string };
 };
+
+type CatalogProperty = {
+  id: string;
+  reference: string;
+  name: string;
+  status: string;
+  type?: string;
+  price?: number | null;
+};
+
+function withUnrentedProperties(rentals: Rental[], props: CatalogProperty[]): Rental[] {
+  const byProperty = new Map(rentals.map((r) => [r.property.id, r]));
+  const seen = new Set<string>();
+  const rows: Rental[] = [];
+  for (const p of props.filter((row) => propertyDealOf(row) === 'location')) {
+    seen.add(p.id);
+    const rental = byProperty.get(p.id);
+    if (rental) {
+      rows.push(rental);
+      continue;
+    }
+    const rent = Number(p.price || 0);
+    rows.push({
+      id: `bien:${p.id}`,
+      reference: '',
+      status: p.status || 'disponible',
+      monthlyRent: rent,
+      totalPaid: 0,
+      remaining: rent,
+      pending: true,
+      client: { id: '', firstName: '', lastName: '', reference: '' },
+      property: { id: p.id, name: p.name, reference: p.reference },
+    });
+  }
+  for (const r of rentals) {
+    if (!seen.has(r.property.id)) rows.push(r);
+  }
+  return rows;
+}
 
 type Stats = { total: number; actives: number; terminees: number; encaisse: number; reste: number; mensualites: number };
 
@@ -65,7 +106,7 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Stats>({ total: 0, actives: 0, terminees: 0, encaisse: 0, reste: 0, mensualites: 0 });
   const [clients, setClients] = useState<{ id: string; reference: string; firstName: string; lastName: string }[]>([]);
-  const [properties, setProperties] = useState<{ id: string; reference: string; name: string; status: string; type?: string }[]>([]);
+  const [properties, setProperties] = useState<{ id: string; reference: string; name: string; status: string; type?: string; price?: number | null }[]>([]);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
@@ -108,12 +149,12 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
     qs.set('sort', sort);
     qs.set('order', order);
     qs.set('page', String(pageNum));
-    qs.set('limit', String(PAGE_SIZE));
+    qs.set('limit', String(projectId ? 100 : PAGE_SIZE));
     return qs.toString();
   }
 
   function refreshProperties() {
-    fetchPropertyList<{ id: string; reference: string; name: string; status: string; type?: string }>({
+    fetchPropertyList<{ id: string; reference: string; name: string; status: string; type?: string; price?: number | null }>({
       limit: 500,
       ...(projectId ? { projectId } : {}),
     }).then(setProperties);
@@ -129,12 +170,16 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
     Promise.all([
       api<PaginatedResponse<Rental>>(`/transactions/rentals?${buildListQuery(pageNum, { q: qVal, status, clientId })}`),
       api<Stats>(`/transactions/rentals/stats?${statsQs}`),
+      projectId
+        ? fetchPropertyList<CatalogProperty>({ projectId, limit: 100 })
+        : Promise.resolve(null),
     ])
-      .then(([res, st]) => {
-        setItems(res.items);
-        setPage(res.page);
-        setPages(res.pages);
-        setTotal(res.total);
+      .then(([res, st, catalog]) => {
+        const rows = catalog ? withUnrentedProperties(res.items, catalog) : res.items;
+        setItems(rows);
+        setPage(catalog ? 1 : res.page);
+        setPages(catalog ? 1 : res.pages);
+        setTotal(catalog ? rows.length : res.total);
         setStats(st);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('msg.serverError')))
@@ -176,9 +221,14 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
     };
   }, [showFilters]);
 
-  function openCreate() {
+  function openCreate(propertyId = '') {
+    const p = properties.find((row) => row.id === propertyId);
     setEditId(null);
-    setForm(emptyRentalForm());
+    setForm({
+      ...emptyRentalForm(),
+      propertyId,
+      monthlyRent: p?.price != null ? String(p.price) : '',
+    });
     setError('');
     setOpen(true);
   }
@@ -292,7 +342,7 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
       <div className="mac-action-group">
         <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
       </div>
-      <Btn icon={Plus} onClick={openCreate}>{t('actions.newRental')}</Btn>
+      <Btn icon={Plus} onClick={() => openCreate()}>{t('actions.newRental')}</Btn>
     </>
   );
 
@@ -457,7 +507,7 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
         {loading ? (
           <p className="p-6 text-[12px] text-gic-muted text-center">{t('common.loading')}</p>
         ) : items.length === 0 ? (
-          <EmptyState title={t('msg.emptyRentals')} action={<Btn icon={Plus} onClick={openCreate}>{t('actions.newRental')}</Btn>} />
+          <EmptyState title={t('msg.emptyRentals')} action={<Btn icon={Plus} onClick={() => openCreate()}>{t('actions.newRental')}</Btn>} />
         ) : (
           <TableWrap mac>
             <thead>
@@ -475,15 +525,25 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
             </thead>
             <tbody>
               {items.map((r) => (
-                <tr key={r.id} className="cursor-pointer" onClick={() => navigate(`/locations/${r.id}`)}>
+                <tr key={r.id} className="cursor-pointer" onClick={() => (r.pending ? openCreate(r.property.id) : navigate(`/locations/${r.id}`))}>
                   <SelectTd selection={selection} row={r} />
                   <Td mac>
-                    <Link to={`/locations/${r.id}`} className="mac-table-ref">{r.reference}</Link>
+                    {r.pending ? (
+                      <span className="text-gic-muted">—</span>
+                    ) : (
+                      <Link to={`/locations/${r.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{r.reference}</Link>
+                    )}
                   </Td>
                   <Td mac>
-                    <Link to={`/clients/${r.client.id}`} className="hover:text-[#007aff]">
-                      {r.client.firstName} {r.client.lastName}
-                    </Link>
+                    {r.pending || !r.client.id ? (
+                      <button type="button" className="text-[12px] text-[#007aff] hover:underline" onClick={(e) => { e.stopPropagation(); openCreate(r.property.id); }}>
+                        {t('fields.selectClient')}
+                      </button>
+                    ) : (
+                      <Link to={`/clients/${r.client.id}`} className="hover:text-[#007aff]" onClick={(e) => e.stopPropagation()}>
+                        {r.client.firstName} {r.client.lastName}
+                      </Link>
+                    )}
                   </Td>
                   <Td mac className="mac-table-muted">
                     <Link to={`/biens/${r.property.id}`} className="hover:text-[#007aff]">{r.property.name}</Link>
@@ -496,20 +556,26 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                   </Td>
                   <Td mac className="mac-td-actions">
                     <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
+                      {r.pending ? (
+                        <MacActionBtn icon={Eye} tone="blue" title={t('actions.ficheDetail')} onClick={() => navigate(`/biens/${r.property.id}`)} />
+                      ) : (
                       <Link to={`/locations/${r.id}`} className="mac-action-btn mac-action-btn-blue" title={t('actions.ficheDetail')}>
                         <Eye size={14} strokeWidth={2.15} />
                       </Link>
-                      <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEdit(r)} />
-                      {r.status === 'active' && (
+                      )}
+                      <MacActionBtn icon={Pencil} tone="orange" title={r.pending ? t('actions.newRental') : t('common.edit')} onClick={() => (r.pending ? openCreate(r.property.id) : openEdit(r))} />
+                      {!r.pending && r.status === 'active' && (
                         <MacActionBtn icon={Wallet} tone="green" title={t('actions.payment')} onClick={() => setPayOpen(r.id)} />
                       )}
+                      {!r.pending && (
                       <MacActionBtn
                         icon={Printer}
                         tone="gray"
                         title={t('common.print')}
                         onClick={() => api(`/transactions/rentals/${r.id}`).then(printRentalReceipt)}
                       />
-                      {r.status === 'active' && (
+                      )}
+                      {!r.pending && r.status === 'active' && (
                         <MacActionBtn
                           icon={Ban}
                           tone="red"
