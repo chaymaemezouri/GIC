@@ -172,7 +172,7 @@ async function recalculateRentalBalances(rentalId: string) {
   });
 }
 
-function buildSaleWhere(q: string, status: string, clientId: string) {
+function buildSaleWhere(q: string, status: string, clientId: string, projectId = '') {
   return {
     AND: [
       q
@@ -189,15 +189,23 @@ function buildSaleWhere(q: string, status: string, clientId: string) {
         : {},
       status ? { status } : {},
       clientId ? { clientId } : {},
+      projectId ? { property: { projectId } } : {},
     ],
   };
 }
 
+function saleListFilters(req: { query: Record<string, unknown> }) {
+  return {
+    q: String(req.query.q || '').trim(),
+    status: String(req.query.status || ''),
+    clientId: String(req.query.clientId || ''),
+    projectId: String(req.query.projectId || ''),
+  };
+}
+
 router.get('/sales/export/csv', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
-  const where = buildSaleWhere(q, status, clientId);
+  const { q, status, clientId, projectId } = saleListFilters(req);
+  const where = buildSaleWhere(q, status, clientId, projectId);
   const sales = await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
@@ -216,10 +224,8 @@ router.get('/sales/export/csv', async (req, res) => {
 });
 
 router.get('/sales/export/xlsx', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
-  const where = buildSaleWhere(q, status, clientId);
+  const { q, status, clientId, projectId } = saleListFilters(req);
+  const where = buildSaleWhere(q, status, clientId, projectId);
   const sales = await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
@@ -243,10 +249,8 @@ router.get('/sales/export/xlsx', async (req, res) => {
 });
 
 router.get('/sales/export/pdf', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
-  const where = buildSaleWhere(q, status, clientId);
+  const { q, status, clientId, projectId } = saleListFilters(req);
+  const where = buildSaleWhere(q, status, clientId, projectId);
   const sales = await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
@@ -277,10 +281,8 @@ router.get('/sales/export/pdf', async (req, res) => {
 });
 
 router.get('/sales/stats', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
-  const baseWhere = buildSaleWhere(q, status, clientId);
+  const { q, status, clientId, projectId } = saleListFilters(req);
+  const baseWhere = buildSaleWhere(q, status, clientId, projectId);
   const activeFilter = { AND: [baseWhere, { status: { notIn: ['annulée', 'résiliée'] } }] };
   const [total, soldees, enCours, agg] = await Promise.all([
     prisma.sale.count({ where: activeFilter }),
@@ -302,9 +304,7 @@ router.get('/sales/stats', async (req, res) => {
 });
 
 router.get('/sales', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
+  const { q, status, clientId, projectId } = saleListFilters(req);
   const sort = String(req.query.sort || 'createdAt');
   const order = req.query.order === 'asc' ? 'asc' : 'desc';
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -317,7 +317,7 @@ router.get('/sales', async (req, res) => {
         ? { remaining: order as 'asc' | 'desc' }
         : { createdAt: order as 'asc' | 'desc' };
 
-  const where = buildSaleWhere(q, status, clientId);
+  const where = buildSaleWhere(q, status, clientId, projectId);
   const [items, total] = await Promise.all([
     prisma.sale.findMany({
       where,
@@ -325,6 +325,7 @@ router.get('/sales', async (req, res) => {
         client: { select: { id: true, reference: true, firstName: true, lastName: true } },
         property: { select: { id: true, reference: true, name: true, projectId: true } },
         payments: { orderBy: { date: 'desc' }, take: 1 },
+        _count: { select: { schedules: true } },
       },
       orderBy,
       skip,
@@ -340,6 +341,7 @@ router.post('/sales', async (req, res) => {
   if (!clientId || !propertyId || salePrice == null) {
     return res.status(400).json({ message: 'Client, bien et prix obligatoires' });
   }
+  const paymentPlan = req.body.paymentPlan === 'echeancier' ? 'echeancier' : 'avance';
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   if (!property) return res.status(404).json({ message: 'Bien introuvable' });
   const active = await prisma.sale.findFirst({
@@ -365,6 +367,7 @@ router.post('/sales', async (req, res) => {
         totalPaid: advanceAmount,
         remaining,
         contractType,
+        paymentPlan,
         description,
         status: status || 'en_cours',
         contractDate: req.body.contractDate ? new Date(req.body.contractDate) : new Date(),
@@ -547,6 +550,9 @@ router.put('/sales/:id', async (req, res) => {
   const data: Record<string, unknown> = {};
   if (req.body.description != null) data.description = req.body.description;
   if (req.body.contractType != null) data.contractType = req.body.contractType;
+  if (req.body.paymentPlan === 'avance' || req.body.paymentPlan === 'echeancier') {
+    data.paymentPlan = req.body.paymentPlan;
+  }
   if (req.body.contractDate != null) data.contractDate = new Date(req.body.contractDate);
   if (req.body.status != null) data.status = req.body.status;
   if (req.body.sellerSignatureDate !== undefined) data.sellerSignatureDate = req.body.sellerSignatureDate || null;
@@ -608,6 +614,7 @@ router.post('/sales/:id/resiliate', async (req, res) => {
           totalPaid: 0,
           remaining: sale.netPrice,
           contractType: sale.contractType,
+          paymentPlan: sale.paymentPlan || 'avance',
           status: 'brouillon',
           description: `Reprise après résiliation ${sale.reference}`,
         },
@@ -656,7 +663,7 @@ router.delete('/sales/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-function buildRentalWhere(q: string, status: string, clientId: string) {
+function buildRentalWhere(q: string, status: string, clientId: string, projectId = '') {
   return {
     AND: [
       q
@@ -673,15 +680,23 @@ function buildRentalWhere(q: string, status: string, clientId: string) {
         : {},
       status ? { status } : {},
       clientId ? { clientId } : {},
+      projectId ? { property: { projectId } } : {},
     ],
   };
 }
 
+function rentalListFilters(req: { query: Record<string, unknown> }) {
+  return {
+    q: String(req.query.q || '').trim(),
+    status: String(req.query.status || ''),
+    clientId: String(req.query.clientId || ''),
+    projectId: String(req.query.projectId || ''),
+  };
+}
+
 router.get('/rentals/export/csv', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
-  const where = buildRentalWhere(q, status, clientId);
+  const { q, status, clientId, projectId } = rentalListFilters(req);
+  const where = buildRentalWhere(q, status, clientId, projectId);
   const rentals = await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
@@ -699,10 +714,8 @@ router.get('/rentals/export/csv', async (req, res) => {
 });
 
 router.get('/rentals/export/xlsx', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
-  const where = buildRentalWhere(q, status, clientId);
+  const { q, status, clientId, projectId } = rentalListFilters(req);
+  const where = buildRentalWhere(q, status, clientId, projectId);
   const rentals = await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
@@ -726,10 +739,8 @@ router.get('/rentals/export/xlsx', async (req, res) => {
 });
 
 router.get('/rentals/export/pdf', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
-  const where = buildRentalWhere(q, status, clientId);
+  const { q, status, clientId, projectId } = rentalListFilters(req);
+  const where = buildRentalWhere(q, status, clientId, projectId);
   const rentals = await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
@@ -758,10 +769,8 @@ router.get('/rentals/export/pdf', async (req, res) => {
 });
 
 router.get('/rentals/stats', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
-  const baseWhere = buildRentalWhere(q, status, clientId);
+  const { q, status, clientId, projectId } = rentalListFilters(req);
+  const baseWhere = buildRentalWhere(q, status, clientId, projectId);
   const activeFilter = { AND: [baseWhere, { status: 'active' }] };
   const [total, actives, terminees, agg] = await Promise.all([
     prisma.rental.count({ where: baseWhere }),
@@ -783,9 +792,7 @@ router.get('/rentals/stats', async (req, res) => {
 });
 
 router.get('/rentals', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const status = String(req.query.status || '');
-  const clientId = String(req.query.clientId || '');
+  const { q, status, clientId, projectId } = rentalListFilters(req);
   const sort = String(req.query.sort || 'createdAt');
   const order = req.query.order === 'asc' ? 'asc' : 'desc';
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -798,7 +805,7 @@ router.get('/rentals', async (req, res) => {
         ? { monthlyRent: order as 'asc' | 'desc' }
         : { createdAt: order as 'asc' | 'desc' };
 
-  const where = buildRentalWhere(q, status, clientId);
+  const where = buildRentalWhere(q, status, clientId, projectId);
   const [items, total] = await Promise.all([
     prisma.rental.findMany({
       where,

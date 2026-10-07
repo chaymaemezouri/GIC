@@ -952,6 +952,7 @@ router.post('/properties', async (req, res) => {
   const body = { ...req.body };
   delete body.type;
   body.status = occupancyForDeal(deal, body.status || 'disponible');
+  body.paymentPlan = deal === 'vente' && body.paymentPlan === 'echeancier' ? 'echeancier' : 'avance';
   const property = await prisma.property.create({
     data: {
       ...body,
@@ -984,6 +985,9 @@ router.put('/properties/:id', async (req, res) => {
     data.status = deal === 'location' ? 'loué' : 'vendu';
   }
   data.status = occupancyForDeal(deal, data.status ?? existing.status);
+  if (data.paymentPlan != null || deal !== 'vente') {
+    data.paymentPlan = deal === 'vente' && data.paymentPlan === 'echeancier' ? 'echeancier' : 'avance';
+  }
   if (data.price != null) data.price = Number(data.price);
   if (data.surface != null) data.surface = Number(data.surface);
   if (data.rooms != null) data.rooms = Number(data.rooms);

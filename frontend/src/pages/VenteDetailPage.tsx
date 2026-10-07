@@ -144,6 +144,15 @@ export default function VenteDetailPage() {
     if (tab === 'documents') loadDocuments();
   }, [tab, id]);
 
+  useEffect(() => {
+    if (!sale) return;
+    const plan = sale.paymentPlan === 'echeancier'
+      || (!sale.paymentPlan && (sale.schedules || []).length > 0)
+      ? 'echeancier'
+      : 'avance';
+    if (plan === 'avance' && tab === 'echeancier') setTab('paiements');
+  }, [sale?.id, sale?.paymentPlan, sale?.schedules?.length, tab]);
+
   async function onDocUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !id) return;
@@ -178,9 +187,16 @@ export default function VenteDetailPage() {
   }
 
   useEffect(() => {
-    if (sale && (location.state as { edit?: boolean } | null)?.edit) {
+    const st = location.state as { edit?: boolean; tab?: Tab } | null;
+    if (!sale || !st) return;
+    if (st.tab === 'echeancier' || st.tab === 'paiements' || st.tab === 'infos' || st.tab === 'documents' || st.tab === 'historique') {
+      setTab(st.tab);
+    }
+    if (st.edit) {
       setForm(saleToForm(sale));
       setEditOpen(true);
+    }
+    if (st.edit || st.tab) {
       navigate(location.pathname, { replace: true, state: null });
     }
   }, [sale, location.state, location.pathname, navigate]);
@@ -333,18 +349,41 @@ export default function VenteDetailPage() {
 
   const closed = ['résiliée', 'annulée'].includes(sale.status);
   const canPay = sale.remaining > 0 && !['résiliée', 'annulée', 'soldée'].includes(sale.status);
+  const paymentPlan: 'avance' | 'echeancier' = sale.paymentPlan === 'echeancier'
+    || (!sale.paymentPlan && (sale.schedules || []).length > 0)
+    ? 'echeancier'
+    : 'avance';
+  const byAdvance = paymentPlan === 'avance';
+  const bySchedule = paymentPlan === 'echeancier';
   const payProgress = sale.netPrice > 0
     ? Math.min(100, Math.round((sale.totalPaid / sale.netPrice) * 100))
     : 0;
   const firstAcompte = [...(sale.payments || [])]
     .filter((p: { nature?: string }) => p.nature === 'acompte')
     .sort((a: { date?: string }, b: { date?: string }) => String(a.date || '').localeCompare(String(b.date || '')))[0];
+  const schedulePayments = (sale.payments || []).filter((p: { scheduleId?: string | null }) => p.scheduleId);
+  const freeAdvancePayments = (sale.payments || []).filter((p: { scheduleId?: string | null }) => !p.scheduleId);
+  const scheduleById = new Map(
+    (sale.schedules || []).map((s: { id: string; label?: string | null; dueDate: string; amount: number; status: string; payments?: { amount: number }[] }) => [s.id, s]),
+  );
 
   function paymentNatureLabel(nature?: string) {
     if (nature === 'acompte') return t('fields.paymentNatureAdvance');
     if (nature === 'echeance') return t('fields.paymentNatureInstallment');
-    if (nature === 'solde') return t('fields.paymentNatureBalance');
+    if (nature === 'solde') return t('fields.paymentNatureTotal') || t('fields.paymentNatureBalance');
     return nature || '—';
+  }
+
+  function scheduleLabelOf(scheduleId?: string | null) {
+    if (!scheduleId) return '—';
+    const s = scheduleById.get(scheduleId);
+    if (!s) return '—';
+    return s.label || formatDate(s.dueDate);
+  }
+
+  function schedulePaidOf(s: { amount: number; status: string; payments?: { amount: number }[] }) {
+    if (s.payments?.length) return s.payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    return s.status === 'paid' ? Number(s.amount || 0) : 0;
   }
 
   return (
@@ -374,8 +413,11 @@ export default function VenteDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
-          {canPay && (
+          {canPay && byAdvance && (
             <Btn icon={Wallet} onClick={openPayModal}>{t('tabs.paymentByAdvance')}</Btn>
+          )}
+          {canPay && bySchedule && (
+            <Btn icon={Calendar} onClick={() => setTab('echeancier')}>{t('tabs.paymentBySchedule')}</Btn>
           )}
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={() => printSaleReceipt(sale)} />
@@ -425,8 +467,15 @@ export default function VenteDetailPage() {
             ariaLabel={t('detail.sectionsSaleAria')}
             items={[
               { id: 'infos', label: t('tabs.informations'), icon: Info },
-              { id: 'echeancier', label: t('tabs.paymentBySchedule'), icon: Calendar, badge: sale.schedules?.length || 0 },
-              { id: 'paiements', label: t('tabs.paymentByAdvance'), icon: Wallet, badge: sale.payments?.length || 0 },
+              ...(bySchedule
+                ? [{ id: 'echeancier', label: t('tabs.paymentBySchedule'), icon: Calendar, badge: sale.schedules?.length || 0 }]
+                : []),
+              {
+                id: 'paiements',
+                label: bySchedule ? t('tabs.scheduleHistoryDetail') : t('tabs.paymentByAdvance'),
+                icon: Wallet,
+                badge: (bySchedule ? schedulePayments : freeAdvancePayments).length || sale.payments?.length || 0,
+              },
               { id: 'documents', label: t('tabs.documents'), icon: FileText, badge: documents.length || sale.documents?.length || 0 },
               { id: 'historique', label: t('tabs.history'), icon: History },
             ]}
@@ -506,8 +555,12 @@ export default function VenteDetailPage() {
                 <div className="grid sm:grid-cols-2 gap-3">
                   <InfoRow label={t('fields.salePriceShort')} value={formatMad(sale.salePrice)} />
                   <InfoRow label={t('fields.discount')} value={formatMad(sale.discount)} />
-                  <InfoRow label={t('fields.initialAdvance')} value={formatMad(sale.advance)} />
-                  {firstAcompte && (
+                  <InfoRow
+                    label={t('fields.salePaymentPlan')}
+                    value={bySchedule ? t('tabs.paymentBySchedule') : t('tabs.paymentByAdvance')}
+                  />
+                  {byAdvance && <InfoRow label={t('fields.initialAdvance')} value={formatMad(sale.advance)} />}
+                  {byAdvance && firstAcompte && (
                     <>
                       <InfoRow label={t('fields.advancePaymentMode')} value={paymentModeLabel(firstAcompte.operationType)} />
                       {isBankPaymentMode(firstAcompte.operationType) && (
@@ -548,7 +601,7 @@ export default function VenteDetailPage() {
           </div>
         )}
 
-        {tab === 'echeancier' && id && (
+        {tab === 'echeancier' && bySchedule && id && (
           <PaymentSchedulePanel
             entityType="sales"
             entityId={id}
@@ -558,7 +611,90 @@ export default function VenteDetailPage() {
           />
         )}
 
-        {tab === 'paiements' && (
+        {tab === 'paiements' && bySchedule && (
+          <div className="mt-1 space-y-4">
+            <div>
+              <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('tabs.scheduleHistoryDetail')}</p>
+              <p className="text-[12px] text-gic-muted mt-0.5">{t('fields.salePaymentPlanScheduleHint')}</p>
+            </div>
+            {(sale.schedules || []).length === 0 ? (
+              <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.noSchedules')}</p>
+            ) : (
+              <TableWrap mac>
+                <thead>
+                  <tr>
+                    <Th mac>{t('fields.paymentSchedule')}</Th>
+                    <Th mac>{t('fields.dueDate')}</Th>
+                    <Th mac>{t('columns.amount')}</Th>
+                    <Th mac>{t('columns.paid')}</Th>
+                    <Th mac>{t('columns.remaining')}</Th>
+                    <Th mac>{t('columns.status')}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...(sale.schedules as Array<{ id: string; label?: string | null; dueDate: string; amount: number; status: string; payments?: { amount: number }[] }>)]
+                    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+                    .map((s) => {
+                      const paid = Math.round(schedulePaidOf(s) * 100) / 100;
+                      const reste = Math.round(Math.max(0, Number(s.amount) - paid) * 100) / 100;
+                      const fullyPaid = reste <= 0.01 || s.status === 'paid';
+                      const overdue = !fullyPaid && (s.status === 'overdue' || new Date(s.dueDate) < new Date());
+                      const statusKey = fullyPaid ? 'soldée' : overdue ? 'retard' : 'en_cours';
+                      return (
+                        <tr key={s.id}>
+                          <Td mac className="font-medium">{s.label || '—'}</Td>
+                          <Td mac className="mac-table-muted">{formatDate(s.dueDate)}</Td>
+                          <Td mac>{formatMad(s.amount)}</Td>
+                          <Td mac className="text-gic-emerald">{formatMad(paid)}</Td>
+                          <Td mac className={reste > 0 ? 'text-gic-coral font-medium' : ''}>{formatMad(reste)}</Td>
+                          <Td mac><StatusPill status={statusKey} quiet /></Td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </TableWrap>
+            )}
+            {schedulePayments.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[12px] font-medium text-gic-ink tracking-tight">{t('rental.monthHistory')}</p>
+                <TableWrap mac>
+                  <thead>
+                    <tr>
+                      <Th mac>{t('columns.receipt')}</Th>
+                      <Th mac>{t('fields.paymentSchedule')}</Th>
+                      <Th mac>{t('columns.date')}</Th>
+                      <Th mac>{t('columns.amount')}</Th>
+                      <Th mac>{t('fields.nature')}</Th>
+                      <Th mac>{t('columns.mode')}</Th>
+                      <Th mac>{t('fields.payer')}</Th>
+                      <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {schedulePayments.map((p: any) => (
+                      <tr key={p.id}>
+                        <Td mac><span className="mac-table-ref">{p.receiptNo}</span></Td>
+                        <Td mac className="mac-table-muted">{scheduleLabelOf(p.scheduleId)}</Td>
+                        <Td mac className="mac-table-muted">{formatDate(p.date)}</Td>
+                        <Td mac className="font-medium">{formatMad(p.amount)}</Td>
+                        <Td mac>{paymentNatureLabel(p.nature)}</Td>
+                        <Td mac>{paymentModeLabel(p.operationType)}</Td>
+                        <Td mac className="mac-table-muted">{p.payerName || '—'}</Td>
+                        <Td mac className="mac-td-actions">
+                          <div className="mac-actions">
+                            <MacActionBtn icon={Printer} tone="gray" title={t('actions.printReceipt')} onClick={() => printPaymentReceipt(p)} />
+                          </div>
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </TableWrap>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'paiements' && byAdvance && (
           <div className="mt-1">
             <div className="flex items-center justify-between gap-2 mb-3">
               <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('tabs.paymentByAdvance')}</p>

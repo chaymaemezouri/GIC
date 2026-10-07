@@ -22,12 +22,20 @@ type Sale = {
   id: string;
   reference: string;
   status: string;
+  paymentPlan?: string | null;
   netPrice: number;
   totalPaid: number;
   remaining: number;
   client: { id: string; firstName: string; lastName: string; reference: string };
   property: { id: string; name: string; reference: string };
+  _count?: { schedules?: number };
 };
+
+function salePaymentPlan(s: Sale): 'avance' | 'echeancier' {
+  if (s.paymentPlan === 'echeancier') return 'echeancier';
+  if (s.paymentPlan === 'avance') return 'avance';
+  return (s._count?.schedules || 0) > 0 ? 'echeancier' : 'avance';
+}
 
 type Stats = { total: number; soldees: number; enCours: number; encaisse: number; reste: number; volume: number };
 
@@ -49,23 +57,31 @@ function formatMadCompact(n: number | null | undefined) {
   return formatMad(v);
 }
 
-export default function VentesPage() {
+type VentesPageProps = {
+  projectId?: string;
+  embedded?: boolean;
+  onChanged?: () => void;
+};
+
+export default function VentesPage({ projectId, embedded, onChanged }: VentesPageProps = {}) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<Sale[]>([]);
-  const [page, setPage] = useState(Number(searchParams.get('page') || 1));
+  const [page, setPage] = useState(embedded ? 1 : Number(searchParams.get('page') || 1));
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Stats>({ total: 0, soldees: 0, enCours: 0, encaisse: 0, reste: 0, volume: 0 });
   const [clients, setClients] = useState<{ id: string; reference: string; firstName: string; lastName: string }[]>([]);
-  const [properties, setProperties] = useState<{ id: string; reference: string; name: string; status: string }[]>([]);
-  const [q, setQ] = useState(searchParams.get('q') || '');
-  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
-  const [clientFilter, setClientFilter] = useState(searchParams.get('clientId') || '');
-  const [sort, setSort] = useState(searchParams.get('sort') || 'createdAt');
+  const [properties, setProperties] = useState<{ id: string; reference: string; name: string; status: string; type?: string; paymentPlan?: string | null; price?: number | null }[]>([]);
+  const [q, setQ] = useState(embedded ? '' : (searchParams.get('q') || ''));
+  const [statusFilter, setStatusFilter] = useState(embedded ? '' : (searchParams.get('status') || ''));
+  const [clientFilter, setClientFilter] = useState(embedded ? '' : (searchParams.get('clientId') || ''));
+  const [sort, setSort] = useState(embedded ? 'createdAt' : (searchParams.get('sort') || 'createdAt'));
   const [order, setOrder] = useState<SortOrder>(
-    (searchParams.get('order') as SortOrder) || defaultOrderForSort(searchParams.get('sort') || 'createdAt'),
+    embedded
+      ? 'desc'
+      : ((searchParams.get('order') as SortOrder) || defaultOrderForSort(searchParams.get('sort') || 'createdAt')),
   );
   const [showFilters, setShowFilters] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
@@ -87,6 +103,7 @@ export default function VentesPage() {
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (clientId) qs.set('clientId', clientId);
+    if (projectId) qs.set('projectId', projectId);
     return qs.toString();
   }
 
@@ -103,6 +120,7 @@ export default function VentesPage() {
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (clientId) qs.set('clientId', clientId);
+    if (projectId) qs.set('projectId', projectId);
     qs.set('sort', sortVal);
     qs.set('order', orderVal);
     qs.set('page', String(pageNum));
@@ -111,6 +129,7 @@ export default function VentesPage() {
   }
 
   function syncUrl(pageNum = page) {
+    if (embedded) return;
     const qs = new URLSearchParams();
     if (q) qs.set('q', q);
     if (statusFilter) qs.set('status', statusFilter);
@@ -119,6 +138,13 @@ export default function VentesPage() {
     if (order !== defaultOrderForSort(sort)) qs.set('order', order);
     if (pageNum > 1) qs.set('page', String(pageNum));
     setSearchParams(qs, { replace: true });
+  }
+
+  function refreshProperties() {
+    fetchPropertyList<{ id: string; reference: string; name: string; status: string; type?: string; paymentPlan?: string | null; price?: number | null }>({
+      limit: 500,
+      ...(projectId ? { projectId } : {}),
+    }).then(setProperties);
   }
 
   function load(
@@ -149,21 +175,22 @@ export default function VentesPage() {
   }
 
   useEffect(() => {
-    load(page);
-  }, []);
+    load(1);
+    setPage(1);
+  }, [projectId]);
 
   useEffect(() => {
-    if (searchParams.get('create') !== '1') return;
+    if (embedded || searchParams.get('create') !== '1') return;
     openCreate();
     const qs = new URLSearchParams(searchParams);
     qs.delete('create');
     setSearchParams(qs, { replace: true });
-  }, [searchParams]);
+  }, [searchParams, embedded]);
 
   useEffect(() => {
     fetchClientList<{ id: string; reference: string; firstName: string; lastName: string }>().then(setClients);
-    fetchPropertyList<{ id: string; reference: string; name: string; status: string }>().then(setProperties);
-  }, []);
+    refreshProperties();
+  }, [projectId]);
 
   useEffect(() => {
     if (!showFilters) return;
@@ -199,7 +226,8 @@ export default function VentesPage() {
       setOpen(false);
       load(1);
       setPage(1);
-      fetchPropertyList<{ id: string; reference: string; name: string; status: string }>().then(setProperties);
+      refreshProperties();
+      onChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -221,6 +249,7 @@ export default function VentesPage() {
       setPayOpen(null);
       setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null });
       load(page);
+      onChanged?.();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
@@ -236,7 +265,8 @@ export default function VentesPage() {
       setResiliateId(null);
       setResiliateMotif('');
       load(page);
-      fetchPropertyList<{ id: string; reference: string; name: string; status: string }>().then(setProperties);
+      refreshProperties();
+      onChanged?.();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
@@ -258,6 +288,10 @@ export default function VentesPage() {
         { label: t('columns.netPrice'), value: (s) => formatMad(s.netPrice), align: 'right', total: (rows) => formatMad(rows.reduce((sum, s) => sum + Number(s.netPrice || 0), 0)) },
         { label: t('columns.paid'), value: (s) => formatMad(s.totalPaid), align: 'right', total: (rows) => formatMad(rows.reduce((sum, s) => sum + Number(s.totalPaid || 0), 0)) },
         { label: t('columns.remaining'), value: (s) => formatMad(s.remaining), align: 'right', total: (rows) => formatMad(rows.reduce((sum, s) => sum + Number(s.remaining || 0), 0)) },
+        {
+          label: t('fields.salePaymentPlan'),
+          value: (s) => (salePaymentPlan(s) === 'echeancier' ? t('tabs.paymentBySchedule') : t('tabs.paymentByAdvance')),
+        },
         { label: t('columns.status'), value: (s) => (s.status ?? '').replace(/_/g, ' ') },
       ],
       rows: selection.count ? selection.rows : () => fetchAllRows<Sale>('/transactions/sales', buildListQuery(1)),
@@ -276,24 +310,30 @@ export default function VentesPage() {
 
   const hasActiveFilters = !!statusFilter || !!clientFilter || !!q;
 
+  const headerActions = (
+    <>
+      <Btn variant="secondary" icon={Download} onClick={() => downloadCsv(`/transactions/sales/export/csv?${buildStatsQuery()}`, 'ventes-gic.csv')}>{t('common.csv')}</Btn>
+      <Btn variant="secondary" icon={Download} onClick={() => downloadExcel(`/transactions/sales/export/xlsx?${buildStatsQuery()}`, 'ventes-gic.xlsx')}>{t('common.excel')}</Btn>
+      <Btn variant="secondary" icon={Download} onClick={() => downloadPdf(`/transactions/sales/export/pdf?${buildStatsQuery()}`, 'ventes-gic.pdf')}>PDF</Btn>
+      <div className="mac-action-group">
+        <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
+      </div>
+      <Btn icon={Plus} onClick={openCreate}>{t('actions.newSale')}</Btn>
+    </>
+  );
+
   return (
     <div className="space-y-0">
-      <PageHeader
-        mac
-        title={t('pages.sales')}
-        subtitle={t('pages.salesSubtitle')}
-        actions={
-          <>
-            <Btn variant="secondary" icon={Download} onClick={() => downloadCsv(`/transactions/sales/export/csv?${buildStatsQuery()}`, 'ventes-gic.csv')}>{t('common.csv')}</Btn>
-            <Btn variant="secondary" icon={Download} onClick={() => downloadExcel(`/transactions/sales/export/xlsx?${buildStatsQuery()}`, 'ventes-gic.xlsx')}>{t('common.excel')}</Btn>
-            <Btn variant="secondary" icon={Download} onClick={() => downloadPdf(`/transactions/sales/export/pdf?${buildStatsQuery()}`, 'ventes-gic.pdf')}>PDF</Btn>
-            <div className="mac-action-group">
-              <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
-            </div>
-            <Btn icon={Plus} onClick={openCreate}>{t('actions.newSale')}</Btn>
-          </>
-        }
-      />
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2 mb-3">{headerActions}</div>
+      ) : (
+        <PageHeader
+          mac
+          title={t('pages.sales')}
+          subtitle={t('pages.salesSubtitle')}
+          actions={headerActions}
+        />
+      )}
 
       <div className="mac-kpi-grid mac-kpi-grid-4">
         <KpiCard title={t('pages.sales')} value={stats.total} icon={FileText} tone="violet" />
@@ -450,6 +490,7 @@ export default function VentesPage() {
                 <Th mac>{t('columns.netPrice')}</Th>
                 <Th mac>{t('columns.paid')}</Th>
                 <Th mac>{t('columns.remaining')}</Th>
+                <Th mac>{t('fields.salePaymentPlan')}</Th>
                 <Th mac>{t('columns.status')}</Th>
                 <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
               </tr>
@@ -476,13 +517,29 @@ export default function VentesPage() {
                   <Td mac>{formatMad(s.netPrice)}</Td>
                   <Td mac className="text-gic-emerald">{formatMad(s.totalPaid)}</Td>
                   <Td mac className={s.remaining > 0 ? 'text-gic-coral font-medium' : ''}>{formatMad(s.remaining)}</Td>
+                  <Td mac>
+                    <span className={`mac-chip ${salePaymentPlan(s) === 'echeancier' ? 'mac-chip-blue' : 'mac-chip-gray'}`}>
+                      {salePaymentPlan(s) === 'echeancier' ? t('tabs.paymentBySchedule') : t('tabs.paymentByAdvance')}
+                    </span>
+                  </Td>
                   <Td mac><StatusPill status={s.status} quiet /></Td>
                   <Td mac className="mac-td-actions">
                     <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
                       <MacActionBtn icon={Eye} tone="blue" title={t('actions.fiche360')} onClick={() => navigate(`/ventes/${s.id}`)} />
                       <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => navigate(`/ventes/${s.id}`, { state: { edit: true } })} />
                       {s.remaining > 0 && !['résiliée', 'annulée', 'soldée'].includes(s.status) && (
-                        <MacActionBtn icon={Wallet} tone="green" title={t('actions.payment')} onClick={() => setPayOpen(s.id)} />
+                        <MacActionBtn
+                          icon={Wallet}
+                          tone="green"
+                          title={salePaymentPlan(s) === 'echeancier' ? t('tabs.paymentBySchedule') : t('tabs.paymentByAdvance')}
+                          onClick={() => {
+                            if (salePaymentPlan(s) === 'echeancier') {
+                              navigate(`/ventes/${s.id}`, { state: { tab: 'echeancier' } });
+                            } else {
+                              setPayOpen(s.id);
+                            }
+                          }}
+                        />
                       )}
                       <MacActionBtn
                         icon={Printer}

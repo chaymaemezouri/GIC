@@ -50,7 +50,13 @@ function formatMadCompact(n: number | null | undefined) {
   return formatMad(v);
 }
 
-export default function LocationsPage() {
+type LocationsPageProps = {
+  projectId?: string;
+  embedded?: boolean;
+  onChanged?: () => void;
+};
+
+export default function LocationsPage({ projectId, embedded, onChanged }: LocationsPageProps = {}) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [items, setItems] = useState<Rental[]>([]);
@@ -59,7 +65,7 @@ export default function LocationsPage() {
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Stats>({ total: 0, actives: 0, terminees: 0, encaisse: 0, reste: 0, mensualites: 0 });
   const [clients, setClients] = useState<{ id: string; reference: string; firstName: string; lastName: string }[]>([]);
-  const [properties, setProperties] = useState<{ id: string; reference: string; name: string; status: string }[]>([]);
+  const [properties, setProperties] = useState<{ id: string; reference: string; name: string; status: string; type?: string }[]>([]);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
@@ -86,6 +92,7 @@ export default function LocationsPage() {
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (clientId) qs.set('clientId', clientId);
+    if (projectId) qs.set('projectId', projectId);
     return qs.toString();
   }
 
@@ -97,11 +104,19 @@ export default function LocationsPage() {
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (clientId) qs.set('clientId', clientId);
+    if (projectId) qs.set('projectId', projectId);
     qs.set('sort', sort);
     qs.set('order', order);
     qs.set('page', String(pageNum));
     qs.set('limit', String(PAGE_SIZE));
     return qs.toString();
+  }
+
+  function refreshProperties() {
+    fetchPropertyList<{ id: string; reference: string; name: string; status: string; type?: string }>({
+      limit: 500,
+      ...(projectId ? { projectId } : {}),
+    }).then(setProperties);
   }
 
   function load(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string }) {
@@ -129,7 +144,7 @@ export default function LocationsPage() {
   useEffect(() => {
     load(1);
     setPage(1);
-  }, [sort, order]);
+  }, [sort, order, projectId]);
 
   function onSortChange(nextSort: string) {
     setSort(nextSort);
@@ -142,8 +157,8 @@ export default function LocationsPage() {
 
   useEffect(() => {
     fetchClientList<{ id: string; reference: string; firstName: string; lastName: string }>().then(setClients);
-    fetchPropertyList<{ id: string; reference: string; name: string; status: string }>().then(setProperties);
-  }, []);
+    refreshProperties();
+  }, [projectId]);
 
   useEffect(() => {
     if (!showFilters) return;
@@ -168,7 +183,7 @@ export default function LocationsPage() {
     setOpen(true);
   }
 
-  useCreateQuery(openCreate);
+  useCreateQuery(embedded ? () => {} : openCreate);
 
   function openEdit(r: Rental) {
     api(`/transactions/rentals/${r.id}`).then((full) => {
@@ -196,7 +211,8 @@ export default function LocationsPage() {
       }
       setOpen(false);
       load(page);
-      fetchPropertyList<{ id: string; reference: string; name: string; status: string }>().then(setProperties);
+      refreshProperties();
+      onChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -213,6 +229,7 @@ export default function LocationsPage() {
       setPayOpen(null);
       setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '' });
       load(page);
+      onChanged?.();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
@@ -228,7 +245,8 @@ export default function LocationsPage() {
       setTerminateId(null);
       setTerminateMotif('');
       load(page);
-      fetchPropertyList<{ id: string; reference: string; name: string; status: string }>().then(setProperties);
+      refreshProperties();
+      onChanged?.();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
@@ -266,24 +284,30 @@ export default function LocationsPage() {
 
   const hasActiveFilters = !!statusFilter || !!clientFilter;
 
+  const headerActions = (
+    <>
+      <Btn variant="secondary" icon={Download} onClick={() => downloadCsv(`/transactions/rentals/export/csv?${buildExportQuery()}`, 'locations-gic.csv')}>{t('common.csv')}</Btn>
+      <Btn variant="secondary" icon={Download} onClick={() => downloadExcel(`/transactions/rentals/export/xlsx?${buildExportQuery()}`, 'locations-gic.xlsx')}>{t('common.excel')}</Btn>
+      <Btn variant="secondary" icon={Download} onClick={() => downloadPdf(`/transactions/rentals/export/pdf?${buildExportQuery()}`, 'locations-gic.pdf')}>PDF</Btn>
+      <div className="mac-action-group">
+        <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
+      </div>
+      <Btn icon={Plus} onClick={openCreate}>{t('actions.newRental')}</Btn>
+    </>
+  );
+
   return (
     <div className="space-y-0">
-      <PageHeader
-        mac
-        title={t('pages.rentals')}
-        subtitle={t('pages.rentalsSubtitle')}
-        actions={
-          <>
-            <Btn variant="secondary" icon={Download} onClick={() => downloadCsv(`/transactions/rentals/export/csv?${buildExportQuery()}`, 'locations-gic.csv')}>{t('common.csv')}</Btn>
-            <Btn variant="secondary" icon={Download} onClick={() => downloadExcel(`/transactions/rentals/export/xlsx?${buildExportQuery()}`, 'locations-gic.xlsx')}>{t('common.excel')}</Btn>
-            <Btn variant="secondary" icon={Download} onClick={() => downloadPdf(`/transactions/rentals/export/pdf?${buildExportQuery()}`, 'locations-gic.pdf')}>PDF</Btn>
-            <div className="mac-action-group">
-              <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printList} />
-            </div>
-            <Btn icon={Plus} onClick={openCreate}>{t('actions.newRental')}</Btn>
-          </>
-        }
-      />
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2 mb-3">{headerActions}</div>
+      ) : (
+        <PageHeader
+          mac
+          title={t('pages.rentals')}
+          subtitle={t('pages.rentalsSubtitle')}
+          actions={headerActions}
+        />
+      )}
 
       <div className="mac-kpi-grid mac-kpi-grid-4">
         <KpiCard title={t('pages.rentals')} value={stats.total} icon={Key} tone="violet" />

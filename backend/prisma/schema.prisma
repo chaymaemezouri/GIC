@@ -368,6 +368,8 @@ model Property {
   status           String   @default("disponible")
   /// vente | location — hors statut de disponibilité
   type             String   @default("vente")
+  /// avance | echeancier — type de règlement par défaut si à vendre
+  paymentPlan      String   @default("avance")
   contractualDesc  String?
   photo            String?
   price            Float?
@@ -401,6 +403,8 @@ model Sale {
   totalPaid         Float    @default(0)
   remaining         Float
   contractType      String?
+  /// avance | echeancier — mode de règlement choisi à la création
+  paymentPlan       String   @default("avance")
   description       String?
   status            String   @default("brouillon")
   resiliationMotif  String?

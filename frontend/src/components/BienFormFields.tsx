@@ -10,6 +10,7 @@ export type BienFormData = {
   city: string;
   status: string;
   type: string;
+  paymentPlan: 'avance' | 'echeancier';
   surface: string;
   rooms: string;
   price: string;
@@ -26,6 +27,7 @@ export function emptyBienForm(): BienFormData {
     city: '',
     status: 'disponible',
     type: 'vente',
+    paymentPlan: 'avance',
     surface: '',
     rooms: '',
     price: '',
@@ -44,6 +46,7 @@ export function bienToForm(p: Record<string, unknown>): BienFormData {
     city: String(p.city || ''),
     status,
     type: propertyDealOf({ type: p.type != null ? String(p.type) : '', status }),
+    paymentPlan: p.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
     surface: p.surface != null ? String(p.surface) : '',
     rooms: p.rooms != null ? String(p.rooms) : '',
     price: p.price != null ? String(p.price) : '',
@@ -202,7 +205,12 @@ export function BienFormFields({
         value={form.type}
         onChange={(e) => {
           const type = e.target.value;
-          setForm({ ...form, type, status: occupancyForDeal(type, form.status) });
+          setForm({
+            ...form,
+            type,
+            status: occupancyForDeal(type, form.status),
+            paymentPlan: type === 'vente' ? form.paymentPlan || 'avance' : 'avance',
+          });
         }}
       >
         <option value="vente">{t('status.forSale')}</option>
@@ -221,6 +229,20 @@ export function BienFormFields({
           <option value="vendu">{t('status.sold')}</option>
         )}
       </Select>
+      {form.type === 'vente' && (
+        <div className="sm:col-span-2 grid gap-1">
+          <Select
+            label={`${t('fields.propertyPaymentPlan')} *`}
+            required
+            value={form.paymentPlan}
+            onChange={(e) => setForm({ ...form, paymentPlan: e.target.value === 'echeancier' ? 'echeancier' : 'avance' })}
+          >
+            <option value="avance">{t('tabs.paymentByAdvance')}</option>
+            <option value="echeancier">{t('tabs.paymentBySchedule')}</option>
+          </Select>
+          <p className="text-[11px] text-gic-muted">{t('fields.propertyPaymentPlanHint')}</p>
+        </div>
+      )}
 
       {cascade && (
         <>

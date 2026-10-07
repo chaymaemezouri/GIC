@@ -11,6 +11,7 @@ export type SaleFormData = {
   salePrice: string;
   discount: string;
   advance: string;
+  paymentPlan: 'avance' | 'echeancier';
   contractType: string;
   description: string;
   contractDate: string;
@@ -33,6 +34,7 @@ export function emptySaleForm(): SaleFormData {
     salePrice: '',
     discount: '0',
     advance: '0',
+    paymentPlan: 'avance',
     contractType: 'compromis',
     description: '',
     contractDate: new Date().toISOString().slice(0, 10),
@@ -65,6 +67,9 @@ export function saleToForm(s: Record<string, unknown>): SaleFormData {
     salePrice: s.salePrice != null ? String(s.salePrice) : '',
     discount: s.discount != null ? String(s.discount) : '0',
     advance: s.advance != null ? String(s.advance) : '0',
+    paymentPlan: s.paymentPlan === 'echeancier' || (Array.isArray(s.schedules) && (s.schedules as unknown[]).length > 0 && s.paymentPlan !== 'avance')
+      ? 'echeancier'
+      : 'avance',
     contractType: String(s.contractType || 'compromis'),
     description: String(s.description || ''),
     contractDate: dateField(s.contractDate) || new Date().toISOString().slice(0, 10),
@@ -90,6 +95,7 @@ export function saleFormToCreateBody(f: SaleFormData) {
     advance: f.advance,
     advanceMode: f.advanceMode || 'especes',
     advanceBank: f.advanceBank || null,
+    paymentPlan: f.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
     contractType: f.contractType,
     description: f.description || null,
     contractDate: f.contractDate || null,
@@ -105,6 +111,7 @@ export function saleFormToUpdateBody(f: SaleFormData) {
   return {
     description: f.description || null,
     contractType: f.contractType,
+    paymentPlan: f.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
     contractDate: f.contractDate || null,
     status: f.status,
     sellerSignatureDate: f.sellerSignatureDate || null,
@@ -148,12 +155,21 @@ export function SaleFormFields({
   form: SaleFormData;
   setForm: (f: SaleFormData) => void;
   clients: { id: string; reference: string; firstName: string; lastName: string }[];
-  properties: { id: string; reference: string; name: string; status: string; type?: string }[];
+  properties: { id: string; reference: string; name: string; status: string; type?: string; paymentPlan?: string | null; price?: number | null }[];
   editMode?: boolean;
   lockPropertyId?: string;
   lockedPropertyLabel?: string;
 }) {
   const { t } = useI18n();
+  function applyPropertyDefaults(propertyId: string) {
+    const p = properties.find((x) => x.id === propertyId);
+    setForm({
+      ...form,
+      propertyId,
+      paymentPlan: p?.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
+      ...(p?.price != null && !form.salePrice ? { salePrice: String(p.price) } : {}),
+    });
+  }
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {!editMode && (
@@ -172,7 +188,7 @@ export function SaleFormFields({
               <p className="rounded-xl border border-gic-border bg-gray-50/80 px-3 py-2 text-[12px] font-medium">{lockedPropertyLabel || '—'}</p>
             </div>
           ) : (
-            <Select className="sm:col-span-2" label={`${t('fields.property')} *`} required value={form.propertyId} onChange={(e) => setForm({ ...form, propertyId: e.target.value })}>
+            <Select className="sm:col-span-2" label={`${t('fields.property')} *`} required value={form.propertyId} onChange={(e) => applyPropertyDefaults(e.target.value)}>
               <option value="">{t('fields.selectProperty')}</option>
               {properties.filter((p) => {
                 if (!(p.status === 'disponible' || p.status === 'réservé' || p.id === form.propertyId)) return false;
@@ -186,38 +202,55 @@ export function SaleFormFields({
       )}
       <Input label={`${t('fields.salePriceMad')} *`} required type="number" min="0" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: e.target.value })} disabled={editMode} />
       <Input label={t('fields.discountMad')} type="number" min="0" value={form.discount} onChange={(e) => setForm({ ...form, discount: e.target.value })} disabled={editMode} />
-      <Input label={t('fields.advanceMad')} type="number" min="0" value={form.advance} onChange={(e) => setForm({ ...form, advance: e.target.value })} disabled={editMode} />
-      {(Number(form.advance) > 0 || editMode) && (
+      <Select
+        className="sm:col-span-2"
+        label={`${t('fields.salePaymentPlan')} *`}
+        required
+        value={form.paymentPlan}
+        onChange={(e) => setForm({ ...form, paymentPlan: e.target.value === 'echeancier' ? 'echeancier' : 'avance' })}
+      >
+        <option value="avance">{t('tabs.paymentByAdvance')}</option>
+        <option value="echeancier">{t('tabs.paymentBySchedule')}</option>
+      </Select>
+      <p className="sm:col-span-2 -mt-1 text-[11px] text-gic-muted">
+        {form.paymentPlan === 'echeancier' ? t('fields.salePaymentPlanScheduleHint') : t('fields.salePaymentPlanAdvanceHint')}
+      </p>
+      {form.paymentPlan === 'avance' && (
         <>
-          <Select
-            label={t('fields.advancePaymentMode')}
-            value={form.advanceMode}
-            onChange={(e) => setForm({ ...form, advanceMode: e.target.value, advanceBank: isBankPaymentMode(e.target.value) ? form.advanceBank : '' })}
-            disabled={editMode}
-          >
-            <option value="especes">{t('fields.modeCash')}</option>
-            <option value="cheque">{t('fields.modeCheck')}</option>
-            <option value="virement">{t('fields.modeTransfer')}</option>
-            <option value="carte">{t('fields.modeCard')}</option>
-          </Select>
-          {isBankPaymentMode(form.advanceMode) && (
-            <Input
-              label={t('fields.bankRef')}
-              value={form.advanceBank}
-              onChange={(e) => setForm({ ...form, advanceBank: e.target.value })}
-              disabled={editMode}
-            />
-          )}
-          {!editMode && (
-            <div className={isBankPaymentMode(form.advanceMode) ? '' : 'sm:col-span-2'}>
-              <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.advanceProof')}</label>
-              <input
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.webp"
-                className="block w-full text-[12px] file:mr-2 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:border file:border-gic-border"
-                onChange={(e) => setForm({ ...form, advanceProof: e.target.files?.[0] || null })}
-              />
-            </div>
+          <Input label={t('fields.advanceMad')} type="number" min="0" value={form.advance} onChange={(e) => setForm({ ...form, advance: e.target.value })} disabled={editMode} />
+          {(Number(form.advance) > 0 || editMode) && (
+            <>
+              <Select
+                label={t('fields.advancePaymentMode')}
+                value={form.advanceMode}
+                onChange={(e) => setForm({ ...form, advanceMode: e.target.value, advanceBank: isBankPaymentMode(e.target.value) ? form.advanceBank : '' })}
+                disabled={editMode}
+              >
+                <option value="especes">{t('fields.modeCash')}</option>
+                <option value="cheque">{t('fields.modeCheck')}</option>
+                <option value="virement">{t('fields.modeTransfer')}</option>
+                <option value="carte">{t('fields.modeCard')}</option>
+              </Select>
+              {isBankPaymentMode(form.advanceMode) && (
+                <Input
+                  label={t('fields.bankRef')}
+                  value={form.advanceBank}
+                  onChange={(e) => setForm({ ...form, advanceBank: e.target.value })}
+                  disabled={editMode}
+                />
+              )}
+              {!editMode && (
+                <div className={isBankPaymentMode(form.advanceMode) ? '' : 'sm:col-span-2'}>
+                  <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.advanceProof')}</label>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp"
+                    className="block w-full text-[12px] file:mr-2 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:border file:border-gic-border"
+                    onChange={(e) => setForm({ ...form, advanceProof: e.target.files?.[0] || null })}
+                  />
+                </div>
+              )}
+            </>
           )}
         </>
       )}

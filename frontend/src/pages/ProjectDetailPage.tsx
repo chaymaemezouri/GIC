@@ -41,6 +41,8 @@ import {
 import {
   RentalFormFields, emptyRentalForm, rentalFormToBody, rentalToForm, type RentalFormData,
 } from '../components/RentalFormFields';
+import VentesPage from './VentesPage';
+import LocationsPage from './LocationsPage';
 
 type Tab = 'infos' | 'galerie' | 'structure' | 'biens' | 'chantiers' | 'ventes' | 'locations' | 'documents' | 'echanges' | 'historique';
 
@@ -583,12 +585,13 @@ export default function ProjectDetailPage() {
     return `${p.reference || ''} — ${p.name || ''}`.replace(/^ — /, '');
   }
 
-  function openNewSale(p?: { id: string; reference?: string; name?: string; price?: number | null }) {
+  function openNewSale(p?: { id: string; reference?: string; name?: string; price?: number | null; paymentPlan?: string | null }) {
     setEditSaleId(null);
     setSaleForm({
       ...emptySaleForm(),
       propertyId: p?.id || '',
       salePrice: p?.price != null ? String(p.price) : '',
+      paymentPlan: p?.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
     });
     setSaleLock(p ? { id: p.id, label: propertyLabel(p) } : null);
     setSaleFormError('');
@@ -801,19 +804,12 @@ export default function ProjectDetailPage() {
   const chantierCount = project?.chantiers?.length ?? 0;
   const mapsQuery = project ? projectLocationQuery(project) : '';
   const mapsUrl = mapsQuery ? googleMapsSearchUrl(mapsQuery) : '';
-  const venteBiens = (project?.properties || []).filter((p: { id: string; type?: string; status?: string }) => (
-    propertyDealOf(p) === 'vente' || sales.some((s: { property?: { id: string } }) => s.property?.id === p.id)
-  ));
-  const locationBiens = (project?.properties || []).filter((p: { id: string; type?: string; status?: string }) => (
-    propertyDealOf(p) === 'location' || rentals.some((r: { property?: { id: string } }) => r.property?.id === p.id)
-  ));
-
   const chipLabels: Partial<Record<Tab, string>> = {
     biens: `${t('tabs.properties')} (${project?.properties?.length ?? 0})`,
     galerie: `${t('tabs.gallery')} (${imageCount})`,
     chantiers: `${t('nav.sites')} (${chantierCount})`,
-    ventes: `${t('tabs.sales')} (${venteBiens.length})`,
-    locations: `${t('tabs.rentals')} (${locationBiens.length})`,
+    ventes: `${t('tabs.sales')} (${sales.length})`,
+    locations: `${t('tabs.rentals')} (${rentals.length})`,
   };
 
   if (!project && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
@@ -970,8 +966,8 @@ export default function ProjectDetailPage() {
                 items: [
                   { id: 'structure', label: t('tabs.structure'), icon: Layers },
                   { id: 'biens', label: t('tabs.properties'), icon: Home, badge: project.properties?.length ?? 0 },
-                  { id: 'ventes', label: t('tabs.sales'), icon: Building2, badge: venteBiens.length },
-                  { id: 'locations', label: t('tabs.rentals'), icon: KeyRound, badge: locationBiens.length },
+                  { id: 'ventes', label: t('tabs.sales'), icon: Building2, badge: sales.length },
+                  { id: 'locations', label: t('tabs.rentals'), icon: KeyRound, badge: rentals.length },
                 ],
               },
               {
@@ -1351,153 +1347,15 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {tab === 'ventes' && (
+      {tab === 'ventes' && id && (
         <div className="mt-1">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              <TrendingUp size={16} /> {t('tabs.sales')}
-            </h2>
-            <Btn icon={Plus} onClick={() => openNewSale()}>{t('actions.newSale')}</Btn>
-          </div>
-          {venteBiens.length === 0 ? (
-            <div className="py-6 text-center">
-              <p className="text-[12px] text-gic-muted mb-3">{t('msg.emptySales')}</p>
-              <Btn icon={Plus} onClick={() => openNewSale()}>{t('actions.newSale')}</Btn>
-            </div>
-          ) : (
-            <TableWrap mac>
-              <thead>
-                <tr>
-                  <Th mac>{t('columns.reference')}</Th>
-                  <Th mac>{t('columns.designation')}</Th>
-                  <Th mac>{t('columns.client')}</Th>
-                  <Th mac>{t('columns.price')}</Th>
-                  <Th mac>{t('columns.status')}</Th>
-                  <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
-                </tr>
-              </thead>
-              <tbody>
-                {venteBiens.map((p: any) => {
-                  const sale = sales.find((s: any) => s.property?.id === p.id);
-                  return (
-                    <tr
-                      key={p.id}
-                      className="cursor-pointer hover:bg-gray-50/60"
-                      onClick={() => (sale ? openSaleDetail(sale.id) : openNewSale(p))}
-                    >
-                      <Td mac className="font-medium text-gic-violet">{p.reference}</Td>
-                      <Td mac>{p.name}</Td>
-                      <Td mac>
-                        {sale?.client ? (
-                          <Link to={`/clients/${sale.client.id}`} className="hover:text-gic-violet" onClick={(e) => e.stopPropagation()}>
-                            {sale.client.firstName} {sale.client.lastName}
-                          </Link>
-                        ) : (
-                          <button
-                            type="button"
-                            className="text-[12px] text-[#007aff] hover:underline"
-                            onClick={(e) => { e.stopPropagation(); openNewSale(p); }}
-                          >
-                            {t('fields.selectClient')}
-                          </button>
-                        )}
-                      </Td>
-                      <Td mac>{formatMad(sale?.netPrice ?? p.price)}</Td>
-                      <Td mac><StatusPill status={occupancyStatusOf(p)} quiet /></Td>
-                      <Td mac className="mac-td-actions">
-                        <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
-                          <MacActionBtn
-                            icon={Pencil}
-                            tone="orange"
-                            title={sale ? t('common.edit') : t('actions.newSale')}
-                            onClick={() => (sale ? void openEditSale(sale.id) : openNewSale(p))}
-                          />
-                          <Link to={sale ? `/ventes/${sale.id}` : `/biens/${p.id}`} title={t('actions.openFiche')} className="mac-action-btn mac-action-btn-blue">
-                            <ExternalLink size={14} strokeWidth={2.15} />
-                          </Link>
-                        </div>
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </TableWrap>
-          )}
+          <VentesPage projectId={id} embedded onChanged={loadDeals} />
         </div>
       )}
 
-      {tab === 'locations' && (
+      {tab === 'locations' && id && (
         <div className="mt-1">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              <KeyRound size={16} /> {t('tabs.rentals')}
-            </h2>
-            <Btn icon={Plus} onClick={() => openNewRental()}>{t('actions.newRental')}</Btn>
-          </div>
-          {locationBiens.length === 0 ? (
-            <div className="py-6 text-center">
-              <p className="text-[12px] text-gic-muted mb-3">{t('msg.emptyRentals')}</p>
-              <Btn icon={Plus} onClick={() => openNewRental()}>{t('actions.newRental')}</Btn>
-            </div>
-          ) : (
-            <TableWrap mac>
-              <thead>
-                <tr>
-                  <Th mac>{t('columns.reference')}</Th>
-                  <Th mac>{t('columns.designation')}</Th>
-                  <Th mac>{t('columns.tenant')}</Th>
-                  <Th mac>{t('columns.price')}</Th>
-                  <Th mac>{t('columns.status')}</Th>
-                  <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
-                </tr>
-              </thead>
-              <tbody>
-                {locationBiens.map((p: any) => {
-                  const rental = rentals.find((r: any) => r.property?.id === p.id);
-                  return (
-                    <tr
-                      key={p.id}
-                      className="cursor-pointer hover:bg-gray-50/60"
-                      onClick={() => (rental ? openRentalDetail(rental.id) : openNewRental(p))}
-                    >
-                      <Td mac className="font-medium text-gic-violet">{p.reference}</Td>
-                      <Td mac>{p.name}</Td>
-                      <Td mac>
-                        {rental?.client ? (
-                          <Link to={`/clients/${rental.client.id}`} className="hover:text-gic-violet" onClick={(e) => e.stopPropagation()}>
-                            {rental.client.firstName} {rental.client.lastName}
-                          </Link>
-                        ) : (
-                          <button
-                            type="button"
-                            className="text-[12px] text-[#007aff] hover:underline"
-                            onClick={(e) => { e.stopPropagation(); openNewRental(p); }}
-                          >
-                            {t('fields.selectClient')}
-                          </button>
-                        )}
-                      </Td>
-                      <Td mac>{formatMad(rental?.monthlyRent ?? p.price)}</Td>
-                      <Td mac><StatusPill status={occupancyStatusOf(p)} quiet /></Td>
-                      <Td mac className="mac-td-actions">
-                        <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
-                          <MacActionBtn
-                            icon={Pencil}
-                            tone="orange"
-                            title={rental ? t('common.edit') : t('actions.newRental')}
-                            onClick={() => (rental ? void openEditRental(rental.id) : openNewRental(p))}
-                          />
-                          <Link to={rental ? `/locations/${rental.id}` : `/biens/${p.id}`} title={t('actions.openFiche')} className="mac-action-btn mac-action-btn-blue">
-                            <ExternalLink size={14} strokeWidth={2.15} />
-                          </Link>
-                        </div>
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </TableWrap>
-          )}
+          <LocationsPage projectId={id} embedded onChanged={loadDeals} />
         </div>
       )}
 
