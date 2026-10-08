@@ -537,7 +537,8 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
             <thead>
               <tr>
                 <SelectAllTh selection={selection} rows={items} />
-                <Th mac>{t('columns.ref')}</Th>
+                {embedded && <Th mac>{t('columns.reference')}</Th>}
+                <Th mac>{embedded ? t('columns.contractRef') : t('columns.ref')}</Th>
                 <Th mac>{t('columns.client')}</Th>
                 <Th mac>{t('columns.property')}</Th>
                 <Th mac>{t('columns.netPrice')}</Th>
@@ -556,8 +557,13 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
                   onClick={() => (s.pending ? openCreate(s.property.id) : navigate(`/ventes/${s.id}`))}
                 >
                   <SelectTd selection={selection} row={s} />
+                  {embedded && (
+                    <Td mac>
+                      <Link to={`/biens/${s.property.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{s.property.reference}</Link>
+                    </Td>
+                  )}
                   <Td mac>
-                    {s.pending ? (
+                    {s.pending || !s.reference ? (
                       <span className="text-gic-muted">—</span>
                     ) : (
                       <Link to={`/ventes/${s.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{s.reference}</Link>

@@ -513,7 +513,8 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
             <thead>
               <tr>
                 <SelectAllTh selection={selection} rows={items} />
-                <Th mac>{t('columns.ref')}</Th>
+                {embedded && <Th mac>{t('columns.reference')}</Th>}
+                <Th mac>{embedded ? t('columns.rentalRef') : t('columns.ref')}</Th>
                 <Th mac>{t('columns.tenant')}</Th>
                 <Th mac>{t('columns.property')}</Th>
                 <Th mac>{t('columns.monthly')}</Th>
@@ -527,8 +528,13 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
               {items.map((r) => (
                 <tr key={r.id} className="cursor-pointer" onClick={() => (r.pending ? openCreate(r.property.id) : navigate(`/locations/${r.id}`))}>
                   <SelectTd selection={selection} row={r} />
+                  {embedded && (
+                    <Td mac>
+                      <Link to={`/biens/${r.property.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{r.property.reference}</Link>
+                    </Td>
+                  )}
                   <Td mac>
-                    {r.pending ? (
+                    {r.pending || !r.reference ? (
                       <span className="text-gic-muted">—</span>
                     ) : (
                       <Link to={`/locations/${r.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{r.reference}</Link>
@@ -548,9 +554,9 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                   <Td mac className="mac-table-muted">
                     <Link to={`/biens/${r.property.id}`} className="hover:text-[#007aff]">{r.property.name}</Link>
                   </Td>
-                  <Td mac>{formatMad(r.monthlyRent)}</Td>
-                  <Td mac>{formatMad(r.totalPaid)}</Td>
-                  <Td mac className={r.remaining > 0 ? 'text-gic-coral font-medium' : ''}>{formatMad(r.remaining)}</Td>
+                  <Td mac>{r.pending ? '—' : formatMad(r.monthlyRent)}</Td>
+                  <Td mac>{r.pending ? '—' : formatMad(r.totalPaid)}</Td>
+                  <Td mac className={!r.pending && r.remaining > 0 ? 'text-gic-coral font-medium' : ''}>{r.pending ? '—' : formatMad(r.remaining)}</Td>
                   <Td mac>
                     <StatusPill status={r.status} quiet />
                   </Td>

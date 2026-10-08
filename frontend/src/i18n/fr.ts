@@ -1140,6 +1140,7 @@ const fr: Dict = {
   columns: {
     ref: 'Réf.',
     contractRef: 'Réf. contrat',
+    rentalRef: 'Réf. location',
     name: 'Nom',
     firstName: 'Prénom',
     lastName: 'Nom',

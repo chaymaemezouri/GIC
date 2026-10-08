@@ -1140,6 +1140,7 @@ const ar: Dict = {
   columns: {
     ref: 'المرجع',
     contractRef: 'مرجع العقد',
+    rentalRef: 'مرجع الكراء',
     name: 'الاسم',
     firstName: 'الاسم الشخصي',
     lastName: 'الاسم العائلي',
