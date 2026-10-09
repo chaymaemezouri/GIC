@@ -1713,6 +1713,22 @@ router.put('/payments/:id', upload.single('proof'), async (req, res) => {
     return res.status(400).json({ message: e instanceof Error ? e.message : 'Doublon détecté' });
   }
 
+  if (payment.scheduleId && newAmount > Number(payment.amount) + 0.01) {
+    const schedule = await prisma.paymentSchedule.findUnique({
+      where: { id: payment.scheduleId },
+      include: { payments: true },
+    });
+    if (schedule) {
+      const others = schedulePaidTotal(schedule.payments.filter((p) => p.id !== payment.id));
+      const max = roundMad(Math.max(0, schedule.amount - others));
+      if (newAmount > max + 0.01) {
+        return res.status(400).json({
+          message: `Le montant dépasse le reste de l'échéance (${max.toLocaleString('fr-MA')} MAD)`,
+        });
+      }
+    }
+  }
+
   const delta = newAmount - payment.amount;
   const data: Record<string, unknown> = { amount: newAmount };
   if (req.body.date) data.date = new Date(req.body.date);

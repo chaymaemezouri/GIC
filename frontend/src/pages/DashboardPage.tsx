@@ -42,7 +42,7 @@ type DashboardData = {
 const EMPTY_FILTERS = { projectId: '', chantierId: '', dateFrom: '', dateTo: '' };
 
 function formatDateLocalized(lang: string) {
-  return new Date().toLocaleDateString(lang === 'ar' ? 'ar-MA' : 'fr-FR', {
+  return new Date().toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'en' ? 'en-GB' : 'fr-FR', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',

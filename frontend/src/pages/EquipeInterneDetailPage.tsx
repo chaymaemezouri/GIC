@@ -326,7 +326,7 @@ export default function EquipeInterneDetailPage() {
   );
 
   const monthName = (month: number) =>
-    new Date(2000, month - 1, 1).toLocaleString(lang === 'ar' ? 'ar-MA' : 'fr-FR', { month: 'long' });
+    new Date(2000, month - 1, 1).toLocaleString(lang === 'ar' ? 'ar-MA' : lang === 'en' ? 'en-GB' : 'fr-FR', { month: 'long' });
 
   const canManageAccount = canManageUsers(me?.role || '');
 

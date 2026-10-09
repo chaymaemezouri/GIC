@@ -10,23 +10,32 @@ import {
 import type { Dict, I18nContextValue, Lang, TranslateFn } from './types';
 import fr from './fr';
 import ar from './ar';
+import en from './en';
 import fleetFr from './fleetFr';
 import fleetAr from './fleetAr';
+import fleetEn from './fleetEn';
 
 const STORAGE_KEY = 'gic_lang';
 const dictionaries: Record<Lang, Dict> = {
   fr: { ...fr, fleet: fleetFr },
   ar: { ...ar, fleet: fleetAr },
+  en: { ...en, fleet: fleetEn },
 };
 
 function readStoredLang(): Lang {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === 'ar' || raw === 'fr') return raw;
+    if (raw === 'ar' || raw === 'fr' || raw === 'en') return raw;
   } catch {
     /* ignore */
   }
   return 'fr';
+}
+
+export function localeOf(lang: Lang) {
+  if (lang === 'ar') return 'ar-MA';
+  if (lang === 'en') return 'en-GB';
+  return 'fr-FR';
 }
 
 function getByPath(dict: Dict, path: string): string | undefined {

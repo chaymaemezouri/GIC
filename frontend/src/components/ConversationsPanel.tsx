@@ -97,7 +97,7 @@ export default function ConversationsPanel({ entityType, entityId, defaultEmail,
     return c;
   }
 
-  const locale = lang === 'ar' ? 'ar-MA' : 'fr-MA';
+  const locale = lang === 'ar' ? 'ar-MA' : lang === 'en' ? 'en-GB' : 'fr-MA';
 
   return (
     <Card>

@@ -725,13 +725,14 @@ export default function ParametresPage() {
           <p className="text-[12px] text-gic-muted mb-4">
             {t('settings.currentLanguage')}:{' '}
             <span className="font-medium text-gic-ink">
-              {lang === 'ar' ? t('settings.arabic') : t('settings.french')}
+              {lang === 'ar' ? t('settings.arabic') : lang === 'en' ? t('settings.english') : t('settings.french')}
             </span>
           </p>
-          <div className="grid sm:grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-3 gap-3">
             {([
               { id: 'fr' as Lang, title: t('settings.french'), desc: t('settings.frenchDesc'), flag: 'FR' },
               { id: 'ar' as Lang, title: t('settings.arabic'), desc: t('settings.arabicDesc'), flag: 'ع' },
+              { id: 'en' as Lang, title: t('settings.english'), desc: t('settings.englishDesc'), flag: 'EN' },
             ]).map((opt) => {
               const active = lang === opt.id;
               return (

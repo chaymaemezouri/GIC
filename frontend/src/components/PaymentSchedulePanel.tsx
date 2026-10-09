@@ -95,7 +95,7 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
   function monthTitle(dueDate: string, label?: string | null) {
     if (label && label.trim()) return label.trim();
     const d = new Date(dueDate);
-    const locale = lang === 'ar' ? 'ar-MA' : 'fr-MA';
+    const locale = lang === 'ar' ? 'ar-MA' : lang === 'en' ? 'en-GB' : 'fr-MA';
     const s = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(d);
     return s.charAt(0).toUpperCase() + s.slice(1);
   }

@@ -1,4 +1,4 @@
-export type Lang = 'fr' | 'ar';
+export type Lang = 'fr' | 'ar' | 'en';
 
 /** Nested dictionary; leaf values are strings. Keys resolved via dot paths. */
 export type Dict = { [key: string]: string | Dict };

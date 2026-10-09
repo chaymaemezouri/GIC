@@ -14,12 +14,14 @@ export function ClientFormPicker({
   value,
   onChange,
   label,
+  labelClassName,
   required = false,
   allowCreate = true,
 }: {
   value: string;
   onChange: (clientId: string) => void;
   label?: string;
+  labelClassName?: string;
   required?: boolean;
   allowCreate?: boolean;
 }) {
@@ -116,7 +118,7 @@ export function ClientFormPicker({
 
   return (
     <div>
-      <label className="block text-[11px] font-medium text-gic-muted mb-1">
+      <label className={labelClassName || 'block text-[11px] font-medium text-gic-muted mb-1'}>
         {resolvedLabel}{required && !resolvedLabel.includes('*') ? ' *' : ''}
       </label>
       <div className="flex flex-wrap items-center gap-2">

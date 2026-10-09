@@ -237,6 +237,7 @@ export function BienFormFields({
         <div className="sm:col-span-2">
           <ClientFormPicker
             label={form.type === 'location' ? `${t('fields.tenant')} *` : `${t('fields.buyer')} *`}
+            labelClassName="block text-[11px] font-semibold uppercase tracking-wide text-gic-violet mb-1"
             required
             value={form.clientId}
             onChange={(clientId) => setForm({ ...form, clientId })}

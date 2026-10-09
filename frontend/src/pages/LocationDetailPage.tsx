@@ -409,12 +409,7 @@ export default function LocationDetailPage() {
 
         {tab === 'paiements' && (
           <div className="mt-1">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('detail.paymentHistory')}</p>
-              {canPay && (
-                <Btn icon={Wallet} onClick={() => setPayOpen(true)}>{t('actions.newPayment')}</Btn>
-              )}
-            </div>
+            <p className="text-[13px] font-medium text-gic-ink tracking-tight mb-3">{t('detail.paymentHistory')}</p>
             {(rental.payments || []).length === 0 ? (
               <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptyPayments')}</p>
             ) : (

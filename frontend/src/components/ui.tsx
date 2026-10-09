@@ -515,7 +515,7 @@ export function MacDateInput({
   const ref = useRef<HTMLDivElement>(null);
   const selected = parseIsoDate(value);
   const today = startOfDay(new Date());
-  const locale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
+  const locale = lang === 'ar' ? 'ar-MA' : lang === 'en' ? 'en-GB' : 'fr-FR';
   const weekdays = [
     t('common.weekdayMon'),
     t('common.weekdayTue'),

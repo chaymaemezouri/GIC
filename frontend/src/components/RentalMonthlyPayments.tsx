@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Check, Circle, RefreshCw, Trash2, Wand2 } from 'lucide-react';
+import { Check, Circle, Pencil, RefreshCw, Trash2, Wand2 } from 'lucide-react';
 import { api, formatDate, formatMad } from '../lib/api';
 import { Btn, Input, MacActionBtn, Modal, Select } from './ui';
 import { useI18n } from '../i18n/I18nContext';
@@ -69,6 +69,9 @@ export default function RentalMonthlyPayments({
   const [selected, setSelected] = useState<MonthSchedule | null>(null);
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [payMode, setPayMode] = useState('especes');
+  const [editPayId, setEditPayId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editMode, setEditMode] = useState('especes');
   const [genForm, setGenForm] = useState({
     startDate: startDate ? String(startDate).slice(0, 10) : new Date().toISOString().slice(0, 10),
     endDate: endDate ? String(endDate).slice(0, 10) : '',
@@ -98,7 +101,7 @@ export default function RentalMonthlyPayments({
 
   function monthTitle(dueDate: string) {
     const d = new Date(dueDate);
-    const locale = lang === 'ar' ? 'ar-MA' : 'fr-MA';
+    const locale = lang === 'ar' ? 'ar-MA' : lang === 'en' ? 'en-GB' : 'fr-MA';
     const s = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(d);
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
@@ -194,6 +197,45 @@ export default function RentalMonthlyPayments({
       });
       onReload();
       setSelected(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function startEditPayment(pay: MonthPayment) {
+    setEditPayId(pay.id);
+    setEditAmount(String(pay.amount));
+    setEditMode(pay.operationType || 'especes');
+    setError('');
+  }
+
+  async function saveEditPayment(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedLive || !editPayId || busyId) return;
+    if (!canCancelMonth(selectedLive)) {
+      const blocker = laterOpen(selectedLive);
+      setError(t('rental.mustUnpayLaterFirst', { month: blocker ? monthTitle(blocker.dueDate) : '' }));
+      return;
+    }
+    const current = (selectedLive.payments || []).find((p) => p.id === editPayId);
+    if (!current) return;
+    const amount = roundMad(Number(editAmount));
+    const max = roundMad(Number(current.amount) + selectedReste);
+    if (!(amount > 0) || amount > max + 0.01) {
+      setError(`${t('rental.remaining')}: ${formatMad(max)}`);
+      return;
+    }
+    setBusyId(selectedLive.id);
+    setError('');
+    try {
+      await api(`/transactions/payments/${editPayId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ amount, operationType: editMode }),
+      });
+      setEditPayId(null);
+      onReload();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -415,18 +457,47 @@ export default function RentalMonthlyPayments({
               ) : (
                 <ul className="space-y-1.5 text-[12px]">
                   {(selectedLive.payments || []).map((pay) => (
-                    <li key={pay.id} className="flex items-center justify-between gap-2 border-b border-black/[0.04] pb-1.5 last:border-0">
-                      <span className="text-gic-muted">
-                        {formatDate(pay.date)}
-                        {pay.operationType ? ` · ${pay.operationType}` : ''}
-                        {pay.receiptNo ? ` · ${pay.receiptNo}` : ''}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="font-medium">{formatMad(pay.amount)}</span>
-                        {canEdit && canCancelMonth(selectedLive) && (
-                          <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => removePayment(pay.id)} />
-                        )}
-                      </span>
+                    <li key={pay.id} className="border-b border-black/[0.04] pb-1.5 last:border-0">
+                      {editPayId === pay.id ? (
+                        <form onSubmit={saveEditPayment} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] items-end">
+                          <Input
+                            label={t('rental.advanceAmount')}
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            max={roundMad(Number(pay.amount) + selectedReste)}
+                            value={editAmount}
+                            onChange={(e) => setEditAmount(e.target.value)}
+                            required
+                          />
+                          <Select label={t('fields.mode')} value={editMode} onChange={(e) => setEditMode(e.target.value)}>
+                            <option value="especes">{t('fields.modeCash')}</option>
+                            <option value="virement">{t('fields.modeTransfer')}</option>
+                            <option value="cheque">{t('fields.modeCheck')}</option>
+                          </Select>
+                          <div className="flex gap-1 pb-0.5">
+                            <Btn type="submit" disabled={!!busyId}>{t('common.save')}</Btn>
+                            <Btn type="button" variant="secondary" onClick={() => setEditPayId(null)}>{t('common.cancel')}</Btn>
+                          </div>
+                        </form>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-gic-muted">
+                            {formatDate(pay.date)}
+                            {pay.operationType ? ` · ${pay.operationType}` : ''}
+                            {pay.receiptNo ? ` · ${pay.receiptNo}` : ''}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="font-medium">{formatMad(pay.amount)}</span>
+                            {canEdit && canCancelMonth(selectedLive) && (
+                              <>
+                                <MacActionBtn icon={Pencil} tone="orange" title={t('rental.editAdvance')} onClick={() => startEditPayment(pay)} />
+                                <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => removePayment(pay.id)} />
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
