@@ -7,6 +7,7 @@ import { api, fetchChantierList, formatDate, formatMad, openPrintUrl, uploadDocu
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 
@@ -407,11 +408,13 @@ export default function FournisseurDetailPage() {
             {id && <EntityDocChecklist entityType="supplier" entityId={id} extra={{ supplierId: id }} />}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-[12px] text-gic-muted">{t('msg.documentsSupplierHint')}</p>
-              <label className="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium bg-white shadow-[var(--shadow-panel)] text-gic-ink hover:bg-black/[0.02] border border-transparent cursor-pointer">
+              <DocumentFileActions
+                labelClassName="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium bg-white shadow-[var(--shadow-panel)] text-gic-ink hover:bg-black/[0.02] border border-transparent cursor-pointer"
+                onChange={onUploadDoc}
+              >
                 <Upload size={14} strokeWidth={2} />
                 {t('actions.addDocument')}
-                <input type="file" className="hidden" onChange={onUploadDoc} />
-              </label>
+              </DocumentFileActions>
             </div>
 
             <div>

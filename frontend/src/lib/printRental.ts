@@ -52,6 +52,9 @@ export async function printRentalReceipt(rental: Record<string, unknown>, _opts?
     <div><span class="k">Email :</span> ${esc(client.email)}</div>
     <div><span class="k">Adresse :</span> ${esc(client.address)}</div>
   </div>
+  ${(Array.isArray(rental.coClients) && rental.coClients.length)
+    ? `<p><span class="k">Autres locataires :</span> ${esc((rental.coClients as { firstName?: string; lastName?: string }[]).map((c) => `${c.firstName || ''} ${c.lastName || ''}`.trim()).join(', '))}</p>`
+    : ''}
 
   <h2>2. Contrat / loyer</h2>
   <div class="grid">
@@ -65,7 +68,7 @@ export async function printRentalReceipt(rental: Record<string, unknown>, _opts?
     <div><span class="k">Remise :</span> ${esc(mad(rental.discount))}</div>
     <div><span class="k">Payé / Reste :</span> ${esc(mad(rental.totalPaid))} / ${esc(mad(rental.remaining))}</div>
   </div>
-  ${rental.description ? `<p><span class="k">Description :</span> ${esc(rental.description)}</p>` : ''}
+  ${rental.description ? `<p><span class="k">Description du contrat :</span> ${esc(rental.description)}</p>` : ''}
 
   <h2>3. Produit / bien</h2>
   <div class="grid">

@@ -23,8 +23,10 @@ import {
   buildPurchaseDetail,
   deletePaymentWithMovement,
   normalizeLines,
+  readChefReviews,
   recomputePurchase,
   round2,
+  saveChefReview,
   statusIndex,
   summarizeLines,
   syncPaymentMovement,
@@ -273,14 +275,14 @@ router.get('/analytics', async (req, res) => {
 
     const totalLines = p.lines.reduce((s, l) => s + l.amountTTC, 0);
     for (const l of p.lines) {
-      const fam = l.family || 'Sans catégorie';
+      const fam = l.family || 'Sans famille';
       const b = bucket(byFamily, fam, fam);
       const ratio = totalLines > 0 ? l.amountTTC / totalLines : 0;
       b.engaged = round2(b.engaged + l.amountTTC);
       b.paid = round2(b.paid + p.paidAmount * ratio);
       b.remaining = round2(b.remaining + remaining * ratio);
     }
-    const fams = new Set(p.lines.map((l) => l.family || 'Sans catégorie'));
+    const fams = new Set(p.lines.map((l) => l.family || 'Sans famille'));
     for (const fam of fams) bucket(byFamily, fam, fam).count += 1;
   }
 
@@ -423,10 +425,15 @@ router.get('/', async (req, res) => {
     prisma.purchase.count({ where }),
     prisma.purchase.aggregate({ where, _sum: { totalPrice: true, paidAmount: true } }),
   ]);
+  const reviews = await readChefReviews(items.map((p) => p.id));
   const amount = agg._sum.totalPrice || 0;
   const paid = agg._sum.paidAmount || 0;
   res.json({
-    items: items.map((p) => ({ ...p, remaining: round2(Math.max(0, p.totalPrice - p.paidAmount)) })),
+    items: items.map((p) => ({
+      ...p,
+      ...(reviews.get(p.id) || {}),
+      remaining: round2(Math.max(0, p.totalPrice - p.paidAmount)),
+    })),
     total,
     page,
     limit,
@@ -647,6 +654,27 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ─── Cycle de vie ───────────────────────────────────────────────────
+
+router.post('/:id/review', async (req, res) => {
+  const id = String(req.params.id);
+  const decision = String(req.body.decision || '');
+  if (decision !== 'valide' && decision !== 'non_valide') {
+    return res.status(400).json({ message: 'Décision invalide' });
+  }
+  const remark = optionalText(req.body.remark);
+  if (decision === 'non_valide' && !remark) {
+    return res.status(400).json({ message: 'La remarque est obligatoire si l’achat n’est pas validé' });
+  }
+  const existing = await prisma.purchase.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ message: 'Achat introuvable' });
+
+  const reviewer = await userDisplayName(req);
+  await saveChefReview(id, decision, remark, reviewer);
+  const label = decision === 'valide' ? 'Contrôle chef : validé' : 'Contrôle chef : non validé';
+  await addHistory(id, req, existing.status, existing.status, remark ? `${label} — ${remark}` : label);
+  await audit(req, 'contrôle chef', 'Purchase', id, `${existing.reference} — ${label}${remark ? ` — ${remark}` : ''}`);
+  return sendDetail(res, id);
+});
 
 router.patch('/:id/status', async (req, res) => {
   const id = String(req.params.id);
@@ -953,11 +981,11 @@ ${detail.expectedDeliveryDate ? `<p><strong>Livraison prévue :</strong> ${d(det
   if (docType === 'bon_reception') {
     title = 'Bon de réception';
     body = `${header}
-<table><thead><tr><th>Produit</th><th>Unité</th><th>Commandé</th><th>Livré</th><th>Refusé</th><th>Accepté</th><th>Restant</th></tr></thead><tbody>
+<table><thead><tr><th>Famille</th><th>Produit</th><th>Unité</th><th>Commandé</th><th>Livré</th><th>Refusé</th><th>Accepté</th><th>Restant</th></tr></thead><tbody>
 ${detail.lines
   .map(
     (l) =>
-      `<tr><td>${esc(l.product)}${l.reference ? ` <small>(${esc(l.reference)})</small>` : ''}</td><td>${esc(l.unit || '')}</td><td>${l.quantity}</td><td>${l.delivered}</td><td>${l.rejected}</td><td>${l.accepted}</td><td>${l.remaining}</td></tr>`,
+      `<tr><td>${esc(l.family || '—')}</td><td>${esc(l.product)}</td><td>${esc(l.unit || '')}</td><td>${l.quantity}</td><td>${l.delivered}</td><td>${l.rejected}</td><td>${l.accepted}</td><td>${l.remaining}</td></tr>`,
   )
   .join('')}
 </tbody></table>
@@ -974,11 +1002,11 @@ ${detail.deliveries
 </tbody></table>`;
   } else {
     body = `${header}
-<table><thead><tr><th>Produit / marchandise</th><th>Réf.</th><th>Qté</th><th>Unité</th><th>PU HT</th><th>TVA %</th><th>Montant TTC</th></tr></thead><tbody>
+<table><thead><tr><th>Famille</th><th>Produit / marchandise</th><th>Qté</th><th>Unité</th><th>PU HT</th><th>TVA %</th><th>Montant TTC</th></tr></thead><tbody>
 ${detail.lines
   .map(
     (l) =>
-      `<tr><td>${esc(l.product)}</td><td>${esc(l.reference || '')}</td><td>${l.quantity}</td><td>${esc(l.unit || '')}</td><td>${money(l.unitPrice)}</td><td>${l.tvaRate}</td><td>${money(l.amountTTC)}</td></tr>`,
+      `<tr><td>${esc(l.family || '—')}</td><td>${esc(l.product)}</td><td>${l.quantity}</td><td>${esc(l.unit || '')}</td><td>${money(l.unitPrice)}</td><td>${l.tvaRate}</td><td>${money(l.amountTTC)}</td></tr>`,
   )
   .join('')}
 </tbody></table>

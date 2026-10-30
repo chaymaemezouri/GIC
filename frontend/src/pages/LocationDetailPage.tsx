@@ -1,4 +1,4 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { printPaymentReceipt as printReceipt, printPaymentsReceipt } from '../lib/printPayment';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -6,7 +6,9 @@ import {
   ArrowLeft, Pencil, Ban, Printer, Wallet, ExternalLink, KeyRound, Home, User, FileText, Upload,
   Info, Calendar, History,
 } from 'lucide-react';
-import { api, fetchDropdownOptions, fetchPropertyList, formatDate, formatMad, uploadDocument } from '../lib/api';
+import { api, fetchDropdownOptions, fetchPropertyList, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
+import { fileUrl } from '../lib/photoUrl';
+import { FileInlinePreview } from '../components/PdfPreview';
 import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th,
   PageBackLink,
@@ -14,11 +16,12 @@ import {
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { DocumentFileActions } from '../components/DocumentScanner';
 
 import { RentalFormFields, rentalToForm, rentalFormToBody, type RentalFormData } from '../components/RentalFormFields';
 import { printRentalReceipt } from '../lib/printRental';
+import { partyLabel } from '../components/PartyNames';
 import RentalMonthlyPayments from '../components/RentalMonthlyPayments';
-import PaymentSchedulePanel from '../components/PaymentSchedulePanel';
 
 type Tab = 'infos' | 'echeancier' | 'paiements' | 'documents' | 'historique';
 
@@ -51,9 +54,10 @@ export default function LocationDetailPage() {
   const [form, setForm] = useState<RentalFormData>({
     clientId: '', propertyId: '', monthlyRent: '', discount: '0',
     contractType: 'bail_habitation', description: '', contractDate: '', status: 'active',
+    coClientId2: '', coClientId3: '',
     landlordSignatureDate: '', landlordLegalizationNo: '', tenantSignatureDate: '', tenantLegalizationNo: '',
   });
-  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '' });
+  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '', proof: null as File | null });
   const [paymentNatures, setPaymentNatures] = useState<{ value: string; label?: string }[]>([]);
 
   function load() {
@@ -127,12 +131,17 @@ export default function LocationDetailPage() {
   async function addPayment(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api('/transactions/payments', {
-        method: 'POST',
-        body: JSON.stringify({ rentalId: id, ...payForm }),
-      });
+      const fd = new FormData();
+      fd.append('rentalId', id || '');
+      fd.append('amount', payForm.amount);
+      fd.append('operationType', payForm.operationType);
+      if (payForm.nature) fd.append('nature', payForm.nature);
+      if (payForm.payerName) fd.append('payerName', payForm.payerName);
+      if (payForm.bank) fd.append('bank', payForm.bank);
+      if (payForm.proof) fd.append('proof', payForm.proof);
+      await uploadForm('/transactions/payments', fd);
       setPayOpen(false);
-      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '' });
+      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '', proof: null });
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -152,15 +161,23 @@ export default function LocationDetailPage() {
     }
   }
 
-  async function printPaymentReceipt(p: { receiptNo: string; amount: number; operationType?: string; date: string }) {
-
-    await printWithCompany({ title: `Reçu ${p.receiptNo}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px">
-      <h2>GIC — Reçu ${p.receiptNo}</h2>
-      <p>Location: ${rental.reference}</p>
-      <p>Montant: ${formatMad(p.amount)}</p>
-      <p>Mode: ${p.operationType || '—'}</p>
-      <p>Date: ${formatDate(p.date)}</p>
-    </body></html>`, { grid: true }) });
+  async function printPaymentReceipt(p: {
+    receiptNo: string;
+    amount: number;
+    operationType?: string;
+    date: string;
+    nature?: string | null;
+    payerName?: string | null;
+    bank?: string | null;
+  }) {
+    if (!rental) return;
+    await printReceipt({
+      ...p,
+      rental: {
+        reference: rental.reference,
+        client: rental.client,
+      },
+    });
   }
 
   if (!rental && !error) {
@@ -199,7 +216,7 @@ export default function LocationDetailPage() {
             <p className="mac-detail-eyebrow">{t('detail.rental360')}</p>
             <h1 className="mac-detail-name truncate">{rental.reference}</h1>
             <p className="mac-detail-meta">
-              {rental.client.firstName} {rental.client.lastName}
+              {partyLabel(rental.client, rental.coClients)}
               <span className="text-[#c7c7cc]"> · </span>
               {rental.property.name}
             </p>
@@ -308,6 +325,18 @@ export default function LocationDetailPage() {
                       </Link>
                     }
                   />
+                  {(rental.coClients || []).map((person: { id: string; reference?: string; firstName: string; lastName: string }, index: number) => (
+                    <InfoRow
+                      key={person.id}
+                      label={t('fields.coTenant', { n: String(index + 2) })}
+                      value={
+                        <Link to={`/clients/${person.id}`} className="text-[#007aff] hover:opacity-70 inline-flex items-center gap-1">
+                          {person.reference ? `${person.reference} — ` : ''}{person.firstName} {person.lastName}
+                          <ExternalLink size={10} />
+                        </Link>
+                      }
+                    />
+                  ))}
                   <InfoRow
                     label={t('fields.property')}
                     value={
@@ -372,7 +401,7 @@ export default function LocationDetailPage() {
 
             {rental.description && (
               <div className="mac-section-card">
-                <p className="mac-info-label">{t('fields.descriptionRemark')}</p>
+                <p className="mac-info-label">{t('fields.contractDescription')}</p>
                 <p className="mac-info-value !font-normal text-gic-muted whitespace-pre-wrap">{rental.description}</p>
               </div>
             )}
@@ -389,27 +418,49 @@ export default function LocationDetailPage() {
               schedules={rental.schedules || []}
               onReload={load}
               canEdit={isActive}
+              receipt={{
+                reference: rental.reference,
+                firstName: rental.client?.firstName,
+                lastName: rental.client?.lastName,
+              }}
             />
-            <details className="rounded-xl border border-gic-border/80 bg-white">
-              <summary className="cursor-pointer px-4 py-3 text-[12px] font-medium text-gic-muted hover:text-gic-ink">
-                Vue tableau détaillée (échéancier classique)
-              </summary>
-              <div className="border-t border-gic-border/60">
-                <PaymentSchedulePanel
-                  entityType="rentals"
-                  entityId={id}
-                  schedules={rental.schedules || []}
-                  onReload={load}
-                  canEdit={isActive}
-                />
-              </div>
-            </details>
           </div>
         )}
 
         {tab === 'paiements' && (
           <div className="mt-1">
-            <p className="text-[13px] font-medium text-gic-ink tracking-tight mb-3">{t('detail.paymentHistory')}</p>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('detail.paymentHistory')}</p>
+              {(rental.payments || []).length > 0 && (
+                <Btn
+                  variant="secondary"
+                  icon={Printer}
+                  onClick={() => printPaymentsReceipt({
+                    clientName: `${rental.client?.firstName || ''} ${rental.client?.lastName || ''}`.trim(),
+                    reference: rental.reference,
+                    propertyName: rental.property?.name,
+                    lines: (rental.payments || []).map((p: {
+                      receiptNo?: string;
+                      date?: string;
+                      amount?: number;
+                      operationType?: string;
+                      nature?: string | null;
+                    }) => ({
+                      receiptNo: p.receiptNo,
+                      date: p.date,
+                      amount: p.amount,
+                      operationType: p.operationType,
+                      nature: p.nature,
+                      ref: rental.reference,
+                      propertyName: rental.property?.name,
+                      type: 'location',
+                    })),
+                  })}
+                >
+                  {t('actions.printAllReceipts')}
+                </Btn>
+              )}
+            </div>
             {(rental.payments || []).length === 0 ? (
               <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptyPayments')}</p>
             ) : (
@@ -417,10 +468,12 @@ export default function LocationDetailPage() {
                 <thead>
                   <tr>
                     <Th mac>{t('columns.receipt')}</Th>
+                    <Th mac>{t('rental.monthPaid')}</Th>
                     <Th mac>{t('columns.date')}</Th>
                     <Th mac>{t('columns.amount')}</Th>
                     <Th mac>{t('columns.mode')}</Th>
                     <Th mac>{t('fields.payer')}</Th>
+                    <Th mac>{t('columns.proof')}</Th>
                     <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
                   </tr>
                 </thead>
@@ -432,15 +485,26 @@ export default function LocationDetailPage() {
                     amount: number;
                     operationType?: string;
                     payerName?: string;
+                    nature?: string | null;
+                    bank?: string | null;
+                    proofFile?: string | null;
                   }) => (
                     <tr key={p.id}>
                       <Td mac>
                         <span className="mac-table-ref">{p.receiptNo}</span>
                       </Td>
+                      <Td mac className="mac-table-muted">{p.nature || '—'}</Td>
                       <Td mac className="mac-table-muted">{formatDate(p.date)}</Td>
                       <Td mac className="font-medium">{formatMad(p.amount)}</Td>
                       <Td mac className="capitalize mac-table-muted">{p.operationType || '—'}</Td>
                       <Td mac className="mac-table-muted">{p.payerName || '—'}</Td>
+                      <Td mac>
+                        {p.proofFile ? (
+                          <a href={fileUrl(p.proofFile)} className="text-[#007aff] hover:opacity-70">{t('common.view')}</a>
+                        ) : (
+                          <span className="mac-table-muted">—</span>
+                        )}
+                      </Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions">
                           <MacActionBtn icon={Printer} tone="gray" title={t('actions.printReceipt')} onClick={() => printPaymentReceipt(p)} />
@@ -462,25 +526,32 @@ export default function LocationDetailPage() {
                 <FileText size={15} />
                 {t('tabs.documents')} {t('detail.lease').toLowerCase()}
               </p>
-              <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
+              <DocumentFileActions
+                labelClassName="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50"
+                accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+                onChange={onDocUpload}
+                disabled={docUploading}
+              >
                 <Upload size={14} />
                 {docUploading ? t('auth.sending') : t('actions.deposit')}
-                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" onChange={onDocUpload} disabled={docUploading} />
-              </label>
+              </DocumentFileActions>
             </div>
             {documents.length === 0 ? (
               <p className="text-[12px] text-gic-muted py-6 text-center">{t('msg.emptyDocuments')}</p>
             ) : (
               <ul className="space-y-2">
                 {documents.map((d) => (
-                  <li key={d.id} className="flex items-center gap-2 text-[12px] rounded-xl bg-gray-50 px-3 py-2">
-                    <FileText size={14} className="text-gic-violet shrink-0" />
-                    <span className="font-medium truncate flex-1">{d.name}</span>
-                    {d.category && <span className="text-[10px] text-gic-muted shrink-0">{d.category}</span>}
-                    <span className="text-[10px] text-gic-muted shrink-0">{formatDate(d.createdAt)}</span>
-                    <a href={d.path} target="_blank" rel="noreferrer" className="text-gic-violet hover:underline shrink-0 inline-flex items-center gap-1">
-                      {t('actions.open')} <ExternalLink size={11} />
-                    </a>
+                  <li key={d.id} className="rounded-xl bg-gray-50 px-3 py-2 text-[12px]">
+                    <div className="flex items-center gap-2">
+                      <FileText size={14} className="text-gic-violet shrink-0" />
+                      <span className="font-medium truncate flex-1">{d.name}</span>
+                      {d.category && <span className="text-[10px] text-gic-muted shrink-0">{d.category}</span>}
+                      <span className="text-[10px] text-gic-muted shrink-0">{formatDate(d.createdAt)}</span>
+                      <a href={fileUrl(d.path)} className="text-gic-violet hover:underline shrink-0 inline-flex items-center gap-1">
+                        {t('common.view')} <ExternalLink size={11} />
+                      </a>
+                    </div>
+                    {d.path && <div className="mt-2"><FileInlinePreview src={fileUrl(d.path)} /></div>}
                   </li>
                 ))}
               </ul>
@@ -563,6 +634,13 @@ export default function LocationDetailPage() {
           )}
           <Input label={t('fields.payerName')} value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} />
           <Input label={t('fields.bankRef')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</label>
+            <DocumentFileActions
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              onChange={(e) => setPayForm({ ...payForm, proof: e.target.files?.[0] || null })}
+            />
+          </div>
         </form>
       </Modal>
 

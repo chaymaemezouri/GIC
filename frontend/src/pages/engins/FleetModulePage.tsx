@@ -10,6 +10,7 @@ import { fetchAllRows, printRows } from '../../lib/listPrint';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { useI18n } from '../../i18n/I18nContext';
 import { Btn, Card, EmptyState, Input, MacDateInput, MacSearch, MacSelect, Modal, PageHeader, Pagination, Select, TableWrap, Td, Th } from '../../components/ui';
+import { DocumentFileActions } from '../../components/DocumentScanner';
 import { SelectAllTh, SelectTd, SelectionBar } from '../../components/RowSelection';
 import { AssignmentsPanel } from '../../components/engins/Assignments';
 import { ExpensePanel, FuelPanel, UsagePanel } from '../../components/engins/Logs';
@@ -218,7 +219,14 @@ function FleetDocuments() {
           </Select>
           <Input label={t('fleet.fields.documentName')} value={upload.name} onChange={(e) => setUpload({ ...upload, name: e.target.value })} />
           <Input label={t('fleet.fields.expiry')} type="date" value={upload.expiresAt} onChange={(e) => setUpload({ ...upload, expiresAt: e.target.value })} />
-          <Input label={`${t('fleet.fields.file')} *`} type="file" required onChange={(e) => setUpload({ ...upload, file: e.target.files?.[0] || null })} />
+          <div>
+            <span className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fleet.fields.file')} *</span>
+            <DocumentFileActions
+              required
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx,.doc,.xls"
+              onChange={(e) => setUpload({ ...upload, file: e.target.files?.[0] || null })}
+            />
+          </div>
         </form>
       </Modal>
     </>

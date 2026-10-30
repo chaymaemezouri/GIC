@@ -15,9 +15,11 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { AgentFormFields, emptyAgentForm, agentToForm, type AgentFormData } from '../components/AgentFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { ClientLinkPicker } from '../components/ClientLinkPicker';
@@ -75,17 +77,19 @@ export default function AgentDetailPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
+      const fields = omitPhotoFields(form);
       await api(`/agents/${id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          ...form,
-          email: form.email.trim() || null,
-          phone1: form.phone1.trim() || null,
-          phone2: form.phone2.trim() || null,
-          address: form.address.trim() || null,
-          remark: form.remark.trim() || null,
+          ...fields,
+          email: fields.email.trim() || null,
+          phone1: fields.phone1.trim() || null,
+          phone2: fields.phone2.trim() || null,
+          address: fields.address.trim() || null,
+          remark: fields.remark.trim() || null,
         }),
       });
+      await uploadEntityPhoto(`/agents/${id}/photo`, form.photoFile);
       setEditOpen(false);
       load();
     } catch (err) {
@@ -332,10 +336,13 @@ export default function AgentDetailPage() {
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
             {id && <EntityDocChecklist entityType="agent" entityId={id} />}
-            <label className="mac-upload-btn">
+            <DocumentFileActions
+              labelClassName="mac-upload-btn"
+              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+              onChange={onUploadDoc}
+            >
               <Upload size={14} /> {t('actions.addDocument')}
-              <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />
-            </label>
+            </DocumentFileActions>
             <div className="mac-section-card !p-0 overflow-hidden">
               {documents.map((d) => (
                 <div key={d.id} className="mac-row">

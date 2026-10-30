@@ -1,4 +1,5 @@
 import { useI18n } from '../i18n/I18nContext';
+import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 import { Input, Textarea } from './ui';
 
 export type AgentFormData = {
@@ -10,6 +11,8 @@ export type AgentFormData = {
   address: string;
   remark: string;
   isActive: boolean;
+  photoFile: File | null;
+  photoUrl: string;
 };
 
 export function emptyAgentForm(): AgentFormData {
@@ -22,6 +25,7 @@ export function emptyAgentForm(): AgentFormData {
     address: '',
     remark: '',
     isActive: true,
+    ...emptyPhotoFields(),
   };
 }
 
@@ -35,6 +39,7 @@ export function agentToForm(a: Record<string, unknown>): AgentFormData {
     address: String(a.address || ''),
     remark: String(a.remark || ''),
     isActive: a.isActive !== false,
+    ...photoFieldsFrom(a as { photo?: string | null }),
   };
 }
 
@@ -48,6 +53,7 @@ export function AgentFormFields({
   const { t } = useI18n();
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <FormPhotoField file={form.photoFile} photoUrl={form.photoUrl} onFile={(photoFile) => setForm({ ...form, photoFile })} />
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide">{t('fields.sectionIdentity')}</p>
       <Input label={`${t('fields.firstName')} *`} required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
       <Input label={`${t('fields.lastName')} *`} required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />

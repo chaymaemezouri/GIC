@@ -5,6 +5,7 @@ import type { TranslateFn } from '../i18n/types';
 import { api } from '../lib/api';
 import { Btn, Input, Modal, Select, Textarea } from './ui';
 import { ClientFormPicker } from './ClientFormPicker';
+import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 import { googleMapsSearchUrl } from '../lib/googleMaps';
 
 export type ProjectOwnershipType = 'personnel' | 'client';
@@ -42,6 +43,8 @@ export type ProjectFormData = {
   remark: string;
   locationId: string;
   status: string;
+  photoFile: File | null;
+  photoUrl: string;
 };
 
 export function emptyProjectForm(): ProjectFormData {
@@ -55,6 +58,7 @@ export function emptyProjectForm(): ProjectFormData {
     remark: '',
     locationId: '',
     status: 'actif',
+    ...emptyPhotoFields(),
   };
 }
 
@@ -74,6 +78,7 @@ export function projectToForm(p: Record<string, unknown>): ProjectFormData {
     remark: String(p.remark || ''),
     locationId: String(p.locationId || ''),
     status: String(p.status || 'actif'),
+    ...photoFieldsFrom(p as { photo?: string | null }),
   };
 }
 
@@ -146,6 +151,7 @@ export function ProjectFormFields({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <FormPhotoField file={form.photoFile} photoUrl={form.photoUrl} onFile={(photoFile) => setForm({ ...form, photoFile })} />
       <Select
         label={t('fields.projectType')}
         value={form.ownershipType}

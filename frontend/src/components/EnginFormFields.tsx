@@ -14,6 +14,7 @@ import {
   todayISO,
 } from '../lib/engins';
 import { Input, Select, Textarea } from './ui';
+import { FormPhotoField, emptyPhotoFields } from './FormPhotoField';
 import { FormSection } from './engins/FleetCommon';
 
 export type EnginOwnershipType = 'personnel' | 'loue';
@@ -77,6 +78,8 @@ export type EnginFormData = {
   visitExpiry: string;
   authExpiry: string;
   workPassport: string;
+  photoFile: File | null;
+  photoUrl: string;
 };
 
 export function emptyEnginForm(kind = 'engin', ownershipType: EnginOwnershipType = 'personnel'): EnginFormData {
@@ -129,6 +132,7 @@ export function emptyEnginForm(kind = 'engin', ownershipType: EnginOwnershipType
     visitExpiry: '',
     authExpiry: '',
     workPassport: '',
+    ...emptyPhotoFields(),
   };
 }
 
@@ -141,8 +145,9 @@ export function enginToForm(e: Record<string, unknown>): EnginFormData {
   const date = (v: unknown) => (v ? String(v).slice(0, 10) : '');
   const str = (v: unknown) => (v == null ? '' : String(v));
   const base = emptyEnginForm(String(e.kind || 'engin'), normalizeOwnershipType(e.ownershipType));
-  const out = { ...base } as Record<string, string>;
+  const out = { ...base } as unknown as Record<string, string>;
   for (const key of Object.keys(base)) {
+    if (key === 'photoFile' || key === 'photoUrl') continue;
     const v = e[key];
     if (v === undefined) continue;
     out[key] = /Date$|Start$|End$|Expiry$/.test(key) ? date(v) : str(v);
@@ -152,14 +157,17 @@ export function enginToForm(e: Record<string, unknown>): EnginFormData {
     out.rentalUnit = 'mois';
   }
   if (!out.status || out.status === 'en_mission') out.status = out.status ? 'en_utilisation' : 'disponible';
-  return { ...(out as unknown as EnginFormData), ownershipType: normalizeOwnershipType(e.ownershipType) };
+  return { ...(out as unknown as EnginFormData), ownershipType: normalizeOwnershipType(e.ownershipType), photoFile: null, photoUrl: e.photo ? String(e.photo) : '' };
 }
 
 export function enginFormToBody(f: EnginFormData) {
   const ownershipType = normalizeOwnershipType(f.ownershipType);
   const n = (v: string) => (v === '' ? null : v);
   const body: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(f)) body[k] = n(v as string);
+  for (const [k, v] of Object.entries(f)) {
+    if (k === 'photoFile' || k === 'photoUrl') continue;
+    body[k] = n(v as string);
+  }
   body.ownershipType = ownershipType;
   body.kind = f.kind || 'engin';
   body.counterUnit = f.counterUnit || 'KM';
@@ -207,10 +215,13 @@ export function EnginFormFields({
   form,
   setForm,
   isEdit = false,
+  fixedKind = false,
 }: {
   form: EnginFormData;
   setForm: (f: EnginFormData) => void;
   isEdit?: boolean;
+  /** Empêche de changer engin / matériel quand la création vient d'une affectation. */
+  fixedKind?: boolean;
 }) {
   const { t } = useI18n();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -226,8 +237,9 @@ export function EnginFormFields({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <FormPhotoField file={form.photoFile} photoUrl={form.photoUrl} onFile={(photoFile) => set({ photoFile })} />
       <FormSection title={t('fleet.sections.identity')}>
-        <Select label={t('fleet.fields.kind')} value={form.kind} disabled={isEdit} onChange={(e) => set({ kind: e.target.value })}>
+        <Select label={t('fleet.fields.kind')} value={form.kind} disabled={isEdit || fixedKind} onChange={(e) => set({ kind: e.target.value })}>
           {ENGIN_KINDS.map((k) => <option key={k} value={k}>{t(`fleet.kind.${k}`)}</option>)}
         </Select>
         <Select

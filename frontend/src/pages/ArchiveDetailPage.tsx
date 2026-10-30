@@ -8,6 +8,7 @@ import { escHtml, printWithCompany } from '../lib/companyPrint';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { FilePieceLinks } from '../lib/documentDisplay';
 
 type Archive = {
@@ -319,12 +320,13 @@ export default function ArchiveDetailPage() {
           <Input className="sm:col-span-2" label={t('fields.remark')} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
           <label className="block sm:col-span-2">
             <span className="text-[11px] font-medium text-gic-muted">{t('fields.scanFile')}</span>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-              className="mt-1 block w-full text-[12px] file:mr-3 file:rounded-lg file:border-0 file:bg-gic-violet/10 file:px-3 file:py-1.5 file:text-[11px] file:font-medium file:text-gic-violet"
-              onChange={(e) => setEditFile(e.target.files?.[0] || null)}
-            />
+            <div className="mt-1">
+              <DocumentFileActions
+                accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+                inputClassName="min-w-[12rem] flex-1 text-[12px] file:mr-3 file:rounded-lg file:border-0 file:bg-gic-violet/10 file:px-3 file:py-1.5 file:text-[11px] file:font-medium file:text-gic-violet"
+                onChange={(e) => setEditFile(e.target.files?.[0] || null)}
+              />
+            </div>
             {entry?.filePath && !editFile && (
               <p className="mt-1 text-[11px] text-gic-muted">
                 {t('fields.currentFile')}: <FilePieceLinks path={entry.filePath} />

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus, Pencil, Eye, Download, Printer, Trash2, ShoppingCart, Clock, Wallet, Receipt,
-  SlidersHorizontal, Check, ArrowUp, ArrowDown, Layers,
+  SlidersHorizontal, Check, ArrowUp, ArrowDown, Layers, BadgeCheck,
 } from 'lucide-react';
 import { api, downloadCsv, downloadExcel, fetchSupplierList, fetchChantierList, formatDate, formatMad, openPrintUrl, type PaginatedResponse } from '../lib/api';
 import {
@@ -15,6 +15,7 @@ import {
   PurchaseFormFields, emptyPurchaseForm, purchaseFormToBody, purchaseToForm, validatePurchaseForm, type PurchaseFormData,
 } from '../components/PurchaseFormFields';
 import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from '../components/PurchaseBadges';
+import { PurchaseReviewModal, type ChefDecision } from '../components/PurchaseReviewModal';
 import PurchaseAnalyticsPanel from '../components/PurchaseAnalyticsPanel';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -32,6 +33,9 @@ type Purchase = {
   paidAmount: number;
   remaining: number;
   status: string;
+  chefReview?: 'valide' | 'non_valide' | null;
+  chefReviewRemark?: string | null;
+  chefReviewedBy?: string | null;
   paymentStatus: string;
   deliveryStatus: string;
   expectedDeliveryDate?: string | null;
@@ -97,6 +101,8 @@ export default function AchatsPage() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteMotif, setDeleteMotif] = useState('');
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
   const [form, setForm] = useState<PurchaseFormData>(emptyPurchaseForm());
   const [formError, setFormError] = useState('');
   const [famName, setFamName] = useState('');
@@ -232,6 +238,25 @@ export default function AchatsPage() {
       setFormError('');
       setOpen(true);
     });
+  }
+
+  async function submitReview(decision: ChefDecision, remark: string) {
+    if (!reviewId) return;
+    setReviewBusy(true);
+    try {
+      const updated = await api<Purchase>(`/achats/purchases/${reviewId}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ decision, remark }),
+      });
+      setItems((rows) => rows.map((row) => (row.id === reviewId
+        ? { ...row, chefReview: updated.chefReview, chefReviewRemark: updated.chefReviewRemark, chefReviewedBy: updated.chefReviewedBy }
+        : row)));
+      setReviewId(null);
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setReviewBusy(false);
+    }
   }
 
   const trackingOnly = !!editing && editing.status !== 'elabore';
@@ -606,7 +631,7 @@ export default function AchatsPage() {
                 </thead>
                 <tbody>
                   {items.map((p) => (
-                    <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/achats/${p.id}`)}>
+                    <tr key={p.id} className={`cursor-pointer${p.chefReview === 'non_valide' ? ' purchase-row-rejected' : ''}`} onClick={() => navigate(`/achats/${p.id}`)}>
                       <SelectTd selection={selection} row={p} />
                       <Td mac>
                         <Link to={`/achats/${p.id}`} className="mac-table-ref" onClick={(e) => e.stopPropagation()}>{p.reference}</Link>
@@ -649,6 +674,12 @@ export default function AchatsPage() {
                           {p.status === 'elabore' && (
                             <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { setDeleteId(p.id); setDeleteMotif(''); }} />
                           )}
+                          <MacActionBtn
+                            icon={BadgeCheck}
+                            tone={p.chefReview === 'non_valide' ? 'red' : p.chefReview === 'valide' ? 'green' : 'gray'}
+                            title={p.chefReviewRemark ? `${t('purchase.actions.review')} — ${p.chefReviewRemark}` : t('purchase.actions.review')}
+                            onClick={() => setReviewId(p.id)}
+                          />
                         </div>
                       </Td>
                     </tr>
@@ -751,6 +782,15 @@ export default function AchatsPage() {
         <p className="text-[12px] text-gic-muted mb-3">{t('purchase.list.deleteHint')}</p>
         <textarea className="w-full h-24 rounded-xl border border-gic-border p-3 text-[12px]" placeholder={t('msg.motifPlaceholder')} value={deleteMotif} onChange={(e) => setDeleteMotif(e.target.value)} />
       </Modal>
+
+      <PurchaseReviewModal
+        open={!!reviewId}
+        reference={items.find((p) => p.id === reviewId)?.reference}
+        initialRemark={items.find((p) => p.id === reviewId)?.chefReviewRemark}
+        busy={reviewBusy}
+        onClose={() => setReviewId(null)}
+        onDecide={submitReview}
+      />
     </div>
   );
 }

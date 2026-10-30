@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ClientFormFields, emptyClientForm, type ClientFormData } from '../components/ClientFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import MacAvatar from '../components/MacAvatar';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -177,7 +178,8 @@ export default function ClientsPage() {
     e.preventDefault();
     setError('');
     try {
-      await api('/clients', { method: 'POST', body: JSON.stringify(form) });
+      const created = await api<{ id: string }>('/clients', { method: 'POST', body: JSON.stringify(omitPhotoFields(form)) });
+      await uploadEntityPhoto(`/clients/${created.id}/photo`, form.photoFile);
       setOpen(false);
       load(1);
     } catch (err) {

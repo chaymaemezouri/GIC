@@ -9,10 +9,12 @@ import { roleLabel, canManageUsers } from '../lib/permissions';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, Select, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { InternalStaffFormFields, staffFormToBody, staffToForm } from '../components/InternalStaffFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import { SALARY_PERIOD_LABELS, baseSalaryForPeriod, salaryPeriodUnitLabel } from '../lib/staffSalaryPeriod';
 
 type Tab = 'infos' | 'compte' | 'salaire' | 'documents' | 'echanges' | 'historique';
@@ -187,6 +189,7 @@ export default function EquipeInterneDetailPage() {
         method: 'PUT',
         body: JSON.stringify(staffFormToBody(form)),
       });
+      await uploadEntityPhoto(`/equipe-interne/${id}/photo`, form.photoFile);
       setEditOpen(false);
       load();
     } catch (err) {
@@ -590,10 +593,12 @@ export default function EquipeInterneDetailPage() {
           <div className="mt-1 space-y-4">
             {id && <EntityDocChecklist entityType="staff" entityId={id} />}
             <div className="flex flex-wrap gap-2">
-              <label className="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-black/[0.02]">
+              <DocumentFileActions
+                labelClassName="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-black/[0.02]"
+                onChange={uploadDoc}
+              >
                 <Upload size={14} /> {t('actions.addDocument')}
-                <input type="file" className="hidden" onChange={uploadDoc} />
-              </label>
+              </DocumentFileActions>
             </div>
             <div>
               <h3 className="text-sm font-semibold mb-2">{t('detail.importedDocs')}</h3>

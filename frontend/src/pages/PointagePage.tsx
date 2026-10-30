@@ -65,7 +65,7 @@ function cellInputClass(locked: boolean, width = 'w-16') {
 }
 
 function pointageBrut(totalDay: number, dayRate: number | null | undefined, fallback: number) {
-  const rate = dayRate != null && dayRate > 0 ? dayRate : fallback;
+  const rate = fallback > 0 ? fallback : dayRate != null && dayRate > 0 ? dayRate : 0;
   return totalDay * rate;
 }
 
@@ -286,12 +286,6 @@ export default function PointagePage() {
     if (tab === 'historique') loadHistory(histPage);
   }, [tab, histSort, histOrder, isEngin]);
 
-  function parseDayRate(value: string) {
-    if (value === '' || value == null) return null;
-    const n = Number(value);
-    return Number.isNaN(n) || n <= 0 ? null : n;
-  }
-
   async function setPointageValidated(pointageId: string, validated: boolean) {
     await api(`/chantiers/pointage/${pointageId}`, {
       method: 'PUT',
@@ -328,7 +322,6 @@ export default function PointagePage() {
     setSaving(p.id);
     try {
       const r = getHistRow(p);
-      const dayRate = parseDayRate(r.dayRate);
       if (!p.chantier?.id) {
         await appAlert(t('msg.attendanceNoSite'));
         return;
@@ -337,18 +330,12 @@ export default function PointagePage() {
         method: 'PUT',
         body: JSON.stringify({
           dayValue: histRowTotalDay(p),
-          dayRate,
           advance: Number(r.advance) || 0,
           bonus: Number(r.bonus) || 0,
           validated,
           chantierId: p.chantier.id,
         }),
       });
-      if (dayRate != null && dayRate > 0) {
-        setWorkforce((prev) =>
-          prev.map((w) => (w.id === p.workforceId ? { ...w, dailySalary: dayRate } : w)),
-        );
-      }
       loadHistory(histPage);
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -418,7 +405,7 @@ export default function PointagePage() {
         { label: t('columns.chantier'), value: (p) => p.chantier?.name },
         { label: t('columns.days'), value: (p) => formatDays(pointageDays(p)), align: 'right', total: (rows) => formatDays(rows.reduce((s, p) => s + pointageDays(p), 0)) },
         { label: t('columns.hours'), value: (p) => (pointageDays(p) * HOURS_PER_DAY).toFixed(1), align: 'right' },
-        { label: t('columns.dailyRate'), value: (p) => formatMad(p.dayRate ?? p.workforce.dailySalary ?? 0), align: 'right' },
+        { label: t('columns.dailyRate'), value: (p) => formatMad(p.workforce.dailySalary || 0), align: 'right' },
         {
           label: t('columns.brut'),
           value: (p) => formatMad(pointageBrut(pointageDays(p), p.dayRate, p.workforce.dailySalary || 0)),
@@ -746,7 +733,7 @@ export default function PointagePage() {
                     const hr = getHistRow(p);
                     const locked = p.validated;
                     const days = histRowTotalDay(p);
-                    const histBrut = pointageBrut(days, parseDayRate(hr.dayRate), p.workforce.dailySalary || 0);
+                    const histBrut = pointageBrut(days, p.dayRate, p.workforce.dailySalary || 0);
                     return (
                     <tr
                       key={p.id}
@@ -779,17 +766,7 @@ export default function PointagePage() {
                         />
                       </Td>
                       <Td mac className="mac-table-muted">{(days * HOURS_PER_DAY).toFixed(1)}</Td>
-                      <Td mac>
-                        <input
-                          className={cellInputClass(locked, 'w-20')}
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          readOnly={locked}
-                          value={hr.dayRate}
-                          onChange={(e) => setHistRow(p.id, { dayRate: e.target.value }, p)}
-                        />
-                      </Td>
+                      <Td mac className="mac-table-muted">{formatMad(p.workforce.dailySalary || 0)}</Td>
                       <Td mac className="mac-table-muted">{formatMad(histBrut)}</Td>
                       <Td mac>
                         <input

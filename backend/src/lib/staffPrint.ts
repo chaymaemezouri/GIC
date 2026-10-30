@@ -46,7 +46,7 @@ ${data.periodLabel ? `<p><strong>Période :</strong> ${data.periodLabel}</p>` : 
 <table>
 <tbody>
 <tr><th>Salaire de base</th><td>${(data.baseSalary ?? data.monthlySalary ?? 0).toLocaleString('fr-MA')} MAD</td></tr>
-<tr><th>Primes</th><td>+${(data.bonus ?? 0).toLocaleString('fr-MA')} MAD</td></tr>
+<tr><th>Heures sup</th><td>+${(data.bonus ?? 0).toLocaleString('fr-MA')} MAD</td></tr>
 <tr><th>Retenues</th><td>−${(data.deduction ?? 0).toLocaleString('fr-MA')} MAD</td></tr>
 <tr><th>Avances</th><td>−${(data.advance ?? 0).toLocaleString('fr-MA')} MAD</td></tr>
 <tr><th><strong>Net à payer</strong></th><td><strong>${(data.net ?? 0).toLocaleString('fr-MA')} MAD</strong></td></tr>

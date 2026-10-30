@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/I18nContext';
+import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 import { Input, Select } from './ui';
 
 export type ClientFormData = {
@@ -18,6 +20,8 @@ export type ClientFormData = {
   source: string;
   remark: string;
   nb: string;
+  photoFile: File | null;
+  photoUrl: string;
 };
 
 export const emptyClientForm = (): ClientFormData => ({
@@ -37,6 +41,7 @@ export const emptyClientForm = (): ClientFormData => ({
   source: '',
   remark: '',
   nb: '',
+  ...emptyPhotoFields(),
 });
 
 export function clientToForm(c: Partial<ClientFormData> & Record<string, unknown>): ClientFormData {
@@ -57,6 +62,7 @@ export function clientToForm(c: Partial<ClientFormData> & Record<string, unknown
     source: String(c.source || ''),
     remark: String(c.remark || ''),
     nb: String(c.nb || ''),
+    ...photoFieldsFrom(c as { photo?: string | null }),
   };
 }
 
@@ -76,8 +82,30 @@ export function ClientFormFields({
   sourceOptions?: string[];
 }) {
   const { t } = useI18n();
+  const options = sourceOptions.length
+    ? sourceOptions
+    : ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commercial', 'Réseaux sociaux'];
+  const preset = options.includes(form.source);
+  const [other, setOther] = useState(() => Boolean(form.source) && !options.includes(form.source));
+
+  useEffect(() => {
+    if (form.source && !options.includes(form.source)) setOther(true);
+  }, [form.source, options]);
+
+  function onSourceSelect(value: string) {
+    if (value === '__other__') {
+      setOther(true);
+      if (!form.source || options.includes(form.source)) setForm({ ...form, source: '' });
+      return;
+    }
+    setOther(false);
+    setForm({ ...form, source: value });
+  }
+
+  const showOther = other || Boolean(form.source && !preset);
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <FormPhotoField file={form.photoFile} photoUrl={form.photoUrl} onFile={(photoFile) => setForm({ ...form, photoFile })} />
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide">{t('fields.sectionIdentity')}</p>
       <Input label={`${t('fields.firstName')} *`} required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
       <Input label={`${t('fields.lastName')} *`} required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
@@ -116,12 +144,21 @@ export function ClientFormFields({
         ))}
       </Select>
 
-      <Select label={t('fields.source')} value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
+      <Select label={t('fields.source')} value={showOther ? '__other__' : form.source} onChange={(e) => onSourceSelect(e.target.value)}>
         <option value="">{t('fields.noneSource')}</option>
-        {(sourceOptions.length ? sourceOptions : ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commercial', 'Réseaux sociaux']).map((s) => (
+        {options.map((s) => (
           <option key={s} value={s}>{s}</option>
         ))}
+        <option value="__other__">{t('common.other')}</option>
       </Select>
+      {showOther && (
+        <Input
+          label={t('fields.sourceManual')}
+          value={form.source}
+          placeholder={t('fields.sourceManualPlaceholder')}
+          onChange={(e) => setForm({ ...form, source: e.target.value })}
+        />
+      )}
 
       <Input className="sm:col-span-2" label={t('fields.remark')} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
     </div>

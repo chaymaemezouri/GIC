@@ -15,8 +15,10 @@ import {
   BienFormFields, emptyBienForm, flattenProjectFloors,
   type BienFormData, type FloorOption,
 } from '../components/BienFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import MacAvatar from '../components/MacAvatar';
 import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { partyLabel } from '../components/PartyNames';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
@@ -36,11 +38,13 @@ type Property = {
     id: string;
     reference: string;
     client?: { id: string; firstName: string; lastName: string; reference?: string } | null;
+    coClients?: { id: string; firstName: string; lastName: string }[];
   }>;
   rentals?: Array<{
     id: string;
     reference: string;
     client?: { id: string; firstName: string; lastName: string; reference?: string } | null;
+    coClients?: { id: string; firstName: string; lastName: string }[];
   }>;
 };
 
@@ -224,15 +228,17 @@ export default function BiensPage() {
     e.preventDefault();
     setError('');
     try {
+      const fields = omitPhotoFields(form);
       const body = {
-        ...form,
-        surface: form.surface ? Number(form.surface) : null,
-        rooms: form.rooms ? Number(form.rooms) : null,
-        price: form.price ? Number(form.price) : null,
-        projectId: form.projectId || null,
-        floorId: form.floorId || null,
+        ...fields,
+        surface: fields.surface ? Number(fields.surface) : null,
+        rooms: fields.rooms ? Number(fields.rooms) : null,
+        price: fields.price ? Number(fields.price) : null,
+        projectId: fields.projectId || null,
+        floorId: fields.floorId || null,
       };
-      await api('/immobilier/properties', { method: 'POST', body: JSON.stringify(body) });
+      const created = await api<{ id: string }>('/immobilier/properties', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/immobilier/properties/${created.id}/photo`, form.photoFile);
       setOpen(false);
       load(1);
       setPage(1);
@@ -280,7 +286,8 @@ export default function BiensPage() {
             const tenant = p.rentals?.[0]?.client;
             const client = buyer || tenant;
             if (!client) return '';
-            return `${client.firstName} ${client.lastName} (${buyer ? t('fields.buyer') : t('fields.tenant')})`;
+            const extras = buyer ? p.sales?.[0]?.coClients : p.rentals?.[0]?.coClients;
+            return `${partyLabel(client, extras)} (${buyer ? t('fields.buyer') : t('fields.tenant')})`;
           },
         },
       ],
@@ -480,6 +487,7 @@ export default function BiensPage() {
                 const buyer = p.sales?.[0]?.client;
                 const tenant = p.rentals?.[0]?.client;
                 const client = buyer || tenant;
+                const extras = buyer ? p.sales?.[0]?.coClients : p.rentals?.[0]?.coClients;
                 const clientRole = buyer ? t('fields.buyer') : tenant ? t('fields.tenant') : null;
                 return (
                 <tr
@@ -506,7 +514,7 @@ export default function BiensPage() {
                     {client ? (
                       <>
                         <Link to={`/clients/${client.id}`} className="mac-table-ref">
-                          {client.firstName} {client.lastName}
+                          {partyLabel(client, extras)}
                         </Link>
                         {clientRole && <span className="block text-[10px] text-gic-muted">{clientRole}</span>}
                       </>

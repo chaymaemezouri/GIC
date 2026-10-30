@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ProjectFormFields, emptyProjectForm, projectToForm, projectFormToBody, projectOwnershipLabel, type ProjectFormData } from '../components/ProjectFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import MacAvatar from '../components/MacAvatar';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -174,11 +175,10 @@ export default function ProjetsPage() {
     }
     try {
       const body = projectFormToBody(form);
-      if (editId) {
-        await api(`/immobilier/projects/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await api('/immobilier/projects', { method: 'POST', body: JSON.stringify(body) });
-      }
+      const saved = editId
+        ? await api<{ id: string }>(`/immobilier/projects/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api<{ id: string }>('/immobilier/projects', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/immobilier/projects/${saved.id}/photo`, form.photoFile);
       setOpen(false);
       load(page);
     } catch (err) {

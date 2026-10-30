@@ -8,10 +8,12 @@ import { api, formatDate, formatMad, openPrintUrl, uploadDocument, uploadForm } 
 import { Btn, Card, KpiCard, MacActionBtn, MacDateInput, MacSelect, Modal, StatusPill, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import DriverVehiclePanel from '../components/DriverVehiclePanel';
@@ -163,6 +165,7 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
           isActive: form.isActive === 'true',
         }),
       });
+      await uploadEntityPhoto(`/chantiers/workforce/${id}/photo`, form.photoFile);
       setEditOpen(false);
       load();
     } catch (err) {
@@ -611,10 +614,13 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
             {id && <EntityDocChecklist entityType="workforce" entityId={id} />}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-[12px] text-gic-muted">{t('msg.documentsInternalGenerated')}</p>
-              <label className="mac-upload-btn">
+              <DocumentFileActions
+                labelClassName="mac-upload-btn"
+                accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+                onChange={onUploadDoc}
+              >
                 <Upload size={14} /> {t('actions.addDocument')}
-                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />
-              </label>
+              </DocumentFileActions>
             </div>
 
             <div>

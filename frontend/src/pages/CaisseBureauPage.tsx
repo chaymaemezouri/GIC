@@ -21,6 +21,7 @@ import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection'
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
+import { FileInlinePreview } from '../components/PdfPreview';
 
 type Movement = {
   id: string;
@@ -693,11 +694,12 @@ export default function CaisseBureauPage() {
             )}
             <p><span className="text-gic-muted">{t('msg.colonRemark')}</span> {viewItem.remark || '—'}</p>
             {viewItem.proofFile && (
-              <p>
+              <div className="space-y-2">
                 <a href={viewItem.proofFile} target="_blank" rel="noreferrer" className="text-[#007aff]">
                   {t('fields.viewDownload')}
                 </a>
-              </p>
+                <FileInlinePreview src={viewItem.proofFile} />
+              </div>
             )}
           </div>
         )}

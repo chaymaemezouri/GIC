@@ -1,11 +1,13 @@
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PauseCircle, Plus, Trash2, Users } from 'lucide-react';
+import { PauseCircle, Plus, Trash2, UserPlus, Users } from 'lucide-react';
 import { api, formatDate } from '../lib/api';
 import { CHAUFFEUR_CATEGORY, workforceDetailPathForCategory } from '../lib/workforceScope';
 import { Btn, Input, MacActionBtn, MacSearch, Modal, Select, TableWrap, Td, Th } from './ui';
 import { EntityPickerPanel, workforceToPickerItem } from './EntityPickerPanel';
+import { WorkforceFormFields, emptyWorkforceForm, type WorkforceFormData } from './WorkforceFormFields';
+import { uploadEntityPhoto } from './FormPhotoField';
 import { useI18n } from '../i18n/I18nContext';
 
 export type SiteAssignment = {
@@ -84,6 +86,11 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
   const [suspendFrom, setSuspendFrom] = useState(todayIso());
   const [suspendUntil, setSuspendUntil] = useState('');
   const [missionFilter, setMissionFilter] = useState<'all' | 'mission' | 'free'>('all');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<WorkforceFormData>(emptyWorkforceForm);
+  const [createError, setCreateError] = useState('');
+  const [createSaving, setCreateSaving] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
 
   const assignedIds = useMemo(() => {
     const ids = new Set(assignments.map((a) => a.workforce.id));
@@ -138,6 +145,79 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
 
   function toggleWorker(id: string) {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+  }
+
+  function openCreateWorker() {
+    setCreateForm(scope === 'drivers'
+      ? { ...emptyWorkforceForm(), category: CHAUFFEUR_CATEGORY }
+      : emptyWorkforceForm());
+    setCreateError('');
+    setCreateOpen(true);
+    if (categories.length || scope === 'drivers') return;
+    const qs = `excludeCategory=${encodeURIComponent(CHAUFFEUR_CATEGORY)}`;
+    api<{ categories?: string[] }>(`/chantiers/workforce/stats?${qs}`)
+      .then((stats) => setCategories(stats.categories || []))
+      .catch(() => setCategories([]));
+  }
+
+  function workforceBody(f: WorkforceFormData) {
+    return {
+      firstName: f.firstName,
+      lastName: f.lastName,
+      cin: f.cin || null,
+      birthDate: f.birthDate || null,
+      address: f.address || null,
+      phone1: f.phone1 || null,
+      phone2: f.phone2 || null,
+      email: f.email || null,
+      category: scope === 'drivers' ? CHAUFFEUR_CATEGORY : (f.category || null),
+      groupe: f.groupe || null,
+      workPassport: f.workPassport || null,
+      hireDate: f.hireDate || null,
+      contractType: f.contractType || null,
+      salaryPeriod: f.salaryPeriod || 'jour',
+      cnssNumber: f.cnssNumber || null,
+      dailySalary: f.dailySalary || 0,
+      monthlySalary: f.monthlySalary || 0,
+      bankName: f.bankName || null,
+      rib: f.rib || null,
+      declared: f.declared === 'true',
+      isActive: f.isActive === 'true',
+    };
+  }
+
+  async function createWorker(e: React.FormEvent) {
+    e.preventDefault();
+    if (createSaving) return;
+    setCreateSaving(true);
+    setCreateError('');
+    try {
+      const created = await api<WorkerOption>('/chantiers/workforce', {
+        method: 'POST',
+        body: JSON.stringify(workforceBody(createForm)),
+      });
+      const uploaded = await uploadEntityPhoto(`/chantiers/workforce/${created.id}/photo`, createForm.photoFile);
+      const option: WorkerOption = {
+        id: created.id,
+        reference: created.reference,
+        firstName: created.firstName,
+        lastName: created.lastName,
+        cin: created.cin,
+        category: scope === 'drivers' ? CHAUFFEUR_CATEGORY : created.category,
+        phone1: created.phone1,
+        photo: uploaded?.photo || created.photo,
+        assignments: [],
+      };
+      setWorkers((rows) => [option, ...rows.filter((w) => w.id !== option.id)]);
+      setSelectedIds((ids) => (ids.includes(option.id) ? ids : [...ids, option.id]));
+      setPickerQuery('');
+      setMissionFilter('all');
+      setCreateOpen(false);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setCreateSaving(false);
+    }
   }
 
   async function assign(e: React.FormEvent) {
@@ -333,7 +413,7 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
 
       <Modal
         open={open}
-        title={t('actions.assignWorkers')}
+        title={scope === 'drivers' ? t('actions.assignDrivers') : t('actions.assignWorkers')}
         onClose={() => setOpen(false)}
         size="lg"
         footer={
@@ -347,6 +427,14 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
       >
         <form id="assign-workers-form" onSubmit={assign} className="grid gap-3">
           <p className="text-[12px] text-gic-muted">{scope === 'drivers' ? t('msg.assignDriversHint') : t('msg.assignWorkersHint')}</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-black/15 bg-black/[0.02] px-3 py-2.5">
+            <p className="text-[12px] text-gic-muted min-w-0">
+              {scope === 'drivers' ? t('msg.createDriverForAssign') : t('msg.createWorkerForAssign')}
+            </p>
+            <Btn type="button" icon={UserPlus} onClick={openCreateWorker}>
+              {scope === 'drivers' ? t('actions.newDriver') : t('actions.newWorker')}
+            </Btn>
+          </div>
           <EntityPickerPanel
             items={pickerItems}
             excludeIds={assignedIds}
@@ -358,7 +446,7 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
             loading={workersLoading}
             open={open}
             searchPlaceholder={t('fields.filterNameRefEmail')}
-            emptyMessage={t('msg.emptyWorkerOnSite')}
+            emptyMessage={scope === 'drivers' ? t('msg.noFreeDriverToAssign') : t('msg.noFreeWorkerToAssign')}
             ariaLabel={t('msg.ariaSelectWorkers')}
             showMissionFilter
             missionFilter={missionFilter}
@@ -378,6 +466,32 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
             onChange={(e) => setFunctionRole(e.target.value)}
             placeholder={t('columns.function')}
           />
+        </form>
+      </Modal>
+
+      <Modal
+        open={createOpen}
+        size="lg"
+        title={scope === 'drivers' ? t('actions.newDriver') : t('actions.newWorker')}
+        onClose={() => setCreateOpen(false)}
+        footer={
+          <>
+            <Btn variant="secondary" type="button" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Btn>
+            <Btn form="create-worker-for-assign" type="submit" disabled={createSaving}>
+              {createSaving ? t('auth.sending') : t('common.add')}
+            </Btn>
+          </>
+        }
+      >
+        <form id="create-worker-for-assign" onSubmit={createWorker}>
+          <WorkforceFormFields
+            form={createForm}
+            setForm={setCreateForm}
+            categories={scope === 'drivers' ? [CHAUFFEUR_CATEGORY] : categories}
+            hideCategory={scope === 'drivers'}
+            driverModes={scope === 'drivers'}
+          />
+          {createError && <p className="mt-3 text-[11px] text-gic-coral">{createError}</p>}
         </form>
       </Modal>
 

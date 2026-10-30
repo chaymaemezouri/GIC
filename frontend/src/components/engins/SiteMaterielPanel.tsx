@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom';
 import { ArrowRightLeft, Eye, Package, Plus, Undo2, Wallet, Warehouse } from 'lucide-react';
 import { api, formatDate, formatMad } from '../../lib/api';
 import { appAlert } from '../../lib/dialog';
-import { COST_CATEGORIES, formatQty, formatSignedQty, materielQtyDelta, parseIntQty, todayISO, type CostBucket, type CostLine } from '../../lib/engins';
+import { COST_CATEGORIES, errorMessage, formatQty, formatSignedQty, materielQtyDelta, parseIntQty, todayISO, type CostBucket, type CostLine } from '../../lib/engins';
 import { useI18n } from '../../i18n/I18nContext';
 import { Btn, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, Modal, Select, TableWrap, Tabs, Td, Th } from '../ui';
+import { EnginFormFields, emptyEnginForm, enginFormToBody, type EnginFormData } from '../EnginFormFields';
+import { uploadEntityPhoto } from '../FormPhotoField';
 import { MaterielStockPanel } from './MaterielStockPanel';
 import { SiteTransferPanel } from './SiteTransferPanel';
 
@@ -102,6 +104,10 @@ export function SiteMaterielPanel({
   const [costs, setCosts] = useState<CostsPayload | null>(null);
   const [openEnginId, setOpenEnginId] = useState<string | null>(null);
   const [histFilter, setHistFilter] = useState<HistFilter>('all');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<EnginFormData>(() => emptyEnginForm('materiel'));
+  const [createError, setCreateError] = useState('');
+  const [createSaving, setCreateSaving] = useState(false);
 
   function bump() {
     setReload((n) => n + 1);
@@ -200,6 +206,45 @@ export function SiteMaterielPanel({
     setDestTranche(tranche || '');
     setDate(todayISO());
     setRemark('');
+  }
+
+  function openCreateMateriel() {
+    setCreateForm(emptyEnginForm('materiel'));
+    setCreateError('');
+    setCreateOpen(true);
+  }
+
+  async function createMateriel(e: React.FormEvent) {
+    e.preventDefault();
+    if (createSaving) return;
+    setCreateSaving(true);
+    setCreateError('');
+    try {
+      const created = await api<{ id: string; code?: string | null; designation?: string | null; quantity?: number | null }>('/engins', {
+        method: 'POST',
+        body: JSON.stringify(enginFormToBody({ ...createForm, kind: 'materiel' })),
+      });
+      await uploadEntityPhoto(`/engins/${created.id}/photo`, createForm.photoFile);
+      const qtyOwned = Number(created.quantity || createForm.quantity || 1);
+      setCatalog((rows) => [
+        {
+          id: created.id,
+          code: created.code,
+          designation: created.designation || createForm.designation,
+          depot: qtyOwned,
+          owned: qtyOwned,
+          repair: 0,
+          onSite: 0,
+        },
+        ...rows.filter((row) => row.id !== created.id),
+      ]);
+      setPicked(created.id);
+      setCreateOpen(false);
+    } catch (err) {
+      setCreateError(errorMessage(err, t('common.error')));
+    } finally {
+      setCreateSaving(false);
+    }
   }
 
   function openRow(kind: ActionKind, target: Position) {
@@ -667,14 +712,20 @@ export function SiteMaterielPanel({
           className="grid gap-3 sm:grid-cols-2"
         >
           {action === 'assign' ? (
-            <Select label={t('fleet.kind.materiel')} value={picked} onChange={(e) => setPicked(e.target.value)} required>
-              <option value="">{t('common.choose')}</option>
-              {assignChoices.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {labelOf(item)} — {t('fleet.stock.depot')} {formatQty(item.depot)}
-                </option>
-              ))}
-            </Select>
+            <>
+              <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-black/15 bg-black/[0.02] px-3 py-2.5">
+                <p className="text-[12px] text-gic-muted min-w-0">{t('msg.createWorkerForAssign')}</p>
+                <Btn type="button" icon={Plus} onClick={openCreateMateriel}>{t('fleet.actions.newMateriel')}</Btn>
+              </div>
+              <Select label={t('fleet.kind.materiel')} value={picked} onChange={(e) => setPicked(e.target.value)} required>
+                <option value="">{t('common.choose')}</option>
+                {assignChoices.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {labelOf(item)} — {t('fleet.stock.depot')} {formatQty(item.depot)}
+                  </option>
+                ))}
+              </Select>
+            </>
           ) : (
             <div className="sm:col-span-2">
               <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fleet.kind.materiel')}</p>
@@ -737,6 +788,26 @@ export function SiteMaterielPanel({
             <Btn type="button" variant="secondary" onClick={() => setAction(null)}>{t('common.cancel')}</Btn>
             <Btn type="button" disabled={saving || !picked} onClick={() => void saveAction()}>{t('common.save')}</Btn>
           </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={createOpen}
+        size="xl"
+        title={t('fleet.actions.newMateriel')}
+        onClose={() => setCreateOpen(false)}
+        footer={
+          <>
+            <Btn variant="secondary" type="button" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Btn>
+            <Btn form="create-materiel-for-assign" type="submit" disabled={createSaving}>
+              {createSaving ? t('auth.sending') : t('common.add')}
+            </Btn>
+          </>
+        }
+      >
+        <form id="create-materiel-for-assign" onSubmit={createMateriel}>
+          <EnginFormFields form={createForm} setForm={setCreateForm} fixedKind />
+          {createError && <p className="mt-3 text-[11px] text-gic-coral">{createError}</p>}
         </form>
       </Modal>
 

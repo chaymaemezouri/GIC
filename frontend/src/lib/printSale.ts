@@ -54,6 +54,9 @@ export async function printSaleReceipt(sale: Record<string, unknown>, _opts?: { 
     <div><span class="k">Référence :</span> ${esc(client.reference)}</div>
     <div><span class="k">NB :</span> ${esc(client.nb)}</div>
   </div>
+  ${(Array.isArray(sale.coClients) && sale.coClients.length)
+    ? `<p><span class="k">Autres acheteurs :</span> ${esc((sale.coClients as { firstName?: string; lastName?: string }[]).map((c) => `${c.firstName || ''} ${c.lastName || ''}`.trim()).join(', '))}</p>`
+    : ''}
 
   <h2>2. Contrat / vente</h2>
   <div class="grid">
@@ -65,10 +68,11 @@ export async function printSaleReceipt(sale: Record<string, unknown>, _opts?: { 
     <div><span class="k">N° égal. acheteur :</span> ${esc(sale.buyerLegalizationNo)}</div>
     <div><span class="k">Prix :</span> ${esc(mad(sale.salePrice))}</div>
     <div><span class="k">Remise :</span> ${esc(mad(sale.discount))}</div>
-    <div><span class="k">Avance :</span> ${esc(mad(sale.advance))}</div>
+    <div><span class="k">Avance demandée :</span> ${esc(mad(sale.advance))}</div>
+    <div><span class="k">Complément de l'avance :</span> ${esc(mad(Math.max(0, Number(sale.advance || 0) - (Array.isArray(sale.payments) ? sale.payments : []).filter((p: { nature?: string }) => /^(avance|acompte|complement_avance)$/i.test(String(p.nature || ''))).reduce((sum: number, p: { amount?: number }) => sum + Number(p.amount || 0), 0))))}</div>
     <div><span class="k">Net / Payé / Reste :</span> ${esc(mad(sale.netPrice))} / ${esc(mad(sale.totalPaid))} / ${esc(mad(sale.remaining))}</div>
   </div>
-  ${sale.description ? `<p><span class="k">Description :</span> ${esc(sale.description)}</p>` : ''}
+  ${sale.description ? `<p><span class="k">Description du contrat :</span> ${esc(sale.description)}</p>` : ''}
 
   <h2>3. Produit / bien</h2>
   <div class="grid">

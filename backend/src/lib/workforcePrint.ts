@@ -62,13 +62,13 @@ export function workforceDocHtml(
 ${period ? `<p>${period}</p>` : ''}
 <p><strong>Salaire / jour :</strong> ${data.dailySalary != null ? Number(data.dailySalary).toLocaleString('fr-MA') : '—'} MAD</p>
 <table>
-<thead><tr><th>Date</th><th>Chantier</th><th>Journées eq.</th><th>Avance</th><th>Prime</th></tr></thead>
+<thead><tr><th>Date</th><th>Chantier</th><th>Journées eq.</th><th>Avance</th><th>Heure sup</th></tr></thead>
 <tbody>${rows}</tbody>
 </table>
 <div class="totals">
 <p><strong>Journées équivalentes :</strong> ${(data.totalDays ?? 0).toFixed(2)}</p>
 <p><strong>Brut :</strong> ${(data.brut ?? 0).toLocaleString('fr-MA')} MAD</p>
-<p><strong>Primes :</strong> +${(data.bonuses ?? 0).toLocaleString('fr-MA')} MAD</p>
+<p><strong>Heures sup :</strong> +${(data.bonuses ?? 0).toLocaleString('fr-MA')} MAD</p>
 <p><strong>Avances :</strong> −${(data.advances ?? 0).toLocaleString('fr-MA')} MAD</p>
 <p><strong>Net à payer :</strong> ${(data.net ?? 0).toLocaleString('fr-MA')} MAD</p>
 </div>

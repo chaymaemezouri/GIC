@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Check, Circle, Pencil, RefreshCw, Trash2, Wand2 } from 'lucide-react';
-import { api, formatDate, formatMad } from '../lib/api';
+import { Check, Circle, Pencil, Printer, Trash2 } from 'lucide-react';
+import { api, formatDate, formatMad, uploadForm } from '../lib/api';
+import { fileUrl } from '../lib/photoUrl';
+import { DocumentFileActions } from './DocumentScanner';
+import { printPaymentReceipt, printPaymentsReceipt } from '../lib/printPayment';
 import { Btn, Input, MacActionBtn, Modal, Select } from './ui';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -10,6 +13,7 @@ export type MonthPayment = {
   date: string;
   operationType?: string | null;
   receiptNo?: string;
+  proofFile?: string | null;
 };
 
 export type MonthSchedule = {
@@ -30,6 +34,7 @@ type Props = {
   schedules: MonthSchedule[];
   onReload: () => void;
   canEdit?: boolean;
+  receipt?: { reference?: string; firstName?: string; lastName?: string };
 };
 
 function roundMad(n: number) {
@@ -54,29 +59,22 @@ function isOverdue(s: MonthSchedule) {
 }
 
 export default function RentalMonthlyPayments({
-  rentalId,
   monthlyRent,
-  startDate,
   endDate,
   schedules,
   onReload,
   canEdit = true,
+  receipt,
 }: Props) {
   const { t, lang } = useI18n();
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [genOpen, setGenOpen] = useState(false);
   const [selected, setSelected] = useState<MonthSchedule | null>(null);
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [payMode, setPayMode] = useState('especes');
+  const [proofFile, setProofFile] = useState<File | null>(null);
   const [editPayId, setEditPayId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editMode, setEditMode] = useState('especes');
-  const [genForm, setGenForm] = useState({
-    startDate: startDate ? String(startDate).slice(0, 10) : new Date().toISOString().slice(0, 10),
-    endDate: endDate ? String(endDate).slice(0, 10) : '',
-    count: '12',
-  });
   const [error, setError] = useState('');
 
   const sorted = useMemo(
@@ -140,6 +138,22 @@ export default function RentalMonthlyPayments({
     setAdvanceAmount(resteOf(s) > 0 ? String(resteOf(s)) : '');
   }
 
+  async function postMonthPayment(scheduleId: string, amount: number) {
+    if (proofFile) {
+      const fd = new FormData();
+      fd.append('amount', String(amount));
+      fd.append('operationType', payMode);
+      fd.append('proof', proofFile);
+      await uploadForm(`/transactions/schedules/${scheduleId}/advance`, fd);
+      setProofFile(null);
+      return;
+    }
+    await api(`/transactions/schedules/${scheduleId}/advance`, {
+      method: 'POST',
+      body: JSON.stringify({ amount, operationType: payMode }),
+    });
+  }
+
   async function addAdvance(e: FormEvent) {
     e.preventDefault();
     if (!selectedLive || busyId) return;
@@ -149,10 +163,7 @@ export default function RentalMonthlyPayments({
     setBusyId(selectedLive.id);
     setError('');
     try {
-      await api(`/transactions/schedules/${selectedLive.id}/advance`, {
-        method: 'POST',
-        body: JSON.stringify({ amount, operationType: payMode }),
-      });
+      await postMonthPayment(selectedLive.id, amount);
       onReload();
       setAdvanceAmount('');
     } catch (err) {
@@ -168,10 +179,7 @@ export default function RentalMonthlyPayments({
     setBusyId(selectedLive.id);
     setError('');
     try {
-      await api(`/transactions/schedules/${selectedLive.id}/advance`, {
-        method: 'POST',
-        body: JSON.stringify({ amount: selectedReste, operationType: payMode }),
-      });
+      await postMonthPayment(selectedLive.id, selectedReste);
       onReload();
       setSelected(null);
     } catch (err) {
@@ -262,36 +270,36 @@ export default function RentalMonthlyPayments({
     }
   }
 
-  async function syncMonths() {
-    if (!canEdit || syncing) return;
-    setSyncing(true);
+  const current = sorted.find((s) => s.status !== 'paid' && resteOf(s) > 0) || null;
+  const paidMonths = sorted.filter((s) => s.id !== current?.id && (s.status === 'paid' || resteOf(s) <= 0));
+
+  function printMonthReceipt(month: MonthSchedule, pay: MonthPayment) {
+    return printPaymentReceipt({
+      receiptNo: pay.receiptNo,
+      date: pay.date,
+      amount: pay.amount,
+      operationType: pay.operationType,
+      nature: month.label || monthTitle(month.dueDate),
+      rental: {
+        reference: receipt?.reference,
+        client: { firstName: receipt?.firstName || '', lastName: receipt?.lastName || '' },
+      },
+    });
+  }
+
+  async function validateMonth(s: MonthSchedule) {
+    if (!canEdit || busyId || resteOf(s) <= 0) return;
+    if (!canPayMonth(s)) return;
+    setBusyId(s.id);
     setError('');
     try {
-      await api(`/transactions/rentals/${rentalId}/schedules/sync`, { method: 'POST' });
+      await postMonthPayment(s.id, resteOf(s));
+      setSelected(null);
       onReload();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function generate(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    try {
-      await api(`/transactions/rentals/${rentalId}/schedules/generate`, {
-        method: 'POST',
-        body: JSON.stringify({
-          startDate: genForm.startDate,
-          endDate: genForm.endDate || undefined,
-          count: genForm.endDate ? undefined : Number(genForm.count) || 12,
-        }),
-      });
-      setGenOpen(false);
-      onReload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      setBusyId(null);
     }
   }
 
@@ -302,19 +310,9 @@ export default function RentalMonthlyPayments({
           <h2 className="text-[14px] font-semibold text-gic-ink tracking-tight">{t('rental.trackingTitle')}</h2>
           <p className="text-[12px] text-gic-muted mt-0.5">
             {t('rental.trackingHint')}
-            {endDate ? '' : t('rental.trackingHintOpenEnded')}.
+            {endDate ? '' : ` ${t('rental.trackingHintOpenEnded')}`}
           </p>
         </div>
-        {canEdit && (
-          <div className="flex flex-wrap gap-1.5">
-            <Btn variant="secondary" icon={RefreshCw} onClick={syncMonths} disabled={syncing}>
-              {syncing ? t('rental.syncing') : t('rental.syncMonths')}
-            </Btn>
-            <Btn variant="secondary" icon={Wand2} onClick={() => setGenOpen(true)}>
-              {t('rental.generatePeriod')}
-            </Btn>
-          </div>
-        )}
       </div>
 
       {error && <p className="text-[12px] text-gic-coral">{error}</p>}
@@ -340,82 +338,121 @@ export default function RentalMonthlyPayments({
         </div>
       </div>
 
-      {sorted.length === 0 ? (
+      {!current ? (
         <div className="rounded-xl border border-dashed border-gic-border py-10 text-center">
-          <p className="text-[12px] text-gic-muted mb-3">{t('rental.noMonths')}</p>
-          {canEdit && (
-            <Btn icon={Wand2} onClick={() => setGenOpen(true)}>{t('rental.generateMonths')}</Btn>
-          )}
+          <p className="text-[12px] text-gic-muted">
+            {sorted.length ? t('rental.monthsDone') : t('rental.noMonths')}
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-          {sorted.map((s) => {
-            const fullyPaid = s.status === 'paid' || resteOf(s) <= 0;
-            const partial = !fullyPaid && paidOf(s) > 0;
-            const overdue = isOverdue(s);
-            const busy = busyId === s.id;
-            const locked = !fullyPaid && !canPayMonth(s);
-            const tip = !canEdit
-              ? undefined
-              : locked
-                ? t('rental.mustPayEarlierFirst', { month: previousUnpaid(s) ? monthTitle(previousUnpaid(s)!.dueDate) : '' })
-                : t('rental.openMonthDetail');
-            return (
-              <button
-                key={s.id}
-                type="button"
-                disabled={!canEdit || busy || locked}
-                onClick={() => openMonth(s)}
-                className={[
-                  'relative text-left rounded-xl border px-3 py-3 transition-all',
-                  fullyPaid
-                    ? 'border-gic-emerald/40 bg-gic-emerald-soft/40'
-                    : partial
-                      ? 'border-[#007aff]/35 bg-[#007aff]/[0.06]'
-                      : overdue
-                        ? 'border-gic-coral/35 bg-gic-coral-soft/25'
-                        : 'border-gic-border bg-white hover:border-[#007aff]/40 hover:bg-[#007aff]/[0.04]',
-                  canEdit && !locked ? 'cursor-pointer' : 'cursor-not-allowed',
-                  busy || locked ? 'opacity-60' : '',
-                ].join(' ')}
-                title={tip}
-              >
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <span
-                    className={[
-                      'inline-flex h-6 w-6 items-center justify-center rounded-full border',
-                      fullyPaid
-                        ? 'border-gic-emerald bg-gic-emerald text-white'
-                        : partial
-                          ? 'border-[#007aff] bg-[#007aff] text-white'
-                          : 'border-gic-border bg-white text-gic-muted',
-                    ].join(' ')}
-                  >
-                    {fullyPaid || partial ? <Check className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
-                  </span>
-                  {overdue && !fullyPaid && (
-                    <span className="text-[9px] font-semibold uppercase tracking-wide text-gic-coral">{t('rental.overdueShort')}</span>
-                  )}
-                  {partial && (
-                    <span className="text-[9px] font-semibold uppercase tracking-wide text-[#007aff]">{t('rental.advanceShort')}</span>
-                  )}
-                </div>
-                <p className="text-[12px] font-semibold text-gic-ink leading-tight">{monthTitle(s.dueDate)}</p>
-                <p className={`text-[11px] mt-1 tabular-nums ${fullyPaid ? 'text-gic-emerald' : partial ? 'text-[#007aff]' : 'text-gic-muted'}`}>
-                  {fullyPaid ? formatMad(s.amount) : partial ? `${t('rental.remaining')} ${formatMad(resteOf(s))}` : formatMad(s.amount)}
-                </p>
-                <p className="text-[10px] mt-0.5 text-gic-muted">
-                  {fullyPaid
-                    ? t('rental.paid')
-                    : partial
-                      ? `${t('rental.paid')} ${formatMad(paidOf(s))}`
-                      : t('rental.unpaidLabel')}
-                </p>
-              </button>
-            );
-          })}
+        <div className="rounded-xl border border-gic-border bg-white px-4 py-4 sm:max-w-md">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-gic-muted">{t('rental.currentMonth')}</p>
+              <p className="text-[18px] font-semibold text-gic-ink mt-0.5">{monthTitle(current.dueDate)}</p>
+              <p className="text-[13px] mt-1 tabular-nums text-gic-ink">{formatMad(current.amount)}</p>
+              <p className="text-[12px] mt-0.5 text-gic-muted">
+                {paidOf(current) > 0
+                  ? `${t('rental.paid')} ${formatMad(paidOf(current))} · ${t('rental.remaining')} ${formatMad(resteOf(current))}`
+                  : t('rental.unpaidLabel')}
+                {isOverdue(current) ? ` · ${t('rental.overdueShort')}` : ''}
+              </p>
+            </div>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gic-border text-gic-muted">
+              {paidOf(current) > 0 ? <Check className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
+            </span>
+          </div>
+          {canEdit && (
+            <div className="mt-4 space-y-2">
+              <div>
+                <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</p>
+                <DocumentFileActions
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+                />
+                {proofFile && <p className="mt-1 text-[11px] text-gic-ink">{proofFile.name}</p>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+              <Btn onClick={() => validateMonth(current)} disabled={busyId === current.id}>
+                {t('rental.validateMonth')}
+              </Btn>
+              <Btn variant="secondary" onClick={() => openMonth(current)}>
+                {t('rental.openMonthDetail')}
+              </Btn>
+              </div>
+            </div>
+          )}
+          <p className="mt-3 text-[11px] text-gic-muted">{t('rental.nextMonthHint')}</p>
         </div>
       )}
+
+      <div className="rounded-xl border border-gic-border bg-white px-4 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+          <div>
+            <p className="text-[13px] font-semibold text-gic-ink">{t('rental.paidReceipts')}</p>
+            <p className="text-[11px] text-gic-muted mt-0.5">{t('rental.paidReceiptsHint')}</p>
+          </div>
+          {paidMonths.some((month) => (month.payments || []).some((pay) => pay.receiptNo)) && (
+            <Btn
+              variant="secondary"
+              icon={Printer}
+              onClick={() => printPaymentsReceipt({
+                clientName: `${receipt?.firstName || ''} ${receipt?.lastName || ''}`.trim(),
+                reference: receipt?.reference,
+                lines: paidMonths.flatMap((month) =>
+                  (month.payments || []).filter((pay) => pay.receiptNo).map((pay) => ({
+                    receiptNo: pay.receiptNo,
+                    date: pay.date,
+                    amount: pay.amount,
+                    operationType: pay.operationType,
+                    nature: month.label || monthTitle(month.dueDate),
+                    ref: receipt?.reference,
+                    type: 'location',
+                  })),
+                ),
+              })}
+            >
+              {t('actions.printAllReceipts')}
+            </Btn>
+          )}
+        </div>
+        {paidMonths.length === 0 ? (
+          <p className="text-[12px] text-gic-muted">{t('rental.noPaidReceipts')}</p>
+        ) : (
+          <ul className="divide-y divide-black/[0.06]">
+            {paidMonths.map((month) => {
+              const receipts = (month.payments || []).filter((pay) => pay.receiptNo);
+              return (
+                <li key={month.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                  <div>
+                    <p className="text-[13px] font-medium text-gic-ink">{month.label || monthTitle(month.dueDate)}</p>
+                    <p className="text-[11px] text-gic-muted">
+                      {formatMad(month.amount)}
+                      {receipts.length === 0 ? '' : ` · ${receipts.map((pay) => pay.receiptNo).join(', ')}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(month.payments || []).filter((pay) => pay.proofFile).map((pay) => (
+                      <a key={`proof-${pay.id}`} href={fileUrl(pay.proofFile || '')} className="text-[11px] text-[#007aff] hover:opacity-70">
+                        {t('common.view')}
+                      </a>
+                    ))}
+                    {receipts.map((pay) => (
+                      <MacActionBtn
+                        key={pay.id}
+                        icon={Printer}
+                        tone="gray"
+                        title={t('actions.printReceipt')}
+                        onClick={() => printMonthReceipt(month, pay)}
+                      />
+                    ))}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
       <Modal
         open={!!selectedLive}
@@ -489,6 +526,12 @@ export default function RentalMonthlyPayments({
                           </span>
                           <span className="flex items-center gap-1">
                             <span className="font-medium">{formatMad(pay.amount)}</span>
+                            {pay.proofFile && (
+                              <a href={fileUrl(pay.proofFile)} className="text-[11px] text-[#007aff] hover:opacity-70">{t('common.view')}</a>
+                            )}
+                            {pay.receiptNo && (
+                              <MacActionBtn icon={Printer} tone="gray" title={t('actions.printReceipt')} onClick={() => printMonthReceipt(selectedLive, pay)} />
+                            )}
                             {canEdit && canCancelMonth(selectedLive) && (
                               <>
                                 <MacActionBtn icon={Pencil} tone="orange" title={t('rental.editAdvance')} onClick={() => startEditPayment(pay)} />
@@ -521,6 +564,14 @@ export default function RentalMonthlyPayments({
                   <option value="virement">{t('fields.modeTransfer')}</option>
                   <option value="cheque">{t('fields.modeCheck')}</option>
                 </Select>
+                <div className="sm:col-span-3">
+                  <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</p>
+                  <DocumentFileActions
+                    accept=".pdf,.jpg,.jpeg,.png,.webp"
+                    onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+                  />
+                  {proofFile && <p className="mt-1 text-[11px] text-gic-ink">{proofFile.name}</p>}
+                </div>
                 <div className="flex items-end">
                   <Btn type="submit" disabled={!!busyId} className="w-full">{t('rental.addAdvance')}</Btn>
                 </div>
@@ -530,46 +581,6 @@ export default function RentalMonthlyPayments({
         )}
       </Modal>
 
-      <Modal
-        open={genOpen}
-        title={t('rental.generateTitle')}
-        onClose={() => setGenOpen(false)}
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setGenOpen(false)}>{t('common.cancel')}</Btn>
-            <Btn form="rent-gen-form" type="submit">{t('rental.generate')}</Btn>
-          </>
-        }
-      >
-        <form id="rent-gen-form" onSubmit={generate} className="grid gap-3">
-          <p className="text-[12px] text-gic-muted">
-            {t('rental.generateHint')}
-          </p>
-          <Input
-            label={t('rental.startDateRequired')}
-            type="date"
-            required
-            value={genForm.startDate}
-            onChange={(e) => setGenForm({ ...genForm, startDate: e.target.value })}
-          />
-          <Input
-            label={t('rental.endDateOptional')}
-            type="date"
-            value={genForm.endDate}
-            onChange={(e) => setGenForm({ ...genForm, endDate: e.target.value })}
-          />
-          {!genForm.endDate && (
-            <Input
-              label={t('rental.monthCount')}
-              type="number"
-              min="1"
-              max="60"
-              value={genForm.count}
-              onChange={(e) => setGenForm({ ...genForm, count: e.target.value })}
-            />
-          )}
-        </form>
-      </Modal>
     </div>
   );
 }

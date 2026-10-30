@@ -3,15 +3,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Pencil, Trash2, Printer, History, FileText, CheckCircle, RotateCcw, ShoppingCart, Hash, Calendar, Truck, GitBranch,
-  HardHat, Layers, Wallet, Info as InfoIcon, Package, Upload, Plus, User, UserCheck, Building2, Receipt, ClipboardCheck,
+  HardHat, Layers, Wallet, Info as InfoIcon, Package, Upload, Plus, User, UserCheck, Building2, Receipt, ClipboardCheck, BadgeCheck,
 } from 'lucide-react';
 import { api, fetchSupplierList, fetchChantierList, formatDate, formatMad, openPrintUrl, uploadForm } from '../lib/api';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, Select, TableWrap, Td, Textarea, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { PurchaseFormFields, purchaseFormToBody, purchaseToForm, validatePurchaseForm, type PurchaseFormData } from '../components/PurchaseFormFields';
 import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from '../components/PurchaseBadges';
+import { PurchaseReviewModal, type ChefDecision } from '../components/PurchaseReviewModal';
 import {
   PURCHASE_DOC_TYPES, PURCHASE_PAYMENT_KINDS, PURCHASE_PAYMENT_MODES, PURCHASE_STATUSES,
   formatAmount, nextPurchaseStatus, previousPurchaseStatus, round2, statusIndex, type PurchaseDetail, type PurchaseStatus,
@@ -47,6 +49,7 @@ export default function AchatDetailPage() {
 
   const [backOpen, setBackOpen] = useState(false);
   const [backReason, setBackReason] = useState('');
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [deliveryForm, setDeliveryForm] = useState({ date: today(), number: '', remark: '' });
@@ -103,6 +106,23 @@ export default function AchatDetailPage() {
     for (const d of purchase?.documents || []) map[d.category || 'autre'] = (map[d.category || 'autre'] || 0) + 1;
     return map;
   }, [purchase?.documents]);
+
+  async function submitReview(decision: ChefDecision, remark: string) {
+    if (!id) return;
+    setBusy(true);
+    try {
+      const updated = await api<PurchaseDetail>(`/achats/purchases/${id}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ decision, remark }),
+      });
+      setPurchase(updated);
+      setReviewOpen(false);
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (!purchase && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
   if (error && !purchase) {
@@ -405,6 +425,13 @@ export default function AchatDetailPage() {
             {deliveryLate && (
               <p className="mt-2 text-[12px] font-medium text-gic-coral">{t('siteOps.deliveryLate')} · {formatDate(p.expectedDeliveryDate)}</p>
             )}
+            {p.chefReview === 'non_valide' && (
+              <p className="mt-2 rounded-lg bg-[#ffd9d9] px-3 py-2 text-[12px] font-medium text-[#9b1c1c]">
+                {t('purchase.review.rejectedBanner')}
+                {p.chefReviewedBy ? ` · ${p.chefReviewedBy}` : ''}
+                {p.chefReviewRemark ? ` — ${p.chefReviewRemark}` : ''}
+              </p>
+            )}
             <div className="purchase-stepper">
               {PURCHASE_STATUSES.map((s, i) => {
                 const idx = statusIndex(p.status);
@@ -443,6 +470,12 @@ export default function AchatDetailPage() {
               <MacActionBtn icon={ClipboardCheck} tone="teal" title={t('purchase.actions.printReception')} onClick={() => openPrintUrl(`/achats/purchases/${id}/print/bon_reception`)} />
             )}
             {!isArchived && <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />}
+            <MacActionBtn
+              icon={BadgeCheck}
+              tone={p.chefReview === 'non_valide' ? 'red' : p.chefReview === 'valide' ? 'green' : 'gray'}
+              title={t('purchase.actions.review')}
+              onClick={() => setReviewOpen(true)}
+            />
             {isDraft && <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { setDeleteOpen(true); setDeleteMotif(''); }} />}
           </div>
         </div>
@@ -588,8 +621,8 @@ export default function AchatDetailPage() {
               <thead>
                 <tr>
                   <Th mac>#</Th>
+                  <Th mac>{t('fields.family')}</Th>
                   <Th mac>{t('purchase.fields.product')}</Th>
-                  <Th mac>{t('purchase.fields.productRef')}</Th>
                   <Th mac>{t('purchase.fields.quantity')}</Th>
                   <Th mac>{t('purchase.fields.unitPrice')}</Th>
                   <Th mac>{t('purchase.fields.tva')}</Th>
@@ -603,11 +636,10 @@ export default function AchatDetailPage() {
                 {p.lines.map((l, i) => (
                   <tr key={l.id}>
                     <Td mac className="mac-table-muted">{i + 1}</Td>
+                    <Td mac>{l.family || '—'}</Td>
                     <Td mac>
                       <p className="font-medium">{l.product}</p>
-                      {l.family && <p className="text-[10px] text-gic-muted">{l.family}</p>}
                     </Td>
-                    <Td mac className="mac-table-muted">{l.reference || '—'}</Td>
                     <Td mac>{l.quantity} {l.unit || ''}</Td>
                     <Td mac>{formatAmount(l.unitPrice)}</Td>
                     <Td mac>{l.tvaRate} %</Td>
@@ -1099,7 +1131,11 @@ export default function AchatDetailPage() {
           </div>
           <label className="sm:col-span-2 block">
             <span className="block text-[11px] font-medium text-gic-muted mb-1">{t('purchase.documents.file')} *</span>
-            <input type="file" accept="application/pdf,image/*" className="text-[12px]" onChange={(e) => setDocFile(e.target.files?.[0] || null)} />
+            <DocumentFileActions
+              required
+              accept="application/pdf,image/*"
+              onChange={(e) => setDocFile(e.target.files?.[0] || null)}
+            />
           </label>
           {docError && <p className="sm:col-span-2 text-[11px] text-gic-coral">{docError}</p>}
         </form>
@@ -1139,6 +1175,15 @@ export default function AchatDetailPage() {
         <p className="text-[12px] text-gic-muted mb-3">{t('purchase.list.deleteHint')}</p>
         <textarea className="w-full h-24 rounded-xl border border-gic-border p-3 text-[12px]" placeholder={t('msg.motifShortPlaceholder')} value={deleteMotif} onChange={(e) => setDeleteMotif(e.target.value)} />
       </Modal>
+
+      <PurchaseReviewModal
+        open={reviewOpen}
+        reference={p.reference}
+        initialRemark={p.chefReviewRemark}
+        busy={busy}
+        onClose={() => setReviewOpen(false)}
+        onDecide={submitReview}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { formatDate } from '../lib/api';
+import { PdfPages } from './PdfPreview';
 
 export type MediaItem = {
   id: string;
@@ -217,7 +218,9 @@ function MediaLightbox({
         {image ? (
           <img src={item.url} alt={item.name || ''} className="mac-lightbox-img" />
         ) : ext === 'pdf' ? (
-          <iframe src={item.url} title={item.name || 'PDF'} className="mac-lightbox-frame" />
+          <div className="h-full w-full overflow-auto">
+            <PdfPages url={item.url} />
+          </div>
         ) : (
           <div className="mac-lightbox-doc">
             <FileText size={56} strokeWidth={1.4} />

@@ -916,15 +916,9 @@ export function ChantierPaymentPanel({
                   onChange={(e) => setHistEdit({ ...histEdit, days: e.target.value })}
                   required
                 />
-                <Input
-                  label={t('columns.dailyRateMad')}
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={histEdit.rate}
-                  onChange={(e) => setHistEdit({ ...histEdit, rate: e.target.value })}
-                  required
-                />
+                <p className="text-[12px] text-gic-muted">
+                  {t('columns.dailyRateMad')} : {formatMad(Number(histEdit.rate) || 0)}
+                </p>
                 <p className="text-[12px] font-medium">
                   {formulaOf(Number(histEdit.days) || 0, Number(histEdit.rate) || 0)}
                 </p>

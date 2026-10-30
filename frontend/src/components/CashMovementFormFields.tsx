@@ -1,4 +1,5 @@
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from './DocumentScanner';
 import { Input, Select } from './ui';
 import { fileUrl } from '../lib/documentDisplay';
 
@@ -95,10 +96,9 @@ function FileField({
   return (
     <div>
       <label className="block text-[11px] font-medium text-gic-muted mb-1">{label}</label>
-      <input
-        type="file"
+      <DocumentFileActions
         accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-        className="block w-full text-[12px] file:mr-3 file:rounded-lg file:border-0 file:bg-gic-violet/10 file:px-3 file:py-1.5 file:text-[11px] file:font-medium file:text-gic-violet"
+        inputClassName="min-w-[12rem] flex-1 text-[12px] file:mr-3 file:rounded-lg file:border-0 file:bg-gic-violet/10 file:px-3 file:py-1.5 file:text-[11px] file:font-medium file:text-gic-violet"
         onChange={(e) => onChange(e.target.files?.[0] || null)}
       />
       {existing && (

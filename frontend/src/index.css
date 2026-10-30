@@ -1648,6 +1648,22 @@ html[dir="rtl"] .shell-dropdown-right {
   background: rgba(0, 0, 0, 0.025);
 }
 
+.mac-table tbody tr.purchase-row-rejected td {
+  background: #ffd9d9;
+}
+
+.mac-table tbody tr.purchase-row-rejected:hover td {
+  background: #ffc6c6;
+}
+
+.mac-table tbody tr.rental-row-late td {
+  background: #ffd9d9;
+}
+
+.mac-table tbody tr.rental-row-late:hover td {
+  background: #ffc6c6;
+}
+
 .mac-table-ref {
   font-weight: 500;
   color: #007aff;

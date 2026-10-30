@@ -31,6 +31,10 @@ const app = express();
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // Le visualiseur PDF de Chrome reste blanc si ces en-têtes sont présents sur le fichier.
+    crossOriginOpenerPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    originAgentCluster: false,
     // API + fichiers statiques (pas de HTML) — le CSP casse notamment les SVG en <img>
     contentSecurityPolicy: false,
   })
@@ -42,13 +46,29 @@ app.use(
   })
 );
 app.use(express.json({ limit: '10mb' }));
+// Le plugin PDF du navigateur laisse la page blanche. Une navigation vers un PDF
+// ouvre l’aperçu de l’application, qui dessine les pages lui-même.
+app.use('/uploads', (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  const name = (req.path.split('/').pop() || '').toLowerCase();
+  if (!name.endsWith('.pdf') || String(req.query.raw || '') === '1') return next();
+  const dest = String(req.get('sec-fetch-dest') || '');
+  const mode = String(req.get('sec-fetch-mode') || '');
+  if (dest !== 'document' && dest !== 'iframe' && mode !== 'navigate') return next();
+  let filePath = req.originalUrl.split('?')[0];
+  try { filePath = decodeURIComponent(filePath); } catch { /* garder le chemin brut */ }
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(302, `/apercu?src=${encodeURIComponent(filePath)}`);
+});
 app.use(
   '/uploads',
   express.static(uploadDir, {
     fallthrough: true,
-    setHeaders(res) {
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+    setHeaders(res, filePath) {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.removeHeader('Cross-Origin-Opener-Policy');
+      res.removeHeader('Cross-Origin-Embedder-Policy');
+      res.setHeader('Cache-Control', filePath.toLowerCase().endsWith('.pdf') ? 'no-cache' : 'public, max-age=86400');
     },
   })
 );

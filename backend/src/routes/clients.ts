@@ -11,6 +11,7 @@ import { sendExcel } from '../lib/exportExcel.js';
 import { recordClientAgentChange } from '../lib/clientAgentHistory.js';
 import { sendEmail } from '../lib/email.js';
 import { sendSms, sendWhatsApp } from '../lib/messaging.js';
+import { extraDealsForClient, idsWherePartyContains } from '../lib/dealParties.js';
 
 function buildClientWhere(q: string, type: string, archived = '') {
   const archiveFilter =
@@ -242,8 +243,15 @@ router.get('/:id', async (req, res) => {
   });
   if (!client) return res.status(404).json({ message: 'Client introuvable' });
 
+  const [extraSales, extraRentals] = await Promise.all([
+    extraDealsForClient('Sale', client.id),
+    extraDealsForClient('Rental', client.id),
+  ]);
+  const sales = [...client.sales, ...extraSales];
+  const rentals = [...client.rentals, ...extraRentals];
+
   const allPayments = [
-    ...client.sales.flatMap((s) =>
+    ...sales.flatMap((s) =>
       s.payments.map((p) => ({
         ...p,
         type: 'vente',
@@ -255,7 +263,7 @@ router.get('/:id', async (req, res) => {
         reference: p.receiptNo,
       }))
     ),
-    ...client.rentals.flatMap((r) =>
+    ...rentals.flatMap((r) =>
       r.payments.map((p) => ({
         ...p,
         type: 'location',
@@ -293,7 +301,7 @@ router.get('/:id', async (req, res) => {
   };
 
   const propertiesMap = new Map<string, ClientPropertyRow>();
-  for (const s of client.sales) {
+  for (const s of sales) {
     if (!s.property) continue;
     propertiesMap.set(s.property.id, {
       id: s.property.id,
@@ -316,7 +324,7 @@ router.get('/:id', async (req, res) => {
       payments: s.payments,
     });
   }
-  for (const r of client.rentals) {
+  for (const r of rentals) {
     if (!r.property) continue;
     if (propertiesMap.has(r.property.id)) continue;
     propertiesMap.set(r.property.id, {
@@ -340,18 +348,18 @@ router.get('/:id', async (req, res) => {
 
   const summary = {
     totalContracted:
-      client.sales.reduce((acc, s) => acc + s.netPrice, 0) +
-      client.rentals.reduce((acc, r) => acc + r.monthlyRent * 12, 0),
+      sales.reduce((acc, s) => acc + s.netPrice, 0) +
+      rentals.reduce((acc, r) => acc + r.monthlyRent * 12, 0),
     totalPaid:
-      client.sales.reduce((acc, s) => acc + s.totalPaid, 0) +
-      client.rentals.reduce((acc, r) => acc + r.totalPaid, 0),
-    totalRemaining: client.sales.reduce((acc, s) => acc + s.remaining, 0),
-    salesCount: client.sales.length,
-    rentalsCount: client.rentals.length,
+      sales.reduce((acc, s) => acc + s.totalPaid, 0) +
+      rentals.reduce((acc, r) => acc + r.totalPaid, 0),
+    totalRemaining: sales.reduce((acc, s) => acc + s.remaining, 0),
+    salesCount: sales.length,
+    rentalsCount: rentals.length,
     paymentsCount: allPayments.length,
   };
 
-  res.json({ ...client, summary, allPayments, properties: [...propertiesMap.values()] });
+  res.json({ ...client, sales, rentals, summary, allPayments, properties: [...propertiesMap.values()] });
 });
 
 router.post('/', async (req, res) => {
@@ -456,8 +464,8 @@ router.post('/:id/unarchive', async (req, res) => {
 router.post('/:id/photo', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Photo requise' });
   const ext = path.extname(req.file.originalname).toLowerCase();
-  if (!['.jpg', '.jpeg', '.png'].includes(ext)) {
-    return res.status(400).json({ message: 'Format photo : JPG ou PNG' });
+  if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
+    return res.status(400).json({ message: 'Format photo : JPG, PNG ou WebP' });
   }
   const photo = `/uploads/${req.file.filename}`;
   const clientId = String(req.params.id);
@@ -497,7 +505,11 @@ router.delete('/:id', async (req, res) => {
     include: { sales: true, rentals: true },
   });
   if (!client) return res.status(404).json({ message: 'Client introuvable' });
-  if (client.sales.length || client.rentals.length) {
+  const [saleParty, rentalParty] = await Promise.all([
+    idsWherePartyContains('Sale', String(req.params.id)),
+    idsWherePartyContains('Rental', String(req.params.id)),
+  ]);
+  if (client.sales.length || client.rentals.length || saleParty.length || rentalParty.length) {
     return res.status(400).json({
       message: 'Impossible de supprimer un client lié à une vente ou location (RG-CLI-003)',
     });

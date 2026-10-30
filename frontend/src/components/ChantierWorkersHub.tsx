@@ -42,7 +42,7 @@ function isoDay(value: string) {
 }
 
 function lineBrut(line: SessionLineDetail) {
-  const rate = line.dayRate != null && line.dayRate > 0 ? line.dayRate : line.workforce.dailySalary || 0;
+  const rate = line.workforce.dailySalary || 0;
   return line.totalDay * rate;
 }
 
@@ -479,7 +479,7 @@ export function ChantierWorkersHub({
                 <tbody>
                   {sessionLines.map((line) => {
                     const brut = lineBrut(line);
-                    const rate = line.dayRate != null && line.dayRate > 0 ? line.dayRate : line.workforce.dailySalary || 0;
+                    const rate = line.workforce.dailySalary || 0;
                     return (
                       <tr key={line.id}>
                         <Td mac>

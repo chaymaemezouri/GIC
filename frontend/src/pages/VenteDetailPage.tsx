@@ -13,13 +13,16 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { SaleFormFields, saleToForm, saleFormToUpdateBody, emptySaleForm, type SaleFormData } from '../components/SaleFormFields';
+import { partyLabel } from '../components/PartyNames';
 import { printSaleReceipt } from '../lib/printSale';
 import PaymentSchedulePanel from '../components/PaymentSchedulePanel';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { fileUrl } from '../lib/documentDisplay';
+import { FileInlinePreview } from '../components/PdfPreview';
 
 type Tab = 'infos' | 'echeancier' | 'paiements' | 'documents' | 'historique';
 
@@ -65,6 +68,17 @@ export default function VenteDetailPage() {
     return Math.round(Number(n || 0) * 100) / 100;
   }
 
+  function advancePaidOf(payments: { nature?: string; amount?: number }[]) {
+    return roundMad(payments
+      .filter((p) => /^(avance|acompte|complement_avance)$/i.test(String(p.nature || '')))
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0));
+  }
+
+  function advanceComplementOf(row: { advance?: number; payments?: { nature?: string; amount?: number }[] } | null) {
+    if (!row) return 0;
+    return roundMad(Math.max(0, Number(row.advance || 0) - advancePaidOf(row.payments || [])));
+  }
+
   function payRoom() {
     if (!sale) return 0;
     const reste = roundMad(Math.max(0, Number(sale.remaining || 0)));
@@ -73,15 +87,15 @@ export default function VenteDetailPage() {
     return roundMad(reste + Number(current?.amount || 0));
   }
 
-  function openPayModal() {
+  function openPayModal(nature: 'acompte' | 'complement_avance' = 'acompte', amount = '') {
     if (!sale) return;
     setEditPayId(null);
     setPayForm({
-      amount: '',
+      amount,
       operationType: 'especes',
       payerName: '',
       bank: '',
-      nature: 'acompte',
+      nature,
       proof: null,
     });
     setPayOpen(true);
@@ -96,7 +110,7 @@ export default function VenteDetailPage() {
     nature?: string | null;
   }) {
     setEditPayId(p.id);
-    const nature = p.nature === 'solde' ? 'solde' : 'acompte';
+    const nature = p.nature === 'solde' || p.nature === 'complement_avance' ? p.nature : 'acompte';
     setPayForm({
       amount: String(roundMad(Number(p.amount || 0))),
       operationType: p.operationType || 'especes',
@@ -113,7 +127,13 @@ export default function VenteDetailPage() {
     setPayForm((prev) => ({
       ...prev,
       nature,
-      amount: nature === 'solde' && room > 0 ? String(room) : nature === 'acompte' && !editPayId ? '' : prev.amount,
+      amount: nature === 'solde' && room > 0
+        ? String(room)
+        : nature === 'complement_avance' && !editPayId
+          ? String(advanceComplementOf(sale))
+          : nature === 'acompte' && !editPayId
+            ? ''
+            : prev.amount,
     }));
   }
 
@@ -359,7 +379,7 @@ export default function VenteDetailPage() {
     ? Math.min(100, Math.round((sale.totalPaid / sale.netPrice) * 100))
     : 0;
   const firstAcompte = [...(sale.payments || [])]
-    .filter((p: { nature?: string }) => p.nature === 'acompte')
+    .filter((p: { nature?: string }) => /^(avance|acompte)$/i.test(String(p.nature || '')))
     .sort((a: { date?: string }, b: { date?: string }) => String(a.date || '').localeCompare(String(b.date || '')))[0];
   const schedulePayments = (sale.payments || []).filter((p: { scheduleId?: string | null }) => p.scheduleId);
   const freeAdvancePayments = (sale.payments || []).filter((p: { scheduleId?: string | null }) => !p.scheduleId);
@@ -367,7 +387,17 @@ export default function VenteDetailPage() {
     (sale.schedules || []).map((s: { id: string; label?: string | null; dueDate: string; amount: number; status: string; payments?: { amount: number }[] }) => [s.id, s]),
   );
 
+  function scheduleKindText(kind?: string | null) {
+    if (kind === 'mensuel') return t('fields.scheduleKindMonthly');
+    if (kind === 'trimestriel') return t('fields.scheduleKindQuarterly');
+    if (kind === 'semestriel') return t('fields.scheduleKindSemiannual');
+    if (kind === 'annuel') return t('fields.scheduleKindAnnual');
+    if (kind === 'versement') return t('fields.scheduleKindInstallment');
+    return t('fields.scheduleKindInstallment');
+  }
+
   function paymentNatureLabel(nature?: string) {
+    if (nature === 'complement_avance') return t('fields.paymentNatureAdvanceComplement');
     if (nature === 'acompte') return t('fields.paymentNatureAdvance');
     if (nature === 'echeance') return t('fields.paymentNatureInstallment');
     if (nature === 'solde') return t('fields.paymentNatureTotal') || t('fields.paymentNatureBalance');
@@ -400,7 +430,7 @@ export default function VenteDetailPage() {
             <p className="mac-detail-eyebrow">{t('detail.sale360')}</p>
             <h1 className="mac-detail-name truncate">{sale.reference}</h1>
             <p className="mac-detail-meta">
-              {sale.client.firstName} {sale.client.lastName}
+              {partyLabel(sale.client, sale.coClients)}
               <span className="text-[#c7c7cc]"> · </span>
               {sale.property.name}
             </p>
@@ -413,8 +443,13 @@ export default function VenteDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
+          {canPay && byAdvance && advanceComplementOf(sale) > 0 && (
+            <Btn icon={Wallet} onClick={() => openPayModal('complement_avance', String(advanceComplementOf(sale)))}>
+              {t('actions.collectAdvanceComplement')}
+            </Btn>
+          )}
           {canPay && byAdvance && (
-            <Btn icon={Wallet} onClick={openPayModal}>{t('tabs.paymentByAdvance')}</Btn>
+            <Btn icon={Wallet} variant="secondary" onClick={() => openPayModal()}>{t('tabs.paymentByAdvance')}</Btn>
           )}
           {canPay && bySchedule && (
             <Btn icon={Calendar} onClick={() => setTab('echeancier')}>{t('tabs.paymentBySchedule')}</Btn>
@@ -520,6 +555,18 @@ export default function VenteDetailPage() {
                       </Link>
                     }
                   />
+                  {(sale.coClients || []).map((person: { id: string; reference?: string; firstName: string; lastName: string }, index: number) => (
+                    <InfoRow
+                      key={person.id}
+                      label={t('fields.coBuyer', { n: String(index + 2) })}
+                      value={
+                        <Link to={`/clients/${person.id}`} className="text-[#007aff] hover:opacity-70 inline-flex items-center gap-1">
+                          {person.reference ? `${person.reference} — ` : ''}{person.firstName} {person.lastName}
+                          <ExternalLink size={10} />
+                        </Link>
+                      }
+                    />
+                  ))}
                   <InfoRow
                     label={t('fields.property')}
                     value={
@@ -559,7 +606,19 @@ export default function VenteDetailPage() {
                     label={t('fields.salePaymentPlan')}
                     value={bySchedule ? t('tabs.paymentBySchedule') : t('tabs.paymentByAdvance')}
                   />
-                  {byAdvance && <InfoRow label={t('fields.initialAdvance')} value={formatMad(sale.advance)} />}
+                  {byAdvance && <InfoRow label={t('fields.advanceMad')} value={formatMad(sale.advance)} />}
+                  {byAdvance && (
+                    <InfoRow
+                      label={t('fields.advancePaidMad')}
+                      value={formatMad(Math.min(advancePaidOf(sale.payments || []), Number(sale.advance || 0)))}
+                    />
+                  )}
+                  {byAdvance && (
+                    <InfoRow
+                      label={t('fields.advanceComplement')}
+                      value={formatMad(advanceComplementOf(sale))}
+                    />
+                  )}
                   {byAdvance && firstAcompte && (
                     <>
                       <InfoRow label={t('fields.advancePaymentMode')} value={paymentModeLabel(firstAcompte.operationType)} />
@@ -594,7 +653,7 @@ export default function VenteDetailPage() {
 
             {sale.description && (
               <div className="mac-section-card">
-                <p className="mac-info-label">{t('fields.description')}</p>
+                <p className="mac-info-label">{t('fields.contractDescription')}</p>
                 <p className="mac-info-value !font-normal text-gic-muted whitespace-pre-wrap">{sale.description}</p>
               </div>
             )}
@@ -625,6 +684,7 @@ export default function VenteDetailPage() {
                   <tr>
                     <Th mac>{t('fields.paymentSchedule')}</Th>
                     <Th mac>{t('fields.dueDate')}</Th>
+                    <Th mac>{t('fields.scheduleKind')}</Th>
                     <Th mac>{t('columns.amount')}</Th>
                     <Th mac>{t('columns.paid')}</Th>
                     <Th mac>{t('columns.remaining')}</Th>
@@ -632,7 +692,7 @@ export default function VenteDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...(sale.schedules as Array<{ id: string; label?: string | null; dueDate: string; amount: number; status: string; payments?: { amount: number }[] }>)]
+                  {[...(sale.schedules as Array<{ id: string; label?: string | null; kind?: string | null; dueDate: string; amount: number; status: string; payments?: { amount: number }[] }>)]
                     .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
                     .map((s) => {
                       const paid = Math.round(schedulePaidOf(s) * 100) / 100;
@@ -644,6 +704,7 @@ export default function VenteDetailPage() {
                         <tr key={s.id}>
                           <Td mac className="font-medium">{s.label || '—'}</Td>
                           <Td mac className="mac-table-muted">{formatDate(s.dueDate)}</Td>
+                          <Td mac>{scheduleKindText(s.kind)}</Td>
                           <Td mac>{formatMad(s.amount)}</Td>
                           <Td mac className="text-gic-emerald">{formatMad(paid)}</Td>
                           <Td mac className={reste > 0 ? 'text-gic-coral font-medium' : ''}>{formatMad(reste)}</Td>
@@ -699,7 +760,7 @@ export default function VenteDetailPage() {
             <div className="flex items-center justify-between gap-2 mb-3">
               <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('tabs.paymentByAdvance')}</p>
               {canPay && (
-                <Btn icon={Wallet} onClick={openPayModal}>{t('actions.newPayment')}</Btn>
+                <Btn icon={Wallet} onClick={() => openPayModal()}>{t('actions.newPayment')}</Btn>
               )}
             </div>
             {(sale.payments || []).length === 0 ? (
@@ -774,26 +835,33 @@ export default function VenteDetailPage() {
                 <FileText size={15} />
                 {t('tabs.documents')} {t('fields.sale').toLowerCase()}
               </p>
-              <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
+              <DocumentFileActions
+                labelClassName="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50"
+                accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+                onChange={onDocUpload}
+                disabled={docUploading}
+              >
                 <Upload size={14} />
                 {docUploading ? t('auth.sending') : t('actions.deposit')}
-                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" onChange={onDocUpload} disabled={docUploading} />
-              </label>
+              </DocumentFileActions>
             </div>
             {(documents.length === 0 && !(sale.documents?.length)) ? (
               <p className="text-[12px] text-gic-muted py-6 text-center">{t('msg.emptyDocuments')}</p>
             ) : (
               <ul className="space-y-2">
                 {(documents.length ? documents : sale.documents || []).map((d: any) => (
-                  <li key={d.id} className="flex items-center gap-2 text-[12px] rounded-xl bg-gray-50 px-3 py-2">
-                    <FileText size={14} className="text-gic-violet shrink-0" />
-                    <span className="font-medium truncate flex-1">{d.name}</span>
-                    {d.category && <span className="text-[10px] text-gic-muted shrink-0">{d.category}</span>}
-                    <span className="text-[10px] text-gic-muted shrink-0">{formatDate(d.createdAt)}</span>
-                    <a href={fileUrl(d.path)} target="_blank" rel="noreferrer" className="text-gic-violet hover:underline shrink-0 inline-flex items-center gap-1">
-                      {t('actions.open')} <ExternalLink size={11} />
-                    </a>
-                    <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
+                  <li key={d.id} className="rounded-xl bg-gray-50 px-3 py-2 text-[12px]">
+                    <div className="flex items-center gap-2">
+                      <FileText size={14} className="text-gic-violet shrink-0" />
+                      <span className="font-medium truncate flex-1">{d.name}</span>
+                      {d.category && <span className="text-[10px] text-gic-muted shrink-0">{d.category}</span>}
+                      <span className="text-[10px] text-gic-muted shrink-0">{formatDate(d.createdAt)}</span>
+                      <a href={fileUrl(d.path)} className="text-gic-violet hover:underline shrink-0 inline-flex items-center gap-1">
+                        {t('common.view')} <ExternalLink size={11} />
+                      </a>
+                      <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
+                    </div>
+                    {d.path && <div className="mt-2"><FileInlinePreview src={fileUrl(d.path)} /></div>}
                   </li>
                 ))}
               </ul>
@@ -851,6 +919,7 @@ export default function VenteDetailPage() {
           </p>
           <Select label={t('detail.stPayKind')} value={payForm.nature} onChange={(e) => changePayNature(e.target.value)}>
             <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
+            {byAdvance && <option value="complement_avance">{t('fields.paymentNatureAdvanceComplement')}</option>}
             <option value="solde">{t('fields.paymentNatureTotal')}</option>
           </Select>
           <Input
@@ -876,10 +945,8 @@ export default function VenteDetailPage() {
           )}
           <div>
             <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</label>
-            <input
-              type="file"
+            <DocumentFileActions
               accept=".pdf,.jpg,.jpeg,.png,.webp"
-              className="block w-full text-[12px]"
               onChange={(e) => setPayForm({ ...payForm, proof: e.target.files?.[0] || null })}
             />
           </div>

@@ -17,6 +17,7 @@ import {
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 
 type Doc = DocEntity;
 
@@ -816,17 +817,17 @@ export default function DocumentsPage() {
         <form id="upload-form" onSubmit={submitUpload} className="grid gap-3">
           <label className="block">
             <span className="text-[11px] font-medium text-gic-muted">{t('fields.fileRequired')}</span>
-            <input
-              type="file"
-              required
-              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx,.doc,.xls"
-              className="mt-1 block w-full text-[12px]"
-              onChange={(e) => {
-                const f = e.target.files?.[0] || null;
-                setUploadFile(f);
-                if (f && !uploadMeta.name) setUploadMeta({ ...uploadMeta, name: f.name });
-              }}
-            />
+            <div className="mt-1">
+              <DocumentFileActions
+                required
+                accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx,.doc,.xls"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setUploadFile(f);
+                  if (f && !uploadMeta.name) setUploadMeta({ ...uploadMeta, name: f.name });
+                }}
+              />
+            </div>
           </label>
           <Input label={t('fields.displayName')} value={uploadMeta.name} onChange={(e) => setUploadMeta({ ...uploadMeta, name: e.target.value })} />
           <Select label={t('fields.category')} value={uploadMeta.category} onChange={(e) => setUploadMeta({ ...uploadMeta, category: e.target.value })}>
@@ -875,12 +876,13 @@ export default function DocumentsPage() {
           <Input className="sm:col-span-2" label={t('fields.remark')} value={archiveForm.remark} onChange={(e) => setArchiveForm({ ...archiveForm, remark: e.target.value })} />
           <label className="block sm:col-span-2">
             <span className="text-[11px] font-medium text-gic-muted">{t('fields.scanFile')}</span>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-              className="mt-1 block w-full text-[12px] file:mr-3 file:rounded-lg file:border-0 file:bg-gic-violet/10 file:px-3 file:py-1.5 file:text-[11px] file:font-medium file:text-gic-violet"
-              onChange={(e) => setArchiveFile(e.target.files?.[0] || null)}
-            />
+            <div className="mt-1">
+              <DocumentFileActions
+                accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+                inputClassName="min-w-[12rem] flex-1 text-[12px] file:mr-3 file:rounded-lg file:border-0 file:bg-gic-violet/10 file:px-3 file:py-1.5 file:text-[11px] file:font-medium file:text-gic-violet"
+                onChange={(e) => setArchiveFile(e.target.files?.[0] || null)}
+              />
+            </div>
           </label>
         </form>
       </Modal>

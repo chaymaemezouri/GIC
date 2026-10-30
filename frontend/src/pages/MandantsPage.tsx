@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, TableWrap, Td, Th,
 } from '../components/ui';
 import { MandantFormFields, emptyMandantForm, mandantToForm, type MandantFormData } from '../components/MandantFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import MacAvatar from '../components/MacAvatar';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -150,12 +151,12 @@ export default function MandantsPage() {
     e.preventDefault();
     setError('');
     try {
-      const body = { ...form, birthDate: form.birthDate || null };
-      if (editId) {
-        await api(`/mandants/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await api('/mandants', { method: 'POST', body: JSON.stringify(body) });
-      }
+      const fields = omitPhotoFields(form);
+      const body = { ...fields, birthDate: fields.birthDate || null };
+      const saved = editId
+        ? await api<{ id: string }>(`/mandants/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api<{ id: string }>('/mandants', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/mandants/${saved.id}/photo`, form.photoFile);
       setOpen(false);
       load(page);
     } catch (err) {

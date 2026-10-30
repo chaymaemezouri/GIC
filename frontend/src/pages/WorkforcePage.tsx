@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Tabs, Td, Th,
 } from '../components/ui';
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useRowSelection } from '../hooks/useRowSelection';
@@ -254,11 +255,10 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
     setError('');
     try {
       const body = toBody(form);
-      if (editId) {
-        await api(`/chantiers/workforce/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await api('/chantiers/workforce', { method: 'POST', body: JSON.stringify(body) });
-      }
+      const saved = editId
+        ? await api<{ id: string }>(`/chantiers/workforce/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api<{ id: string }>('/chantiers/workforce', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/chantiers/workforce/${saved.id}/photo`, form.photoFile);
       setOpen(false);
       load(page);
     } catch (err) {

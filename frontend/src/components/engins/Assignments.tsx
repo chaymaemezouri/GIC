@@ -27,6 +27,8 @@ import { useRowSelection } from '../../hooks/useRowSelection';
 import { useI18n } from '../../i18n/I18nContext';
 import { SelectAllTh, SelectTd, SelectionBar } from '../RowSelection';
 import { Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect, Modal, Select, TableWrap, Td, Textarea, Th } from '../ui';
+import { EnginFormFields, emptyEnginForm, enginFormToBody, type EnginFormData } from '../EnginFormFields';
+import { uploadEntityPhoto } from '../FormPhotoField';
 import { ChantierTrancheFields, DeleteMotifModal, EnginSelect, FleetStatusPill, FormGrid, invalidateFleetRefs, useFleetRefs } from './FleetCommon';
 
 type AssignmentForm = {
@@ -120,12 +122,22 @@ export function AssignmentModal({
   lockKind?: 'engin' | 'materiel';
 }) {
   const { t } = useI18n();
-  const { engins, chantiers } = useFleetRefs();
+  const { engins, chantiers, reload } = useFleetRefs();
   const [form, setForm] = useState<AssignmentForm>(emptyForm(defaults));
   const [costTouched, setCostTouched] = useState(false);
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [saving, setSaving] = useState(false);
+  const [freshEngins, setFreshEngins] = useState<EnginRef[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<EnginFormData>(() => emptyEnginForm(lockKind || 'engin'));
+  const [createError, setCreateError] = useState('');
+  const [createSaving, setCreateSaving] = useState(false);
   const isEdit = !!assignment;
+  const enginChoices = useMemo(() => {
+    const map = new Map<string, EnginRef>();
+    for (const item of [...freshEngins, ...engins]) map.set(item.id, item);
+    return [...map.values()];
+  }, [freshEngins, engins]);
 
   useEffect(() => {
     if (!open) return;
@@ -159,7 +171,52 @@ export function AssignmentModal({
     };
   }, [open, form.enginId, form.startDate, costTouched]);
 
-  const engin = engins.find((e) => e.id === form.enginId);
+  const engin = enginChoices.find((e) => e.id === form.enginId);
+
+  function openCreateEngin() {
+    setCreateForm(emptyEnginForm(lockKind || 'engin'));
+    setCreateError('');
+    setCreateOpen(true);
+  }
+
+  async function createEngin(e: React.FormEvent) {
+    e.preventDefault();
+    if (createSaving) return;
+    setCreateSaving(true);
+    setCreateError('');
+    try {
+      const kind = lockKind || createForm.kind || 'engin';
+      const created = await api<EnginRef>('/engins', {
+        method: 'POST',
+        body: JSON.stringify(enginFormToBody({ ...createForm, kind })),
+      });
+      await uploadEntityPhoto(`/engins/${created.id}/photo`, createForm.photoFile);
+      const ref: EnginRef = {
+        id: created.id,
+        code: created.code,
+        designation: created.designation,
+        kind: created.kind || kind,
+        ownershipType: created.ownershipType,
+        brand: created.brand,
+        genre: created.genre,
+        model: created.model,
+        matricule: created.matricule,
+        status: created.status || 'disponible',
+        counterUnit: created.counterUnit,
+        counterValue: created.counterValue,
+      };
+      setFreshEngins((rows) => [ref, ...rows.filter((row) => row.id !== ref.id)]);
+      setCostTouched(false);
+      setForm((f) => ({ ...f, enginId: ref.id }));
+      invalidateFleetRefs();
+      reload();
+      setCreateOpen(false);
+    } catch (err) {
+      setCreateError(errorMessage(err, t('common.error')));
+    } finally {
+      setCreateSaving(false);
+    }
+  }
   const days = inclusiveDays(form.startDate, form.endDate);
   const planned = plannedPreview(form);
 
@@ -214,9 +271,17 @@ export function AssignmentModal({
     >
       <form id="fleet-assignment-form" onSubmit={submit}>
         <FormGrid>
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 space-y-3">
+            {!isEdit && !lock?.engin && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-black/15 bg-black/[0.02] px-3 py-2.5">
+                <p className="text-[12px] text-gic-muted min-w-0">{t('msg.createWorkerForAssign')}</p>
+                <Btn type="button" icon={Plus} onClick={openCreateEngin}>
+                  {lockKind === 'materiel' ? t('fleet.actions.newMateriel') : t('actions.newEquipment')}
+                </Btn>
+              </div>
+            )}
             <EnginSelect
-              engins={engins}
+              engins={enginChoices}
               value={form.enginId}
               disabled={isEdit || lock?.engin}
               onChange={(enginId) => { setCostTouched(false); setForm((f) => ({ ...f, enginId })); }}
@@ -308,6 +373,25 @@ export function AssignmentModal({
           </div>
         </FormGrid>
       </form>
+      <Modal
+        open={createOpen}
+        size="xl"
+        title={lockKind === 'materiel' ? t('fleet.actions.newMateriel') : t('actions.newEquipment')}
+        onClose={() => setCreateOpen(false)}
+        footer={
+          <>
+            <Btn variant="secondary" type="button" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Btn>
+            <Btn form="create-engin-for-assign" type="submit" disabled={createSaving}>
+              {createSaving ? t('auth.sending') : t('common.add')}
+            </Btn>
+          </>
+        }
+      >
+        <form id="create-engin-for-assign" onSubmit={createEngin}>
+          <EnginFormFields form={createForm} setForm={setCreateForm} fixedKind />
+          {createError && <p className="mt-3 text-[11px] text-gic-coral">{createError}</p>}
+        </form>
+      </Modal>
     </Modal>
   );
 }

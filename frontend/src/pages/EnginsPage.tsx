@@ -14,6 +14,7 @@ import {
   Modal, PageHeader, Pagination, Select, Tabs, TableWrap, Td, Th,
 } from '../components/ui';
 import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, type EnginFormData } from '../components/EnginFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import { DeleteMotifModal, FleetStatusPill, invalidateFleetRefs, useFleetRefs } from '../components/engins/FleetCommon';
 import { MaintenanceModal } from '../components/engins/MaintenanceModal';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
@@ -336,11 +337,10 @@ function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
     e.preventDefault();
     try {
       const body = enginFormToBody(form);
-      if (editId) {
-        await api(`/engins/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await api('/engins', { method: 'POST', body: JSON.stringify(body) });
-      }
+      const saved = editId
+        ? await api<{ id: string }>(`/engins/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api<{ id: string }>('/engins', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/engins/${saved.id}/photo`, form.photoFile);
       setOpen(false);
       invalidateFleetRefs();
       load(page);

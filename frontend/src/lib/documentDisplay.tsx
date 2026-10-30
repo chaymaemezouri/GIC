@@ -4,6 +4,7 @@ import type { TranslateFn } from '../i18n/types';
 export { fileUrl } from './photoUrl';
 import { fileUrl } from './photoUrl';
 import { escHtml, printWithCompany } from './companyPrint';
+import { requestPdfPreview } from '../components/PdfPreview';
 
 export type DocEntity = {
   id: string;
@@ -150,10 +151,7 @@ export function FilePieceLinks({ path, label }: { path?: string | null; label?: 
       <button
         type="button"
         className="text-[#007aff] hover:opacity-70"
-        onClick={() => {
-          const w = window.open(url, '_blank');
-          if (w) setTimeout(() => { try { w.print(); } catch { /* ignore */ } }, 500);
-        }}
+        onClick={() => requestPdfPreview(url, true)}
       >
         {t('common.print')}
       </button>

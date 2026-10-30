@@ -1,6 +1,7 @@
 import { Upload } from 'lucide-react';
 import { useI18n, tStatic } from '../i18n/I18nContext';
 import type { TranslateFn } from '../i18n/types';
+import { DocumentFileActions } from './DocumentScanner';
 import { Input, Select, Textarea } from './ui';
 
 export const OFFICE_PURPOSE_KEYS: Record<string, string> = {
@@ -204,16 +205,14 @@ export function OfficeCashFormFields({
       </div>
       <div className="sm:col-span-2">
         <p className="block text-[11px] font-medium text-gic-muted mb-1">{t('fields.proofOptional')}</p>
-        <label className="mac-upload-btn cursor-pointer">
+        <DocumentFileActions
+          labelClassName="mac-upload-btn cursor-pointer"
+          accept=".pdf,.jpg,.jpeg,.png,.webp"
+          onChange={(e) => setForm({ ...form, proof: e.target.files?.[0] || null })}
+        >
           <Upload size={14} />
           {form.proof ? t('fields.changeFile') : t('fields.addProof')}
-          <input
-            type="file"
-            className="hidden"
-            accept=".pdf,.jpg,.jpeg,.png,.webp"
-            onChange={(e) => setForm({ ...form, proof: e.target.files?.[0] || null })}
-          />
-        </label>
+        </DocumentFileActions>
         {form.proof ? (
           <p className="mt-1 text-[11px] text-gic-ink truncate">{form.proof.name}</p>
         ) : (

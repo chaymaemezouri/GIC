@@ -15,9 +15,11 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { MandantFormFields, emptyMandantForm, mandantToForm, type MandantFormData } from '../components/MandantFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { ClientLinkPicker } from '../components/ClientLinkPicker';
@@ -77,10 +79,12 @@ export default function MandantDetailPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
+      const fields = omitPhotoFields(form);
       await api(`/mandants/${id}`, {
         method: 'PUT',
-        body: JSON.stringify({ ...form, birthDate: form.birthDate || null }),
+        body: JSON.stringify({ ...fields, birthDate: fields.birthDate || null }),
       });
+      await uploadEntityPhoto(`/mandants/${id}/photo`, form.photoFile);
       setEditOpen(false);
       load();
     } catch (err) {
@@ -324,10 +328,13 @@ export default function MandantDetailPage() {
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
             {id && <EntityDocChecklist entityType="mandant" entityId={id} />}
-            <label className="mac-upload-btn">
+            <DocumentFileActions
+              labelClassName="mac-upload-btn"
+              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+              onChange={onUploadDoc}
+            >
               <Upload size={14} /> {t('actions.uploadIdentityDoc')}
-              <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />
-            </label>
+            </DocumentFileActions>
             <div className="mac-section-card !p-0 overflow-hidden">
               {documents.map((d) => (
                 <div key={d.id} className="mac-row">

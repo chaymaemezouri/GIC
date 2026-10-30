@@ -14,15 +14,18 @@ import {
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { fileUrl } from '../lib/documentDisplay';
 import { occupancyForDeal, occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
+import { partyLabel } from '../components/PartyNames';
 
 import {
   BienFormFields, bienToForm, emptyBienForm, flattenProjectFloors,
   type BienFormData, type FloorOption,
 } from '../components/BienFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 
 type Tab = 'info' | 'transactions' | 'documents' | 'historique';
 
@@ -131,17 +134,19 @@ export default function BienDetailPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
+      const fields = omitPhotoFields(form);
       await api(`/immobilier/properties/${id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          ...form,
-          surface: form.surface ? Number(form.surface) : null,
-          rooms: form.rooms ? Number(form.rooms) : null,
-          price: form.price ? Number(form.price) : null,
-          projectId: form.projectId || null,
-          floorId: form.floorId || null,
+          ...fields,
+          surface: fields.surface ? Number(fields.surface) : null,
+          rooms: fields.rooms ? Number(fields.rooms) : null,
+          price: fields.price ? Number(fields.price) : null,
+          projectId: fields.projectId || null,
+          floorId: fields.floorId || null,
         }),
       });
+      await uploadEntityPhoto(`/immobilier/properties/${id}/photo`, form.photoFile);
       setEditOpen(false);
       load();
     } catch (err) {
@@ -317,6 +322,16 @@ export default function BienDetailPage() {
                       {buyer.phone1 ? ` · ${buyer.phone1}` : ''}
                       {buyer.email ? ` · ${buyer.email}` : ''}
                     </p>
+                    {(activeSale?.coClients || []).length > 0 && (
+                      <p className="text-[12px] mt-1">
+                        {(activeSale.coClients as { id: string; firstName: string; lastName: string }[]).map((person, index) => (
+                          <span key={person.id}>
+                            {index > 0 ? ', ' : ''}
+                            <Link to={`/clients/${person.id}`} className="text-[#007aff]">{person.firstName} {person.lastName}</Link>
+                          </span>
+                        ))}
+                      </p>
+                    )}
                     {activeSale && (
                       <p className="text-[11px] text-gic-muted mt-1">
                         Vente{' '}
@@ -346,6 +361,16 @@ export default function BienDetailPage() {
                       {tenant.reference || '—'}
                       {tenant.phone1 ? ` · ${tenant.phone1}` : ''}
                     </p>
+                    {(activeRental?.coClients || []).length > 0 && (
+                      <p className="text-[12px] mt-1">
+                        {(activeRental.coClients as { id: string; firstName: string; lastName: string }[]).map((person, index) => (
+                          <span key={person.id}>
+                            {index > 0 ? ', ' : ''}
+                            <Link to={`/clients/${person.id}`} className="text-[#007aff]">{person.firstName} {person.lastName}</Link>
+                          </span>
+                        ))}
+                      </p>
+                    )}
                   </div>
                   <Link to={`/clients/${tenant.id}`}>
                     <Btn variant="secondary" icon={ExternalLink}>{t('actions.viewClientFiche')}</Btn>
@@ -415,7 +440,7 @@ export default function BienDetailPage() {
                           <p className="mac-row-subtitle">
                             {s.client ? (
                               <Link to={`/clients/${s.client.id}`} className="text-[#007aff]" onClick={(e) => e.stopPropagation()}>
-                                {s.client.firstName} {s.client.lastName}
+                                {partyLabel(s.client, s.coClients)}
                               </Link>
                             ) : '—'}
                             {' · '}Net {formatMad(s.netPrice)} · Payé {formatMad(s.totalPaid)} · Reste {formatMad(s.remaining)}
@@ -497,7 +522,7 @@ export default function BienDetailPage() {
                           <p className="mac-row-subtitle">
                             {r.client ? (
                               <Link to={`/clients/${r.client.id}`} className="text-[#007aff]" onClick={(e) => e.stopPropagation()}>
-                                {r.client.firstName} {r.client.lastName}
+                                {partyLabel(r.client, r.coClients)}
                               </Link>
                             ) : '—'}
                             {' · '}Payé {formatMad(r.totalPaid)}
@@ -566,12 +591,13 @@ export default function BienDetailPage() {
             {id && <EntityDocChecklist entityType="property" entityId={id} extra={{ propertyId: id }} />}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-[12px] text-gic-muted">Titres fonciers, plans, photos, contrats…</p>
-              <label className="cursor-pointer">
-                <span className="inline-flex items-center gap-2 rounded-lg border border-gic-border px-3 py-2 text-[12px] font-medium hover:bg-black/[0.03]">
-                  <Upload size={14} /> {t('actions.addFile')}
-                </span>
-                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />
-              </label>
+              <DocumentFileActions
+                labelClassName="inline-flex items-center gap-2 rounded-lg border border-gic-border px-3 py-2 text-[12px] font-medium hover:bg-black/[0.03] cursor-pointer"
+                accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+                onChange={onUploadDoc}
+              >
+                <Upload size={14} /> {t('actions.addFile')}
+              </DocumentFileActions>
             </div>
             {docs.length === 0 ? (
               <p className="text-[12px] text-gic-muted">{t('msg.emptyDocuments')}</p>

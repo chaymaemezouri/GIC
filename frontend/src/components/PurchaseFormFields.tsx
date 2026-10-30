@@ -9,6 +9,120 @@ const FALLBACK_PURCHASE_UNITS = [
   'Unité', 'm²', 'm³', 'tonne', 'kg', 'litre', 'pièce', 'lot', 'forfait',
 ];
 
+const PURCHASE_FAMILIES = [
+  'Gros œuvre',
+  'Terrassement',
+  'Fondations',
+  'Maçonnerie',
+  'Béton',
+  'Ferraillage',
+  'Second œuvre',
+  'Menuiserie',
+  'Carrelage',
+  'Plomberie',
+  'Électricité',
+  'Climatisation',
+  'Étanchéité',
+  'Isolation',
+  'Peinture',
+  'Faux plafonds',
+  'Serrurerie',
+  'Quincaillerie',
+  'Outillage',
+  'Échafaudage',
+  'Sécurité',
+  'Carburant',
+  'Location de matériel',
+  'Transport',
+  'Finitions',
+];
+
+function productsOf(catalog: { label: string; family: string }[], family: string) {
+  if (!family) return [];
+  return catalog.filter((item) => item.family === family);
+}
+
+function FamilyField({
+  value,
+  names,
+  onChange,
+}: {
+  value: string;
+  names: string[];
+  onChange: (value: string) => void;
+}) {
+  const { t } = useI18n();
+  const known = names.includes(value);
+  const [other, setOther] = useState(() => Boolean(value) && !known);
+  useEffect(() => {
+    if (value && !names.includes(value)) setOther(true);
+  }, [value, names]);
+  const showOther = other || Boolean(value && !known);
+
+  function onSelect(next: string) {
+    if (next === '__other__') {
+      setOther(true);
+      if (!value || names.includes(value)) onChange('');
+      return;
+    }
+    setOther(false);
+    onChange(next);
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <select value={showOther ? '__other__' : value} onChange={(e) => onSelect(e.target.value)}>
+        <option value="">—</option>
+        {names.map((name) => (
+          <option key={name} value={name}>{name}</option>
+        ))}
+        <option value="__other__">{t('common.other')}</option>
+      </select>
+      {showOther && (
+        <input
+          value={value}
+          placeholder={t('fields.familyManualPlaceholder')}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProductField({
+  family,
+  value,
+  choices,
+  onChange,
+}: {
+  family: string;
+  value: string;
+  choices: { label: string }[];
+  onChange: (value: string) => void;
+}) {
+  const { t } = useI18n();
+  if (!choices.length) {
+    return (
+      <input
+        value={value}
+        disabled={!family}
+        placeholder={family ? t('purchase.form.productPlaceholder') : t('fields.family')}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  const known = choices.some((item) => item.label === value);
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">—</option>
+      {choices.map((item, index) => (
+        <option key={`${item.label}-${index}`} value={item.label}>{item.label}</option>
+      ))}
+      {value && !known && <option value={value}>{value}</option>}
+    </select>
+  );
+}
+
 export type PurchaseLineForm = {
   key: string;
   product: string;
@@ -227,6 +341,13 @@ export function PurchaseFormFields({
     () => families.flatMap((f) => (f.designations || []).map((d) => ({ label: d.label, family: f.name }))),
     [families],
   );
+  const familyNames = useMemo(() => {
+    const names = [...PURCHASE_FAMILIES];
+    for (const family of families) {
+      if (family.name && !names.includes(family.name)) names.push(family.name);
+    }
+    return names;
+  }, [families]);
   const totals = computePurchaseFormTotals(form);
   const chantierId = lockChantier || form.chantierId;
   const project = chantiers.find((c) => c.id === chantierId)?.project;
@@ -234,10 +355,14 @@ export function PurchaseFormFields({
   const set = (patch: Partial<PurchaseFormData>) => setForm({ ...form, ...patch });
   const setLine = (key: string, patch: Partial<PurchaseLineForm>) =>
     setForm({ ...form, lines: form.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
-  const onProductChange = (key: string, product: string) => {
-    const match = catalog.find((c) => c.label === product);
+  const onFamilyChange = (key: string, family: string) => {
     const line = form.lines.find((l) => l.key === key);
-    setLine(key, { product, ...(match && !line?.family ? { family: match.family } : {}) });
+    const choices = productsOf(catalog, family);
+    const productStays = !choices.length || choices.some((item) => item.label === line?.product);
+    setLine(key, { family, ...(productStays ? {} : { product: '' }) });
+  };
+  const onProductChange = (key: string, product: string) => {
+    setLine(key, { product });
   };
 
   const trackingFields = (
@@ -332,28 +457,13 @@ export function PurchaseFormFields({
             {t('purchase.form.addLine')}
           </Btn>
         </div>
-        {catalog.length > 0 && (
-          <datalist id="purchase-catalog-list">
-            {catalog.map((c) => (
-              <option key={`${c.family}-${c.label}`} value={c.label}>{c.family}</option>
-            ))}
-          </datalist>
-        )}
-        {families.length > 0 && (
-          <datalist id="purchase-family-list">
-            {families.map((f) => (
-              <option key={f.id} value={f.name} />
-            ))}
-          </datalist>
-        )}
         <div className="purchase-lines-wrap">
           <table className="purchase-lines-table">
             <thead>
               <tr>
                 <th className="w-8">#</th>
+                <th className="min-w-[150px]">{t('fields.family')}</th>
                 <th>{t('purchase.fields.product')} *</th>
-                <th>{t('purchase.fields.productRef')}</th>
-                <th>{t('purchase.fields.category')}</th>
                 <th className="w-20">{t('purchase.fields.quantity')} *</th>
                 <th className="w-24">{t('purchase.fields.unit')}</th>
                 <th className="w-24">{t('purchase.fields.unitPrice')} *</th>
@@ -366,20 +476,19 @@ export function PurchaseFormFields({
               {form.lines.map((l, i) => (
                 <tr key={l.key}>
                   <td className="text-gic-muted text-center">{i + 1}</td>
-                  <td>
-                    <input
-                      value={l.product}
-                      list={catalog.length ? 'purchase-catalog-list' : undefined}
-                      placeholder={t('purchase.form.productPlaceholder')}
-                      onChange={(e) => onProductChange(l.key, e.target.value)}
+                  <td className="align-top">
+                    <FamilyField
+                      value={l.family}
+                      names={familyNames}
+                      onChange={(family) => onFamilyChange(l.key, family)}
                     />
                   </td>
-                  <td><input value={l.reference} onChange={(e) => setLine(l.key, { reference: e.target.value })} /></td>
                   <td>
-                    <input
-                      value={l.family}
-                      list={families.length ? 'purchase-family-list' : undefined}
-                      onChange={(e) => setLine(l.key, { family: e.target.value })}
+                    <ProductField
+                      family={l.family}
+                      value={l.product}
+                      choices={productsOf(catalog, l.family)}
+                      onChange={(product) => onProductChange(l.key, product)}
                     />
                   </td>
                   <td><input type="number" min="0" step="0.01" value={l.quantity} onChange={(e) => setLine(l.key, { quantity: e.target.value })} /></td>

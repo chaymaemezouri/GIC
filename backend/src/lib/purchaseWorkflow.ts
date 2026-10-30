@@ -241,6 +241,39 @@ export async function userDisplayName(req: Request) {
   return name || req.user.email || null;
 }
 
+export type ChefReviewRow = {
+  chefReview: string | null;
+  chefReviewRemark: string | null;
+  chefReviewedAt: Date | string | null;
+  chefReviewedBy: string | null;
+};
+
+/** Colonnes ajoutées hors client Prisma tant que le moteur est verrouillé par le serveur. */
+export async function readChefReviews(ids: string[]) {
+  const map = new Map<string, ChefReviewRow>();
+  if (!ids.length) return map;
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await prisma.$queryRawUnsafe<(ChefReviewRow & { id: string })[]>(
+    `SELECT id, chefReview, chefReviewRemark, chefReviewedAt, chefReviewedBy FROM Purchase WHERE id IN (${placeholders})`,
+    ...ids,
+  );
+  for (const row of rows) map.set(row.id, row);
+  return map;
+}
+
+export async function saveChefReview(id: string, decision: string, remark: string | null, reviewer: string | null) {
+  const now = new Date().toISOString();
+  await prisma.$executeRawUnsafe(
+    'UPDATE Purchase SET chefReview = ?, chefReviewRemark = ?, chefReviewedAt = ?, chefReviewedBy = ?, updatedAt = ? WHERE id = ?',
+    decision,
+    remark,
+    now,
+    reviewer,
+    now,
+    id,
+  );
+}
+
 /** Vue complète d'un achat : lignes + avancement livraison, livraisons, paiements, documents, totaux */
 export async function buildPurchaseDetail(id: string) {
   const purchase = await prisma.purchase.findUnique({
@@ -280,8 +313,10 @@ export async function buildPurchaseDetail(id: string) {
   const hasInvoice = documents.some((d) => INVOICE_DOC_CATEGORIES.includes(d.category || ''));
   const legacyMovement = await findMovementBySource('achat', id);
 
+  const review = await readChefReviews([id]);
   return {
     ...purchase,
+    ...(review.get(id) || {}),
     lines,
     payments,
     documents,

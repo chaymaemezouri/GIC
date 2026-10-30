@@ -10,6 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { canAccessRoute } from '../lib/permissions';
 import { Btn, Card, MacDateInput, MacSelect, SectionTitle, StatCell, StatusPill } from '../components/ui';
 import { useI18n } from '../i18n/I18nContext';
+import { partyLabel, type PartyPerson } from '../components/PartyNames';
 type DashboardData = {
   immobilier: Record<string, number>;
   finance: Record<string, number>;
@@ -24,6 +25,7 @@ type DashboardData = {
       status: string;
       remaining: number;
       client: { id: string; firstName: string; lastName: string };
+      coClients?: PartyPerson[];
       property?: { name: string };
     }[];
     clients: {
@@ -167,7 +169,7 @@ export default function DashboardPage() {
       <h2>${escHtml(t('dashboard.lastSales'))}</h2>
       ${recentSales.length ? buildRowsTableHtml<DashboardData['recent']['sales'][number]>([
         { label: t('common.reference'), value: (s) => s.reference },
-        { label: t('fields.client'), value: (s) => `${s.client.firstName} ${s.client.lastName}` },
+        { label: t('fields.client'), value: (s) => partyLabel(s.client, s.coClients) },
         { label: t('fields.property'), value: (s) => s.property?.name },
         { label: t('common.status'), value: (s) => (s.status || '').replace(/_/g, ' ') },
         { label: t('dashboard.remaining'), value: (s) => formatMad(s.remaining), align: 'right' },
@@ -323,7 +325,7 @@ export default function DashboardPage() {
                 <div className="min-w-0">
                   <p className="mac-row-title truncate">{s.reference}</p>
                   <p className="mac-row-subtitle truncate">
-                    {s.client.firstName} {s.client.lastName}
+                    {partyLabel(s.client, s.coClients)}
                     {s.property?.name ? ` — ${s.property.name}` : ''}
                   </p>
                 </div>

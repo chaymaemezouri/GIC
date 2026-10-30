@@ -7,6 +7,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { printMovementReceipt } from '../lib/printMovement';
 import { FilePieceLinks } from '../lib/documentDisplay';
+import { FileInlinePreview } from '../components/PdfPreview';
 
 type Tab = 'infos' | 'historique';
 
@@ -169,9 +170,12 @@ export default function FinanceDetailPage() {
               <div className="mac-section-card space-y-2">
                 <p className="mac-info-label">{t('fields.proof')}</p>
                 {pieces.map((p) => (
-                  <div key={p.label} className="flex items-center gap-2 text-[12px]">
-                    <Paperclip size={12} className="text-gic-muted shrink-0" />
-                    <FilePieceLinks path={p.path} label={p.label} />
+                  <div key={p.label} className="space-y-2 text-[12px]">
+                    <div className="flex items-center gap-2">
+                      <Paperclip size={12} className="text-gic-muted shrink-0" />
+                      <FilePieceLinks path={p.path} label={p.label} />
+                    </div>
+                    <FileInlinePreview src={p.path!} />
                   </div>
                 ))}
               </div>

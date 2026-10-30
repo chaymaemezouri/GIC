@@ -4,6 +4,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import { Btn, Input, Modal, Select } from './ui';
+import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 
 /** Vrai si début et fin sont renseignés et que début n'est pas strictement avant fin. */
 export function chantierDateError(start: string, end: string) {
@@ -22,6 +23,8 @@ export type ChantierFormData = {
   status: string;
   projectId: string;
   budgetAchats: string;
+  photoFile: File | null;
+  photoUrl: string;
 };
 
 export type ProjectOption = { id: string; name: string; city?: string | null; status?: string };
@@ -40,6 +43,7 @@ export function emptyChantierForm(): ChantierFormData {
     status: 'actif',
     projectId: '',
     budgetAchats: '',
+    ...emptyPhotoFields(),
   };
 }
 
@@ -57,6 +61,7 @@ export function chantierToForm(c: Record<string, unknown>): ChantierFormData {
     status: String(c.status || 'actif'),
     projectId: String(c.projectId || project?.id || ''),
     budgetAchats: c.budgetAchats != null ? String(c.budgetAchats) : '',
+    ...photoFieldsFrom(c as { photo?: string | null }),
   };
 }
 
@@ -108,6 +113,7 @@ export function ChantierFormFields({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <FormPhotoField file={form.photoFile} photoUrl={form.photoUrl} onFile={(photoFile) => setForm({ ...form, photoFile })} />
       <Input className="sm:col-span-2" label={`${t('fields.chantierName')} *`} required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       <Input className="sm:col-span-2" label={t('fields.address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
       <Select

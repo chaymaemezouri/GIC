@@ -9,6 +9,8 @@ import { api, formatDate, formatMad, uploadForm } from '../lib/api';
 import { Btn, Card, KpiCard, MacActionBtn, Modal, Select, TableWrap, Td, Th, PageBackLink, Input } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentScanButton } from '../components/DocumentScanner';
+import { PdfPages } from '../components/PdfPreview';
 import {
   daysUntilExpiry,
   entityLink,
@@ -296,6 +298,7 @@ export default function DocumentDetailPage() {
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={copied ? CheckCircle2 : Copy} tone="blue" title={t('docs.copyLink')} onClick={copyLink} />
             <MacActionBtn icon={RefreshCw} tone="gray" title={t('projectDocs.replace')} onClick={() => replaceInputRef.current?.click()} />
+            <DocumentScanButton variant="icon" onFile={(file) => onReplaceFile(file)} />
             <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={() => printDocumentFiche(d, t)} />
             <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
             <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={confirmDelete} />
@@ -452,8 +455,8 @@ export default function DocumentDetailPage() {
                 <img src={url} alt={d.name} className="max-h-[70vh] w-full object-contain rounded-lg bg-black/[0.03]" />
               </div>
             ) : isPdf ? (
-              <div className="mac-section-card overflow-hidden p-0">
-                <iframe title={d.name} src={url} className="w-full min-h-[70vh] rounded-lg border-0 bg-white" />
+              <div className="mac-section-card overflow-hidden bg-[#e8e8ed] p-3">
+                <PdfPages url={url} />
               </div>
             ) : null}
           </div>

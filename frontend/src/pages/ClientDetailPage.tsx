@@ -1,4 +1,5 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { printPaymentReceipt, printPaymentsReceipt } from '../lib/printPayment';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -18,6 +19,7 @@ import { useI18n } from '../i18n/I18nContext';
 
 import { ClientFormFields, clientToForm, type ClientFormData } from '../components/ClientFormFields';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { MandantLinkPicker } from '../components/MandantLinkPicker';
@@ -567,7 +569,7 @@ export default function ClientDetailPage() {
                           <div className="min-w-0">
                             <p className="mac-info-value">{formatMad(p.amount)}</p>
                             <p className="mac-info-label !mb-0 mt-0.5 capitalize">
-                              {p.type} · {p.mode || p.operationType || '—'}
+                              {p.nature || p.type} · {p.receiptNo || p.reference || p.mode || p.operationType || '—'}
                             </p>
                           </div>
                           <span className="text-[11px] text-gic-muted shrink-0">{formatDate(p.date)}</span>
@@ -586,10 +588,13 @@ export default function ClientDetailPage() {
                     <EmptyBlock
                       message={t('msg.emptyDocuments')}
                       action={
-                        <label className="mac-section-card-action cursor-pointer inline-flex items-center gap-1">
+                        <DocumentFileActions
+                          labelClassName="mac-section-card-action cursor-pointer inline-flex items-center gap-1"
+                          accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+                          onChange={onUploadDoc}
+                        >
                           <Plus size={12} /> {t('common.add')}
-                          <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />
-                        </label>
+                        </DocumentFileActions>
                       }
                     />
                   ) : (
@@ -835,9 +840,32 @@ export default function ClientDetailPage() {
           <div className="mt-1">
             <div className="flex items-center justify-between gap-2 mb-3">
               <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('detail.paymentHistory')}</p>
-              {canAddPayment && (
-                <Btn icon={Wallet} onClick={openPayModal}>{t('actions.newPayment')}</Btn>
-              )}
+              <div className="flex items-center gap-2">
+                {payments.length > 0 && (
+                  <Btn
+                    variant="secondary"
+                    icon={Printer}
+                    onClick={() => printPaymentsReceipt({
+                      clientName: `${client.firstName || ''} ${client.lastName || ''}`.trim(),
+                      lines: payments.map((p: any) => ({
+                        receiptNo: p.receiptNo || p.reference,
+                        date: p.date,
+                        amount: p.amount,
+                        operationType: p.mode || p.operationType,
+                        nature: p.nature,
+                        ref: p.ref,
+                        propertyName: p.propertyName,
+                        type: p.type,
+                      })),
+                    })}
+                  >
+                    {t('actions.printAllReceipts')}
+                  </Btn>
+                )}
+                {canAddPayment && (
+                  <Btn icon={Wallet} onClick={openPayModal}>{t('actions.newPayment')}</Btn>
+                )}
+              </div>
             </div>
             {payments.length === 0 ? (
               <p className="text-[12px] text-gic-muted py-6 text-center">
@@ -851,12 +879,14 @@ export default function ClientDetailPage() {
                 <tr>
                   <Th mac>{t('columns.date')}</Th>
                   <Th mac>{t('columns.type')}</Th>
+                  <Th mac>{t('rental.monthPaid')}</Th>
                   <Th mac>{t('columns.propertyRef')}</Th>
                   <Th mac>{t('columns.amount')}</Th>
                   <Th mac>{t('columns.mode')}</Th>
                   <Th mac>{t('columns.bank')}</Th>
                   <Th mac>{t('columns.proof')}</Th>
                   <Th mac>{t('columns.receipt')}</Th>
+                  <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
                 </tr>
               </thead>
               <tbody>
@@ -864,6 +894,7 @@ export default function ClientDetailPage() {
                   <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/encaissements/${p.id}`)}>
                     <Td mac className="mac-table-muted whitespace-nowrap">{formatDate(p.date)}</Td>
                     <Td mac className="capitalize">{p.type}</Td>
+                    <Td mac className="mac-table-muted">{p.nature || '—'}</Td>
                     <Td mac>
                       <span className="mac-table-ref">{p.ref}</span>
                       {p.propertyName && <span className="block text-[10px] text-gic-muted">{p.propertyName}</span>}
@@ -883,6 +914,20 @@ export default function ClientDetailPage() {
                       )}
                     </Td>
                     <Td mac className="mac-table-muted">{p.reference || p.receiptNo || '—'}</Td>
+                    <Td mac className="mac-td-actions" onClick={(e) => e.stopPropagation()}>
+                      <MacActionBtn
+                        icon={Printer}
+                        tone="gray"
+                        title={t('actions.printReceipt')}
+                        onClick={() => printPaymentReceipt({
+                          ...p,
+                          receiptNo: p.receiptNo || p.reference,
+                          propertyName: p.propertyName,
+                          sale: p.type === 'vente' ? { reference: p.ref, client } : null,
+                          rental: p.type === 'location' ? { reference: p.ref, client } : null,
+                        })}
+                      />
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -926,10 +971,13 @@ export default function ClientDetailPage() {
           <div className="space-y-3">
           <EntityDocChecklist entityType="client" entityId={id} extra={{ clientId: id }} />
           <div className="space-y-3">
-            <label className="mac-upload-btn">
+            <DocumentFileActions
+              labelClassName="mac-upload-btn"
+              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+              onChange={onUploadDoc}
+            >
               <Upload size={14} /> {t('actions.uploadIdentityDoc')}
-              <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />
-            </label>
+            </DocumentFileActions>
             {identityDocs.length > 0 && (
               <div className="mac-section-card">
                 <div className="mac-section-card-header">

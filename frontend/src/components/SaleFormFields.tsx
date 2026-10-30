@@ -2,15 +2,19 @@ import { useI18n } from '../i18n/I18nContext';
 import { occupancyForDeal, propertyDealOf } from '../lib/propertyDeal';
 import { isBankPaymentMode } from '../lib/paymentMode';
 import { uploadDocument, uploadForm } from '../lib/api';
-import { Input, Select } from './ui';
+import { DocumentFileActions } from './DocumentScanner';
+import { Input, Select, Textarea } from './ui';
 import { ClientFormPicker } from './ClientFormPicker';
 
 export type SaleFormData = {
   clientId: string;
+  coClientId2: string;
+  coClientId3: string;
   propertyId: string;
   salePrice: string;
   discount: string;
   advance: string;
+  advancePaid: string;
   paymentPlan: 'avance' | 'echeancier';
   contractType: string;
   description: string;
@@ -30,10 +34,13 @@ export type SaleFormData = {
 export function emptySaleForm(): SaleFormData {
   return {
     clientId: '',
+    coClientId2: '',
+    coClientId3: '',
     propertyId: '',
     salePrice: '',
     discount: '0',
     advance: '0',
+    advancePaid: '',
     paymentPlan: 'avance',
     contractType: 'compromis',
     description: '',
@@ -51,6 +58,15 @@ export function emptySaleForm(): SaleFormData {
   };
 }
 
+function coId(row: Record<string, unknown>, index: number) {
+  const list = Array.isArray(row.coClients) ? row.coClients as { id?: string }[] : [];
+  return String(list[index]?.id || '');
+}
+
+function partyIds(f: { coClientId2: string; coClientId3: string; clientId: string }) {
+  return [f.coClientId2, f.coClientId3].map((id) => id.trim()).filter((id, index, all) => id && id !== f.clientId && all.indexOf(id) === index);
+}
+
 function dateField(v: unknown) {
   if (!v) return '';
   return String(v).slice(0, 10);
@@ -63,10 +79,13 @@ export function saleToForm(s: Record<string, unknown>): SaleFormData {
   const acompte = payments.find((p) => p.nature === 'acompte') || payments[0];
   return {
     clientId: String(s.clientId || ''),
+    coClientId2: coId(s, 0),
+    coClientId3: coId(s, 1),
     propertyId: String(s.propertyId || ''),
     salePrice: s.salePrice != null ? String(s.salePrice) : '',
     discount: s.discount != null ? String(s.discount) : '0',
     advance: s.advance != null ? String(s.advance) : '0',
+    advancePaid: '',
     paymentPlan: s.paymentPlan === 'echeancier' || (Array.isArray(s.schedules) && (s.schedules as unknown[]).length > 0 && s.paymentPlan !== 'avance')
       ? 'echeancier'
       : 'avance',
@@ -93,11 +112,13 @@ export function saleFormToCreateBody(f: SaleFormData) {
     salePrice: f.salePrice,
     discount: f.discount,
     advance: f.advance,
+    advancePaid: f.advancePaid,
     advanceMode: f.advanceMode || 'especes',
     advanceBank: f.advanceBank || null,
     paymentPlan: f.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
     contractType: f.contractType,
     description: f.description || null,
+    coClientIds: partyIds(f),
     contractDate: f.contractDate || null,
     sellerSignatureDate: f.sellerSignatureDate || null,
     sellerLegalizationNo: f.sellerLegalizationNo || null,
@@ -110,6 +131,7 @@ export function saleFormToCreateBody(f: SaleFormData) {
 export function saleFormToUpdateBody(f: SaleFormData) {
   return {
     description: f.description || null,
+    coClientIds: partyIds(f),
     contractType: f.contractType,
     paymentPlan: f.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
     contractDate: f.contractDate || null,
@@ -179,7 +201,12 @@ export function SaleFormFields({
               label={`${t('fields.buyer')} *`}
               required
               value={form.clientId}
-              onChange={(clientId) => setForm({ ...form, clientId })}
+              onChange={(clientId) => setForm({
+                ...form,
+                clientId,
+                coClientId2: form.coClientId2 === clientId ? '' : form.coClientId2,
+                coClientId3: form.coClientId3 === clientId ? '' : form.coClientId3,
+              })}
             />
           </div>
           {lockPropertyId ? (
@@ -200,6 +227,31 @@ export function SaleFormFields({
           )}
         </>
       )}
+      <div className="sm:col-span-2">
+        <ClientFormPicker
+          label={t('fields.coBuyerOptional', { n: '2' })}
+          value={form.coClientId2}
+          excludeIds={[form.clientId, form.coClientId3]}
+          onChange={(coClientId2) => setForm({
+            ...form,
+            coClientId2: coClientId2 === form.clientId ? '' : coClientId2,
+            coClientId3: form.coClientId3 === coClientId2 ? '' : form.coClientId3,
+          })}
+        />
+      </div>
+      <div className="sm:col-span-2">
+        <ClientFormPicker
+          label={t('fields.coBuyerOptional', { n: '3' })}
+          value={form.coClientId3}
+          excludeIds={[form.clientId, form.coClientId2]}
+          onChange={(coClientId3) => setForm({
+            ...form,
+            coClientId3: coClientId3 === form.clientId ? '' : coClientId3,
+            coClientId2: form.coClientId2 === coClientId3 ? '' : form.coClientId2,
+          })}
+        />
+      </div>
+      <p className="sm:col-span-2 -mt-1 text-[11px] text-gic-muted">{t('fields.partyHintSale')}</p>
       <Input label={`${t('fields.salePriceMad')} *`} required type="number" min="0" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: e.target.value })} disabled={editMode} />
       <Input label={t('fields.discountMad')} type="number" min="0" value={form.discount} onChange={(e) => setForm({ ...form, discount: e.target.value })} disabled={editMode} />
       <Select
@@ -218,6 +270,26 @@ export function SaleFormFields({
       {form.paymentPlan === 'avance' && (
         <>
           <Input label={t('fields.advanceMad')} type="number" min="0" value={form.advance} onChange={(e) => setForm({ ...form, advance: e.target.value })} disabled={editMode} />
+          {!editMode && (
+            <Input
+              label={t('fields.advancePaidMad')}
+              type="number"
+              min="0"
+              max={form.advance || undefined}
+              value={form.advancePaid}
+              onChange={(e) => setForm({ ...form, advancePaid: e.target.value })}
+            />
+          )}
+          {!editMode && Number(form.advance) > 0 && (
+            <p className="sm:col-span-2 -mt-1 text-[11px] text-gic-muted">
+              {t('fields.advancePaidHint')}
+              {' '}
+              {t('fields.advanceComplement')} :{' '}
+              <span className="font-medium text-gic-ink">
+                {Math.max(0, Number(form.advance) - (form.advancePaid === '' ? Number(form.advance) : Number(form.advancePaid) || 0)).toLocaleString('fr-MA')} MAD
+              </span>
+            </p>
+          )}
           {(Number(form.advance) > 0 || editMode) && (
             <>
               <Select
@@ -242,10 +314,9 @@ export function SaleFormFields({
               {!editMode && (
                 <div className={isBankPaymentMode(form.advanceMode) ? '' : 'sm:col-span-2'}>
                   <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.advanceProof')}</label>
-                  <input
-                    type="file"
+                  <DocumentFileActions
                     accept=".pdf,.jpg,.jpeg,.png,.webp"
-                    className="block w-full text-[12px] file:mr-2 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:border file:border-gic-border"
+                    inputClassName="min-w-[12rem] flex-1 text-[12px] file:mr-2 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:border file:border-gic-border"
                     onChange={(e) => setForm({ ...form, advanceProof: e.target.files?.[0] || null })}
                   />
                 </div>
@@ -258,11 +329,10 @@ export function SaleFormFields({
         <div className="sm:col-span-2">
           <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.saleDocuments')}</label>
           <p className="mb-1.5 text-[11px] text-gic-muted">{t('fields.saleDocumentsHint')}</p>
-          <input
-            type="file"
+          <DocumentFileActions
             multiple
             accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
-            className="block w-full text-[12px] file:mr-2 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:border file:border-gic-border"
+            inputClassName="min-w-[12rem] flex-1 text-[12px] file:mr-2 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:border file:border-gic-border"
             onChange={(e) => setForm({ ...form, documents: Array.from(e.target.files || []) })}
           />
           {form.documents.length > 0 && (
@@ -292,12 +362,20 @@ export function SaleFormFields({
           <option value="annulée">{t('fields.statusCancelled')}</option>
         </Select>
       )}
+      <div className="sm:col-span-2">
+        <Textarea
+          label={t('fields.contractDescription')}
+          rows={4}
+          placeholder={t('fields.contractDescriptionPlaceholder')}
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+        />
+      </div>
       <p className="sm:col-span-2 text-[10px] font-semibold uppercase text-gic-muted tracking-wide pt-1">{t('fields.sectionSignatures')}</p>
       <Input label={t('fields.sellerSignatureDate')} type="date" value={form.sellerSignatureDate} onChange={(e) => setForm({ ...form, sellerSignatureDate: e.target.value })} />
       <Input label={t('fields.sellerLegalizationNo')} value={form.sellerLegalizationNo} onChange={(e) => setForm({ ...form, sellerLegalizationNo: e.target.value })} />
       <Input label={t('fields.buyerSignatureDate')} type="date" value={form.buyerSignatureDate} onChange={(e) => setForm({ ...form, buyerSignatureDate: e.target.value })} />
       <Input label={t('fields.buyerLegalizationNo')} value={form.buyerLegalizationNo} onChange={(e) => setForm({ ...form, buyerLegalizationNo: e.target.value })} />
-      <Input className="sm:col-span-2" label={t('fields.descriptionRemark')} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
     </div>
   );
 }

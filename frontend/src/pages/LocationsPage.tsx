@@ -3,7 +3,7 @@ import { appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Plus, Pencil, Eye, Download, Printer, Ban, Wallet, Home, Key, TrendingUp,
+  Plus, Pencil, Eye, Download, Printer, Ban, Wallet, Home, Key, TrendingUp, Clock,
   SlidersHorizontal, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { api, downloadCsv, downloadExcel, downloadPdf, fetchClientList, fetchPropertyList, formatMad, type PaginatedResponse } from '../lib/api';
@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { RentalFormFields, emptyRentalForm, rentalToForm, rentalFormToBody, type RentalFormData } from '../components/RentalFormFields';
+import { PartyNames, partyLabel, type PartyPerson } from '../components/PartyNames';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { printRentalReceipt } from '../lib/printRental';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -27,7 +28,10 @@ type Rental = {
   totalPaid: number;
   remaining: number;
   pending?: boolean;
+  rentPayStatus?: 'paye' | 'retard' | 'a_payer';
+  rentDueLabel?: string | null;
   client: { id: string; firstName: string; lastName: string; reference: string };
+  coClients?: PartyPerson[];
   property: { id: string; name: string; reference: string };
 };
 
@@ -70,7 +74,7 @@ function withUnrentedProperties(rentals: Rental[], props: CatalogProperty[]): Re
   return rows;
 }
 
-type Stats = { total: number; actives: number; terminees: number; encaisse: number; reste: number; mensualites: number };
+type Stats = { total: number; actives: number; terminees: number; enRetard?: number; encaisse: number; reste: number; mensualites: number };
 
 const PAGE_SIZE = 20;
 
@@ -109,6 +113,7 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
   const [properties, setProperties] = useState<{ id: string; reference: string; name: string; status: string; type?: string; price?: number | null }[]>([]);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [payFilter, setPayFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [sort, setSort] = useState('createdAt');
   const [order, setOrder] = useState<SortOrder>('desc');
@@ -125,25 +130,29 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
   const [error, setError] = useState('');
   const selection = useRowSelection<Rental>();
 
-  function buildExportQuery(overrides?: { q?: string; status?: string; clientId?: string }) {
+  function buildExportQuery(overrides?: { q?: string; status?: string; clientId?: string; pay?: string }) {
     const qs = new URLSearchParams();
     const qVal = overrides?.q !== undefined ? overrides.q : q;
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
+    const pay = overrides?.pay !== undefined ? overrides.pay : payFilter;
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
+    if (pay) qs.set('pay', pay);
     if (clientId) qs.set('clientId', clientId);
     if (projectId) qs.set('projectId', projectId);
     return qs.toString();
   }
 
-  function buildListQuery(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string }) {
+  function buildListQuery(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string; pay?: string }) {
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
     const qVal = overrides?.q !== undefined ? overrides.q : q;
+    const pay = overrides?.pay !== undefined ? overrides.pay : payFilter;
     const qs = new URLSearchParams();
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
+    if (pay) qs.set('pay', pay);
     if (clientId) qs.set('clientId', clientId);
     if (projectId) qs.set('projectId', projectId);
     qs.set('sort', sort);
@@ -160,15 +169,16 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
     }).then(setProperties);
   }
 
-  function load(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string }) {
+  function load(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string; pay?: string }) {
     setLoading(true);
     setError('');
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
     const qVal = overrides?.q !== undefined ? overrides.q : q;
-    const statsQs = buildExportQuery({ q: qVal, status, clientId });
+    const pay = overrides?.pay !== undefined ? overrides.pay : payFilter;
+    const statsQs = buildExportQuery({ q: qVal, status, clientId, pay });
     Promise.all([
-      api<PaginatedResponse<Rental>>(`/transactions/rentals?${buildListQuery(pageNum, { q: qVal, status, clientId })}`),
+      api<PaginatedResponse<Rental>>(`/transactions/rentals?${buildListQuery(pageNum, { q: qVal, status, clientId, pay })}`),
       api<Stats>(`/transactions/rentals/stats?${statsQs}`),
       projectId
         ? fetchPropertyList<CatalogProperty>({ projectId, limit: 100 })
@@ -313,12 +323,13 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
       ],
       columns: [
         { label: t('columns.ref'), value: (r) => r.reference },
-        { label: t('columns.tenant'), value: (r) => `${r.client.firstName} ${r.client.lastName}` },
+        { label: t('columns.tenant'), value: (r) => partyLabel(r.client, r.coClients) },
         { label: t('columns.property'), value: (r) => r.property.name },
         { label: t('columns.monthly'), value: (r) => formatMad(r.monthlyRent), align: 'right', total: (rows) => formatMad(rows.reduce((s, r) => s + Number(r.monthlyRent || 0), 0)) },
         { label: t('columns.paid'), value: (r) => formatMad(r.totalPaid), align: 'right', total: (rows) => formatMad(rows.reduce((s, r) => s + Number(r.totalPaid || 0), 0)) },
         { label: t('columns.remaining'), value: (r) => formatMad(r.remaining), align: 'right', total: (rows) => formatMad(rows.reduce((s, r) => s + Number(r.remaining || 0), 0)) },
         { label: t('columns.status'), value: (r) => (r.status ?? '').replace(/_/g, ' ') },
+        { label: t('rental.rentSituation'), value: (r) => rentPayText(r.rentPayStatus) },
       ],
       rows: selection.count ? selection.rows : () => fetchAllRows<Rental>('/transactions/rentals', buildListQuery(1)),
       selectedCount: selection.count,
@@ -332,7 +343,21 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
     { id: 'terminée', label: t('common.endedPlural') },
   ];
 
-  const hasActiveFilters = !!statusFilter || !!clientFilter;
+  const payFilters = [
+    { id: '', label: t('common.allFeminine') },
+    { id: 'paye', label: t('rental.paidPlural') },
+    { id: 'retard', label: t('rental.overdue') },
+    { id: 'a_payer', label: t('rental.toPay') },
+  ];
+
+  function rentPayText(status?: string) {
+    if (status === 'retard') return t('rental.overdue');
+    if (status === 'a_payer') return t('rental.toPay');
+    if (status === 'paye') return t('rental.paid');
+    return '—';
+  }
+
+  const hasActiveFilters = !!statusFilter || !!clientFilter || !!payFilter;
 
   const headerActions = (
     <>
@@ -359,8 +384,20 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
         />
       )}
 
-      <div className="mac-kpi-grid mac-kpi-grid-4">
+      <div className="mac-kpi-grid mac-kpi-grid-5">
         <KpiCard title={t('pages.rentals')} value={stats.total} icon={Key} tone="violet" />
+        <button
+          type="button"
+          className={`text-left rounded-2xl ${payFilter === 'retard' ? 'ring-2 ring-gic-coral' : ''}`}
+          onClick={() => {
+            const next = payFilter === 'retard' ? '' : 'retard';
+            setPayFilter(next);
+            setPage(1);
+            load(1, { pay: next });
+          }}
+        >
+          <KpiCard title={t('rental.overdue')} value={stats.enRetard || 0} icon={Clock} tone="coral" />
+        </button>
         <KpiCard title={t('status.active')} value={stats.actives} icon={Home} tone="emerald" delta={t('msg.endedCount', { count: stats.terminees })} deltaTone="muted" />
         <KpiCard
           title={t('fields.collected')}
@@ -438,6 +475,24 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                     </button>
                   ))}
                   <div className="mac-filter-menu-sep" />
+                  <p className="mac-filter-menu-section">{t('rental.rentSituation')}</p>
+                  {payFilters.map((f) => (
+                    <button
+                      key={f.id || 'all-pay'}
+                      type="button"
+                      role="menuitem"
+                      className={`mac-filter-menu-item${payFilter === f.id ? ' mac-filter-menu-item-active' : ''}`}
+                      onClick={() => {
+                        setPayFilter(f.id);
+                        setPage(1);
+                        load(1, { pay: f.id });
+                      }}
+                    >
+                      <span>{f.label}</span>
+                      {payFilter === f.id && <Check size={13} strokeWidth={2.5} className="mac-filter-menu-check" />}
+                    </button>
+                  ))}
+                  <div className="mac-filter-menu-sep" />
                   <p className="mac-filter-menu-section">{t('fields.tenant')}</p>
                   <button
                     type="button"
@@ -476,9 +531,10 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                         className="mac-filter-menu-item mac-filter-menu-reset"
                         onClick={() => {
                           setStatusFilter('');
+                          setPayFilter('');
                           setClientFilter('');
                           setPage(1);
-                          load(1, { status: '', clientId: '' });
+                          load(1, { status: '', clientId: '', pay: '' });
                           setShowFilters(false);
                         }}
                       >
@@ -521,12 +577,13 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                 <Th mac>{t('columns.paid')}</Th>
                 <Th mac>{t('columns.remaining')}</Th>
                 <Th mac>{t('columns.status')}</Th>
+                <Th mac>{t('rental.rentSituation')}</Th>
                 <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
               </tr>
             </thead>
             <tbody>
               {items.map((r) => (
-                <tr key={r.id} className="cursor-pointer" onClick={() => (r.pending ? openCreate(r.property.id) : navigate(`/locations/${r.id}`))}>
+                <tr key={r.id} className={`cursor-pointer${r.rentPayStatus === 'retard' ? ' rental-row-late' : ''}`} onClick={() => (r.pending ? openCreate(r.property.id) : navigate(`/locations/${r.id}`))}>
                   <SelectTd selection={selection} row={r} />
                   {embedded && (
                     <Td mac>
@@ -546,9 +603,7 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                         {t('fields.selectClient')}
                       </button>
                     ) : (
-                      <Link to={`/clients/${r.client.id}`} className="hover:text-[#007aff]" onClick={(e) => e.stopPropagation()}>
-                        {r.client.firstName} {r.client.lastName}
-                      </Link>
+                      <PartyNames client={r.client} coClients={r.coClients} />
                     )}
                   </Td>
                   <Td mac className="mac-table-muted">
@@ -559,6 +614,18 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                   <Td mac className={!r.pending && r.remaining > 0 ? 'text-gic-coral font-medium' : ''}>{r.pending ? '—' : formatMad(r.remaining)}</Td>
                   <Td mac>
                     <StatusPill status={r.status} quiet />
+                  </Td>
+                  <Td mac>
+                    {r.pending ? '—' : (
+                      <span className="inline-flex flex-col gap-0.5">
+                        <span className={`mac-status ${r.rentPayStatus === 'retard' ? 'mac-status-danger' : r.rentPayStatus === 'a_payer' ? 'mac-status-warn' : 'mac-status-ok'}`}>
+                          {rentPayText(r.rentPayStatus)}
+                        </span>
+                        {r.rentDueLabel && r.rentPayStatus !== 'paye' && (
+                          <span className="text-[10px] text-gic-muted">{r.rentDueLabel}</span>
+                        )}
+                      </span>
+                    )}
                   </Td>
                   <Td mac className="mac-td-actions">
                     <div className="mac-actions" onClick={(e) => e.stopPropagation()}>

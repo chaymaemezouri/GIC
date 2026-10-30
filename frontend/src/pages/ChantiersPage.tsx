@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ChantierFormFields, emptyChantierForm, chantierToForm, chantierDateError, type ChantierFormData, type ProjectOption, type ChefOption } from '../components/ChantierFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import MacAvatar from '../components/MacAvatar';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -185,11 +186,10 @@ export default function ChantiersPage() {
     }
     try {
       const body = toBody(form);
-      if (editId) {
-        await api(`/chantiers/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await api('/chantiers', { method: 'POST', body: JSON.stringify(body) });
-      }
+      const saved = editId
+        ? await api<{ id: string }>(`/chantiers/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api<{ id: string }>('/chantiers', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/chantiers/${saved.id}/photo`, form.photoFile);
       setOpen(false);
       load(page);
     } catch (err) {

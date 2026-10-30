@@ -1,4 +1,5 @@
 import { useI18n } from '../i18n/I18nContext';
+import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 import { Input, Select, Textarea } from './ui';
 
 export type MandantFormData = {
@@ -12,6 +13,8 @@ export type MandantFormData = {
   phone2: string;
   address: string;
   remark: string;
+  photoFile: File | null;
+  photoUrl: string;
 };
 
 export function emptyMandantForm(): MandantFormData {
@@ -26,6 +29,7 @@ export function emptyMandantForm(): MandantFormData {
     phone2: '',
     address: '',
     remark: '',
+    ...emptyPhotoFields(),
   };
 }
 
@@ -41,6 +45,7 @@ export function mandantToForm(m: Record<string, unknown>): MandantFormData {
     phone2: String(m.phone2 || ''),
     address: String(m.address || ''),
     remark: String(m.remark || ''),
+    ...photoFieldsFrom(m as { photo?: string | null }),
   };
 }
 
@@ -58,6 +63,7 @@ export function MandantFormFields({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <FormPhotoField file={form.photoFile} photoUrl={form.photoUrl} onFile={(photoFile) => setForm({ ...form, photoFile })} />
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide">{t('fields.sectionIdentity')}</p>
       <Input label={`${t('fields.firstName')} *`} required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
       <Input label={`${t('fields.lastName')} *`} required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />

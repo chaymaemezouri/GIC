@@ -444,7 +444,7 @@ router.get('/salaires/export/csv', requireRole(...STAFF_ROLES), async (req, res)
   });
   const byStaff = new Map(records.map((r) => [r.staffId, r]));
 
-  const header = 'Réf.;Collaborateur;Service;Période;Base;Primes;Retenues;Avances;Net dû;Payé;Reste;Statut';
+  const header = 'Réf.;Collaborateur;Service;Période;Base;Heures sup;Retenues;Avances;Net dû;Payé;Reste;Statut';
   const rows = staffList.map((s) => {
     const rec = byStaff.get(s.id);
     const period = normalizeSalaryPeriod(s.salaryPeriod);

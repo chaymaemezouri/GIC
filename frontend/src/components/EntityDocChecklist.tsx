@@ -6,8 +6,10 @@ import { api, formatDate, uploadDocument, uploadForm } from '../lib/api';
 import { fileUrl } from '../lib/photoUrl';
 import { ENTITY_CHECKLISTS, parseChecklistConfig, type ChecklistConfig } from '../lib/entityChecklists';
 import { DocumentAddButton } from './DocumentAddButton';
+import { DocumentFileActions } from './DocumentScanner';
 import { Btn, Input, MacActionBtn, Modal } from './ui';
 import { useI18n } from '../i18n/I18nContext';
+import { FileInlinePreview } from './PdfPreview';
 
 type Doc = {
   id: string;
@@ -254,15 +256,20 @@ export function EntityDocChecklist({
                       />
                     </>
                   )}
-                  <label className="mac-action-btn mac-action-btn-blue cursor-pointer" title={row.doc ? t('checklists.replace') : t('actions.addDocument')} aria-label={row.doc ? t('checklists.replace') : t('actions.addDocument')}>
+                  <DocumentFileActions
+                    labelClassName="mac-action-btn mac-action-btn-blue cursor-pointer"
+                    labelTitle={row.doc ? t('checklists.replace') : t('actions.addDocument')}
+                    scanVariant="icon"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(row.key, row.label, f, row.doc?.id); e.target.value = ''; }}
+                  >
                     <Upload size={14} strokeWidth={2.15} />
-                    <input type="file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(row.key, row.label, f, row.doc?.id); e.target.value = ''; }} />
-                  </label>
+                  </DocumentFileActions>
                   <MacActionBtn icon={Star} tone={row.required ? 'orange' : 'gray'} title={row.required ? t('checklists.markOptional') : t('checklists.markRequired')} onClick={() => toggleRequired(row.key, row.required)} />
                   <MacActionBtn icon={Pencil} tone="orange" title={t('projectDocs.renameChecklist')} onClick={() => { setRenameKey(row.key); setRenameLabel(row.label); }} />
                   <MacActionBtn icon={Trash2} tone="red" title={t('projectDocs.removeChecklist')} onClick={() => removeRow(row.key)} />
                 </div>
               </div>
+              {row.doc && <div className="mt-2"><FileInlinePreview src={fileUrl(row.doc.path)} /></div>}
             </div>
           );
         })}
@@ -273,19 +280,22 @@ export function EntityDocChecklist({
         <div className="mt-4">
           <p className="text-[12px] font-medium text-gic-ink mb-2">{t('checklists.otherDocs')}</p>
           {extras.map((d) => (
-            <div key={d.id} className="mac-row">
-              <div className="min-w-0">
-                <p className="mac-row-title truncate">{d.name}</p>
-                <p className="mac-row-subtitle">{d.category || '—'}</p>
+            <div key={d.id} className="mac-row flex-col !items-stretch">
+              <div className="flex w-full items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="mac-row-title truncate">{d.name}</p>
+                  <p className="mac-row-subtitle">{d.category || '—'}</p>
+                </div>
+                <div className="mac-actions">
+                  <a href={fileUrl(d.path)} target="_blank" rel="noreferrer" className="mac-action-btn mac-action-btn-blue" title={t('common.view')} aria-label={t('common.view')}>
+                    <Eye size={14} strokeWidth={2.15} />
+                  </a>
+                  <Link to={`/documents/${d.id}`} className="mac-action-btn mac-action-btn-gray" title={t('checklists.openSheet')} aria-label={t('checklists.openSheet')}>
+                    <ExternalLink size={14} strokeWidth={2.15} />
+                  </Link>
+                </div>
               </div>
-              <div className="mac-actions">
-                <a href={fileUrl(d.path)} target="_blank" rel="noreferrer" className="mac-action-btn mac-action-btn-blue" title={t('common.view')} aria-label={t('common.view')}>
-                  <Eye size={14} strokeWidth={2.15} />
-                </a>
-                <Link to={`/documents/${d.id}`} className="mac-action-btn mac-action-btn-gray" title={t('checklists.openSheet')} aria-label={t('checklists.openSheet')}>
-                  <ExternalLink size={14} strokeWidth={2.15} />
-                </Link>
-              </div>
+              <FileInlinePreview src={fileUrl(d.path)} />
             </div>
           ))}
         </div>

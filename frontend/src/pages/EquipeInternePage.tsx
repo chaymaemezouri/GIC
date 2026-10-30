@@ -13,6 +13,7 @@ import {
 import {
   InternalStaffFormFields, emptyInternalStaffForm, staffFormToBody,
 } from '../components/InternalStaffFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useRowSelection } from '../hooks/useRowSelection';
@@ -167,10 +168,11 @@ export default function EquipeInternePage() {
     e.preventDefault();
     setFormError('');
     try {
-      await api('/equipe-interne', {
+      const created = await api<{ id: string }>('/equipe-interne', {
         method: 'POST',
         body: JSON.stringify(staffFormToBody(form)),
       });
+      await uploadEntityPhoto(`/equipe-interne/${created.id}/photo`, form.photoFile);
       setOpen(false);
       load(1);
     } catch (err) {

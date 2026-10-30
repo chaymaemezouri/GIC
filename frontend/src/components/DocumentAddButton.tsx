@@ -2,6 +2,7 @@ import { appAlert } from '../lib/dialog';
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { uploadDocument, uploadForm } from '../lib/api';
+import { DocumentFileActions } from './DocumentScanner';
 import { Btn, Input, Modal, Select } from './ui';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -101,20 +102,20 @@ export function DocumentAddButton({
         footer={<Btn form="doc-add-form" type="submit" disabled={!file || saving}>{saving ? t('auth.sending') : t('actions.send')}</Btn>}
       >
         <form id="doc-add-form" onSubmit={submit} className="grid gap-3">
-          <label className="block">
+          <div>
             <span className="text-[11px] font-medium text-gic-muted">{t('fields.fileRequired')}</span>
-            <input
-              type="file"
-              required
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx,.doc,.xls"
-              className="mt-1 block w-full text-[12px]"
-              onChange={(e) => {
-                const f = e.target.files?.[0] || null;
-                setFile(f);
-                if (f && !form.name) setForm((prev) => ({ ...prev, name: f.name }));
-              }}
-            />
-          </label>
+            <div className="mt-1">
+              <DocumentFileActions
+                required
+                accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx,.doc,.xls"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setFile(f);
+                  if (f && !form.name) setForm((prev) => ({ ...prev, name: f.name }));
+                }}
+              />
+            </div>
+          </div>
           <Input label={t('fields.displayName')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <Select label={t('fields.category')} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
             {options.map((c) => <option key={c} value={c}>{c}</option>)}

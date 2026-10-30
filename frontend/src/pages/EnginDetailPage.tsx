@@ -13,8 +13,10 @@ import {
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, type EnginFormData } from '../components/EnginFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import DriverVehiclePanel from '../components/DriverVehiclePanel';
 import { fileUrl, printDocumentFiche } from '../lib/documentDisplay';
@@ -170,6 +172,7 @@ export default function EnginDetailPage() {
     e.preventDefault();
     try {
       await api(`/engins/${id}`, { method: 'PUT', body: JSON.stringify(enginFormToBody(form)) });
+      await uploadEntityPhoto(`/engins/${id}/photo`, form.photoFile);
       setEditOpen(false);
       refreshAll();
     } catch (err) {
@@ -756,10 +759,13 @@ export default function EnginDetailPage() {
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
             {id && <EntityDocChecklist entityType="engin" entityId={id} extra={{ enginId: id }} />}
-            <label className="mac-upload-btn">
+            <DocumentFileActions
+              labelClassName="mac-upload-btn"
+              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+              onChange={onUploadDoc}
+            >
               <Upload size={14} /> {t('msg.uploadDocumentLabel')}
-              <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={onUploadDoc} />
-            </label>
+            </DocumentFileActions>
             <div className="mac-section-card !p-0 overflow-hidden">
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {docs.map((d: any) => (

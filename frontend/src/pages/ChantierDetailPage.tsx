@@ -15,6 +15,7 @@ import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, PageBackLink, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { photoSrc } from '../lib/photoUrl';
 
@@ -22,6 +23,7 @@ import {
   ChantierFormFields, chantierToForm, chantierDateError, emptyChantierForm, type ChantierFormData,
   type ProjectOption, type ChefOption,
 } from '../components/ChantierFormFields';
+import { uploadEntityPhoto } from '../components/FormPhotoField';
 import ChantierOverviewPanel, { type ChantierOverview } from '../components/ChantierOverview';
 import ChantierDetailNav, { buildChantierNavGroups, type ChantierTab } from '../components/ChantierDetailNav';
 import { ChantierSubcontractorsPanel } from '../components/ChantierExtraPanels';
@@ -301,6 +303,7 @@ export default function ChantierDetailPage() {
           budgetAchats: form.budgetAchats ? Number(form.budgetAchats) : null,
         }),
       });
+      await uploadEntityPhoto(`/chantiers/${id}/photo`, form.photoFile);
       setEditOpen(false);
       load();
     } catch (err) {
@@ -732,11 +735,14 @@ export default function ChantierDetailPage() {
                   {galleryUploading ? t('auth.sending') : t('actions.addImages')}
                   <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.webp" multiple onChange={onGalleryUpload} disabled={galleryUploading} />
                 </label>
-                <label className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
+                <DocumentFileActions
+                  labelClassName="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50"
+                  onChange={onDocUpload}
+                  disabled={docUploading}
+                >
                   <FileText size={14} />
                   {docUploading ? t('auth.sending') : t('gallery.addDocument')}
-                  <input type="file" className="hidden" onChange={onDocUpload} disabled={docUploading} />
-                </label>
+                </DocumentFileActions>
               </div>
             </div>
             <MediaGallery
@@ -970,11 +976,14 @@ export default function ChantierDetailPage() {
               <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('msg.siteDocumentsTitle')}</p>
               <div className="flex flex-wrap items-end gap-2">
                 <Input label={t('fields.expiresOptional')} type="date" value={docExpiresAt} onChange={(e) => setDocExpiresAt(e.target.value)} className="!mb-0 w-40" />
-                <label className="mac-upload-btn">
+                <DocumentFileActions
+                  labelClassName="mac-upload-btn"
+                  onChange={onDocUpload}
+                  disabled={docUploading}
+                >
                   <Upload size={14} />
                   {docUploading ? t('auth.sending') : t('actions.deposit')}
-                  <input type="file" className="hidden" onChange={onDocUpload} disabled={docUploading} />
-                </label>
+                </DocumentFileActions>
               </div>
             </div>
             {documents.length === 0 ? (

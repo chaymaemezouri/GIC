@@ -1,4 +1,5 @@
 import { useI18n } from '../i18n/I18nContext';
+import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 import { Input, Select } from './ui';
 import { MAROC_BANKS } from '../lib/marocBanks';
 
@@ -25,6 +26,8 @@ export type WorkforceFormData = {
   rib: string;
   declared: string;
   isActive: string;
+  photoFile: File | null;
+  photoUrl: string;
 };
 
 export function emptyWorkforceForm(): WorkforceFormData {
@@ -50,6 +53,7 @@ export function emptyWorkforceForm(): WorkforceFormData {
     rib: '',
     declared: 'false',
     isActive: 'true',
+    ...emptyPhotoFields(),
   };
 }
 
@@ -77,6 +81,7 @@ export function workforceToForm(w: Record<string, unknown>): WorkforceFormData {
     rib: String(w.rib || ''),
     declared: w.declared ? 'true' : 'false',
     isActive: w.isActive === false ? 'false' : 'true',
+    ...photoFieldsFrom(w as { photo?: string | null }),
   };
 }
 
@@ -98,6 +103,7 @@ export function WorkforceFormFields({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <FormPhotoField file={form.photoFile} photoUrl={form.photoUrl} onFile={(photoFile) => setForm({ ...form, photoFile })} />
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide">{t('fields.sectionIdentity')}</p>
       <Input label={`${t('fields.firstName')} *`} required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
       <Input label={`${t('fields.lastName')} *`} required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />

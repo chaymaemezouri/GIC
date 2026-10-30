@@ -4,6 +4,7 @@ import { api, fetchAgentList, fetchClientList } from '../lib/api';
 import { Btn, Modal } from './ui';
 import { ClientPickerPanel, type ClientPickerOption } from './ClientLinkPicker';
 import { ClientFormFields, emptyClientForm, type ClientFormData } from './ClientFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from './FormPhotoField';
 import { useI18n } from '../i18n/I18nContext';
 
 function labelClient(c: { firstName: string; lastName: string; reference?: string }) {
@@ -17,6 +18,7 @@ export function ClientFormPicker({
   labelClassName,
   required = false,
   allowCreate = true,
+  excludeIds = [],
 }: {
   value: string;
   onChange: (clientId: string) => void;
@@ -24,6 +26,7 @@ export function ClientFormPicker({
   labelClassName?: string;
   required?: boolean;
   allowCreate?: boolean;
+  excludeIds?: string[];
 }) {
   const { t } = useI18n();
   const resolvedLabel = label ?? `${t('fields.client')} *`;
@@ -104,8 +107,9 @@ export function ClientFormPicker({
     try {
       const created = await api<{ id: string; firstName: string; lastName: string; reference?: string }>('/clients', {
         method: 'POST',
-        body: JSON.stringify(createForm),
+        body: JSON.stringify(omitPhotoFields(createForm)),
       });
+      await uploadEntityPhoto(`/clients/${created.id}/photo`, createForm.photoFile);
       setSelectedLabel(labelClient(created));
       onChange(created.id);
       setCreateOpen(false);
@@ -169,7 +173,7 @@ export function ClientFormPicker({
       >
         <ClientPickerPanel
           open={open}
-          excludeIds={[]}
+          excludeIds={excludeIds.filter((id) => id && id !== value)}
           selectedId={value}
           onSelect={handleSelect}
           query={query}

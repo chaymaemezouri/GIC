@@ -104,6 +104,10 @@ export type PurchaseDetail = {
   expectedDeliveryDate?: string | null;
   advanceMode?: string | null;
   remark?: string | null;
+  chefReview?: 'valide' | 'non_valide' | null;
+  chefReviewRemark?: string | null;
+  chefReviewedAt?: string | null;
+  chefReviewedBy?: string | null;
   purchaseType?: string | null;
   tranche?: string | null;
   supplierId?: string | null;

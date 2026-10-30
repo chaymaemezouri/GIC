@@ -523,6 +523,11 @@ router.get('/workforce/:id', async (req, res) => {
 
 router.put('/workforce/:id', async (req, res) => {
   const id = String(req.params.id);
+  const previous = await prisma.workforce.findUnique({
+    where: { id },
+    select: { dailySalary: true },
+  });
+  if (!previous) return res.status(404).json({ message: 'Ouvrier introuvable' });
   const data = normalizeWorkforcePayFields({ ...req.body });
   delete data.id;
   delete data.reference;
@@ -535,6 +540,9 @@ router.put('/workforce/:id', async (req, res) => {
   if (data.declared != null) data.declared = !!data.declared;
   if (data.isActive != null) data.isActive = !!data.isActive;
   const worker = await prisma.workforce.update({ where: { id }, data: data as any });
+  if (Math.abs(Number(previous.dailySalary) - Number(worker.dailySalary)) >= 0.001) {
+    await syncPointageRatesFromWorkforce(id, worker.dailySalary);
+  }
   await audit(req, 'modification', 'Workforce', id, `${worker.firstName} ${worker.lastName}`);
   res.json(worker);
 });
@@ -669,7 +677,13 @@ async function buildPointageWhere(query: {
 }
 
 function pointageRate(p: { dayRate?: number | null }, fallback: number) {
-  return p.dayRate != null && p.dayRate > 0 ? p.dayRate : fallback;
+  if (fallback > 0) return fallback;
+  return p.dayRate != null && p.dayRate > 0 ? p.dayRate : 0;
+}
+
+function storedDayRate(dailySalary: number | null | undefined) {
+  const n = Number(dailySalary || 0);
+  return n > 0 ? n : null;
 }
 
 function pointageBrut(
@@ -837,31 +851,12 @@ function normalizeWorkforcePayFields(data: Record<string, unknown>) {
   return data;
 }
 
-/** Si un tarif/j est saisi au pointage, met à jour le salaire journalier de la fiche ouvrier. */
-async function syncWorkforceDailyRateFromPointage(
-  req: import('express').Request,
-  workforceId: string,
-  dayRate: number | null,
-) {
-  if (dayRate == null || !(dayRate > 0)) return null;
-  const worker = await prisma.workforce.findUnique({
-    where: { id: workforceId },
-    select: { id: true, dailySalary: true, salaryPeriod: true, firstName: true, lastName: true },
+/** Le tarif du pointage suit le salaire journalier de la fiche ouvrier. */
+async function syncPointageRatesFromWorkforce(workforceId: string, dailySalary: number) {
+  await prisma.pointage.updateMany({
+    where: { workforceId },
+    data: { dayRate: storedDayRate(dailySalary) },
   });
-  if (!worker || isMonthlyWorkforce(worker)) return null;
-  if (Math.abs(Number(worker.dailySalary) - dayRate) < 0.001) return null;
-  const updated = await prisma.workforce.update({
-    where: { id: workforceId },
-    data: { dailySalary: dayRate },
-  });
-  await audit(
-    req,
-    'modification',
-    'Workforce',
-    workforceId,
-    `Tarif journalier ${worker.dailySalary} → ${dayRate} MAD (via pointage)`,
-  );
-  return updated;
 }
 
 async function getSalaryRows(
@@ -1017,7 +1012,7 @@ router.get('/salaries/export/csv', async (req, res) => {
   const chantierId = String(req.query.chantierId || '');
 
   const rows = await getSalaryRows(dateFrom, dateTo, q, category, active, chantierId, undefined, undefined, excludeCategory);
-  const header = 'Prénom;Nom;Catégorie;Salaire/j;Journées;Brut;Primes;Avances;Net dû;Payé;Reste;Statut;Pointages;Chantier';
+  const header = 'Prénom;Nom;Catégorie;Salaire/j;Journées;Brut;Heures sup;Avances;Net dû;Payé;Reste;Statut;Pointages;Chantier';
   const lines = rows.map(
     (r) =>
       `${r.firstName};${r.lastName};${r.category || ''};${r.dailySalary};${r.salary.totalDays.toFixed(2)};${r.salary.brut};${r.salary.bonuses};${r.salary.advances};${r.salary.netDue};${r.salary.amountPaid};${r.salary.remaining};${r.salary.status};${r.salary.pointageCount};${r.chantier?.name || ''}`
@@ -1821,10 +1816,10 @@ router.get('/pointage/export/csv', async (req, res) => {
     orderBy: { date: 'desc' },
   });
 
-  const header = 'Date;Ouvrier;Chantier;Journée;Heures;Total j.;Tarif/j;Avance;Prime;Validé';
+  const header = 'Date;Ouvrier;Chantier;Journée;Heures;Total j.;Tarif/j;Avance;Heure sup;Validé';
   const rows = pointages.map(
     (p) =>
-      `${p.date.toISOString().slice(0, 10)};${p.workforce.firstName} ${p.workforce.lastName};${p.chantier?.name || ''};${p.dayValue};${p.hours};${p.totalDay};${p.dayRate ?? p.workforce.dailySalary};${p.advance};${p.bonus};${p.validated ? 'Oui' : 'Non'}`
+      `${p.date.toISOString().slice(0, 10)};${p.workforce.firstName} ${p.workforce.lastName};${p.chantier?.name || ''};${p.dayValue};${p.hours};${p.totalDay};${p.workforce.dailySalary > 0 ? p.workforce.dailySalary : (p.dayRate ?? 0)};${p.advance};${p.bonus};${p.validated ? 'Oui' : 'Non'}`
   );
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename=pointage-gic.csv');
@@ -1860,10 +1855,10 @@ router.get('/pointage/export/xlsx', async (req, res) => {
       Journée: p.dayValue,
       Heures: p.hours,
       'Total j.': p.totalDay,
-      'Tarif/j': p.dayRate ?? p.workforce.dailySalary,
+      'Tarif/j': p.workforce.dailySalary > 0 ? p.workforce.dailySalary : (p.dayRate ?? 0),
       'Brut est.': pointageBrut(p, p.workforce.dailySalary || 0),
       Avance: p.advance,
-      Prime: p.bonus,
+      'Heure sup': p.bonus,
       Validé: p.validated ? 'Oui' : 'Non',
     }))
   );
@@ -2085,7 +2080,7 @@ router.post('/pointage/sessions/ensure', async (req, res) => {
         dayValue: 1,
         hours: 8,
         totalDay: 1,
-        dayRate: row.workforce.dailySalary > 0 ? row.workforce.dailySalary : null,
+        dayRate: storedDayRate(row.workforce.dailySalary),
       },
     });
     already.add(row.workforceId);
@@ -2160,7 +2155,7 @@ router.post('/pointage/sessions', async (req, res) => {
           dayValue: 1,
           hours: 8,
           totalDay: 1,
-          dayRate: line.dayRate,
+          dayRate: storedDayRate(line.workforce.dailySalary),
         },
       });
     }
@@ -2223,8 +2218,7 @@ router.post('/pointage/sessions/:id/lines', async (req, res) => {
       continue;
     }
     const dv = parseDayValue(raw.dayValue ?? 1);
-    const rate =
-      raw.dayRate != null && raw.dayRate !== '' && !Number.isNaN(Number(raw.dayRate)) ? Number(raw.dayRate) : null;
+    const rate = storedDayRate(worker.dailySalary);
     const validated = raw.validated != null ? !!raw.validated : other?.validated ?? false;
     const data = {
       sessionId: id,
@@ -2245,7 +2239,6 @@ router.post('/pointage/sessions/:id/lines', async (req, res) => {
         data: { ...data, date: session.date, workforceId, chantierId: session.chantierId },
       });
     }
-    await syncWorkforceDailyRateFromPointage(req, workforceId, rate);
     saved++;
   }
   const remainingExcluded = parseExcludedWorkforceIds(session.excludedWorkforceIds)
@@ -2514,7 +2507,6 @@ router.post('/pointage', async (req, res) => {
     advance = 0,
     bonus = 0,
     validated,
-    dayRate,
   } = req.body;
   if (!date || !workforceId) {
     return res.status(400).json({ message: 'date et workforceId requis' });
@@ -2529,7 +2521,7 @@ router.post('/pointage', async (req, res) => {
 
   const workerCheck = await prisma.workforce.findUnique({
     where: { id: String(workforceId) },
-    select: { salaryPeriod: true, firstName: true, lastName: true },
+    select: { salaryPeriod: true, firstName: true, lastName: true, dailySalary: true },
   });
   if (!workerCheck) return res.status(404).json({ message: 'Ouvrier introuvable' });
   if (isMonthlyWorkforce(workerCheck)) {
@@ -2544,8 +2536,7 @@ router.post('/pointage', async (req, res) => {
   const dv = parseDayValue(dayValue);
   const hours = dv * 8;
   const totalDay = dv;
-  const rate =
-    dayRate != null && dayRate !== '' && !Number.isNaN(Number(dayRate)) ? Number(dayRate) : null;
+  const rate = storedDayRate(workerCheck.dailySalary);
   const existingLine = await prisma.pointage.findUnique({
     where: {
       date_workforceId_chantierId: { date: pointageDate, workforceId: String(workforceId), chantierId: cid },
@@ -2591,7 +2582,6 @@ router.post('/pointage', async (req, res) => {
     },
     include: { workforce: true, chantier: true },
   });
-  await syncWorkforceDailyRateFromPointage(req, String(workforceId), rate);
   const refreshed = await prisma.pointage.findUnique({
     where: { id: pointage.id },
     include: { workforce: true, chantier: true },
@@ -2618,12 +2608,6 @@ router.put('/pointage/:id', async (req, res) => {
   const hours = dayValue * 8;
   const totalDay = dayValue;
   const validated = req.body.validated != null ? !!req.body.validated : existing.validated;
-  const dayRate =
-    req.body.dayRate !== undefined
-      ? req.body.dayRate != null && req.body.dayRate !== '' && !Number.isNaN(Number(req.body.dayRate))
-        ? Number(req.body.dayRate)
-        : null
-      : existing.dayRate;
 
   const nextChantierId =
     req.body.chantierId !== undefined ? req.body.chantierId || null : existing.chantierId;
@@ -2640,7 +2624,8 @@ router.put('/pointage/:id', async (req, res) => {
     where: { id: existing.workforceId },
     select: { dailySalary: true },
   });
-  const rateUsed = dayRate != null && dayRate > 0 ? dayRate : salary?.dailySalary || 0;
+  const dayRate = storedDayRate(salary?.dailySalary);
+  const rateUsed = dayRate || 0;
   const pointage = await prisma.pointage.update({
     where: { id },
     data: {
@@ -2662,7 +2647,6 @@ router.put('/pointage/:id', async (req, res) => {
     },
     include: { workforce: true, chantier: true },
   });
-  await syncWorkforceDailyRateFromPointage(req, existing.workforceId, dayRate);
   const refreshed = await prisma.pointage.findUnique({
     where: { id },
     include: { workforce: true, chantier: true },

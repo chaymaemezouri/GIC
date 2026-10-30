@@ -12,6 +12,8 @@ import { googleMapsSearchUrl, projectLocationQuery } from '../lib/googleMaps';
 import { Btn, PageBackLink, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
+import { partyLabel } from '../components/PartyNames';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { DocumentAddButton } from '../components/DocumentAddButton';
 import { fileUrl, photoSrc } from '../lib/photoUrl';
 import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
@@ -34,6 +36,7 @@ import {
   type BienFormData, type FloorOption,
 } from '../components/BienFormFields';
 import { ChantierFormFields, emptyChantierForm, type ChantierFormData, type ChefOption } from '../components/ChantierFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import ConversationsPanel from '../components/ConversationsPanel';
 import {
   SaleFormFields, emptySaleForm, saleFormToCreateBody, saleFormToUpdateBody, saleToForm, attachSaleCreateFiles, type SaleFormData,
@@ -437,6 +440,7 @@ export default function ProjectDetailPage() {
         budgetAchats: chantierForm.budgetAchats ? Number(chantierForm.budgetAchats) : null,
       };
       const created = await api<{ id: string }>('/chantiers', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/chantiers/${created.id}/photo`, chantierForm.photoFile);
       setChantierOpen(false);
       load();
       navigate(`/chantiers/${created.id}`);
@@ -484,19 +488,19 @@ export default function ProjectDetailPage() {
     if (!id) return;
     setBienError('');
     try {
+      const fields = omitPhotoFields(bienForm);
       const body = {
-        ...bienForm,
+        ...fields,
         projectId: id,
-        surface: bienForm.surface ? Number(bienForm.surface) : null,
-        rooms: bienForm.rooms ? Number(bienForm.rooms) : null,
-        price: bienForm.price ? Number(bienForm.price) : null,
-        floorId: bienForm.floorId || null,
+        surface: fields.surface ? Number(fields.surface) : null,
+        rooms: fields.rooms ? Number(fields.rooms) : null,
+        price: fields.price ? Number(fields.price) : null,
+        floorId: fields.floorId || null,
       };
-      if (editBienId) {
-        await api(`/immobilier/properties/${editBienId}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await api('/immobilier/properties', { method: 'POST', body: JSON.stringify(body) });
-      }
+      const saved = editBienId
+        ? await api<{ id: string }>(`/immobilier/properties/${editBienId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api<{ id: string }>('/immobilier/properties', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/immobilier/properties/${saved.id}/photo`, bienForm.photoFile);
       setBienOpen(false);
       setEditBienId(null);
       setBienFloorLock(null);
@@ -569,6 +573,7 @@ export default function ProjectDetailPage() {
         method: 'PUT',
         body: JSON.stringify(projectFormToBody(form)),
       });
+      await uploadEntityPhoto(`/immobilier/projects/${id}/photo`, form.photoFile);
       setEditOpen(false);
       load();
     } catch (err) {
@@ -759,10 +764,10 @@ export default function ProjectDetailPage() {
       `<tr><td>${ch.name}</td><td>${ch.address || '—'}</td><td>${ch.managerName || '—'}</td><td>${Math.round(ch.progressPct || 0)}%</td></tr>`
     ).join('');
     const venteRows = sales.map((s) =>
-      `<tr><td>${s.reference}</td><td>${s.client.firstName} ${s.client.lastName}</td><td>${s.property.reference} — ${s.property.name}</td><td>${formatMad(s.netPrice)}</td><td>${s.status}</td></tr>`
+      `<tr><td>${s.reference}</td><td>${partyLabel(s.client, s.coClients)}</td><td>${s.property.reference} — ${s.property.name}</td><td>${formatMad(s.netPrice)}</td><td>${s.status}</td></tr>`
     ).join('');
     const locationRows = rentals.map((r) =>
-      `<tr><td>${r.reference}</td><td>${r.client.firstName} ${r.client.lastName}</td><td>${r.property.reference} — ${r.property.name}</td><td>${formatMad(r.monthlyRent)}</td><td>${r.status}</td></tr>`
+      `<tr><td>${r.reference}</td><td>${partyLabel(r.client, r.coClients)}</td><td>${r.property.reference} — ${r.property.name}</td><td>${formatMad(r.monthlyRent)}</td><td>${r.status}</td></tr>`
     ).join('');
     let structureHtml = '';
     for (const t of project.tranches || []) {
@@ -1479,20 +1484,18 @@ export default function ProjectDetailPage() {
                         />
                       )}
                       {item.document && renderDocFileActions(item.document, item.state)}
-                      <label className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50">
+                      <DocumentFileActions
+                        labelClassName="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50"
+                        disabled={docUploading}
+                        onChange={(e) => onDocUpload(e, item.key)}
+                      >
                         <Upload size={12} />
                         {uploadingThis
                           ? t('auth.sending')
                           : item.document
                             ? t('projectDocs.replace')
                             : t('projectDocs.deposit')}
-                        <input
-                          type="file"
-                          className="hidden"
-                          disabled={docUploading}
-                          onChange={(e) => onDocUpload(e, item.key)}
-                        />
-                      </label>
+                      </DocumentFileActions>
                     </div>
                   </li>
                 );
@@ -1807,7 +1810,7 @@ export default function ProjectDetailPage() {
               <div>
                 <p className="text-[10px] text-gic-muted uppercase">{t('fields.client')}</p>
                 <Link to={`/clients/${saleDetail.client.id}`} className="font-medium text-gic-violet hover:underline">
-                  {saleDetail.client.firstName} {saleDetail.client.lastName}
+                  {partyLabel(saleDetail.client, saleDetail.coClients)}
                 </Link>
               </div>
               <div>
@@ -1827,7 +1830,7 @@ export default function ProjectDetailPage() {
                 <p>{formatDate(saleDetail.contractDate)}</p>
               </div>
               <div>
-                <p className="text-[10px] text-gic-muted uppercase">Description</p>
+                <p className="text-[10px] text-gic-muted uppercase">{t('fields.contractDescription')}</p>
                 <p className="text-gic-muted">{saleDetail.description || '—'}</p>
               </div>
             </div>
@@ -1886,7 +1889,7 @@ export default function ProjectDetailPage() {
               <div>
                 <p className="text-[10px] text-gic-muted uppercase">{t('fields.tenant')}</p>
                 <Link to={`/clients/${rentalDetail.client.id}`} className="font-medium text-gic-violet hover:underline">
-                  {rentalDetail.client.firstName} {rentalDetail.client.lastName}
+                  {partyLabel(rentalDetail.client, rentalDetail.coClients)}
                 </Link>
               </div>
               <div>
@@ -1906,7 +1909,7 @@ export default function ProjectDetailPage() {
                 <p>{formatDate(rentalDetail.contractDate)}</p>
               </div>
               <div>
-                <p className="text-[10px] text-gic-muted uppercase">Description</p>
+                <p className="text-[10px] text-gic-muted uppercase">{t('fields.contractDescription')}</p>
                 <p className="text-gic-muted">{rentalDetail.description || '—'}</p>
               </div>
             </div>

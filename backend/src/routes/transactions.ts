@@ -10,11 +10,50 @@ import { sendExcel } from '../lib/exportExcel.js';
 import { sendPdfTable } from '../lib/exportPdf.js';
 import { removeAutomaticMovement, syncEncaissementMovement } from '../lib/cashSync.js';
 import { upload } from '../lib/upload.js';
-import { addMonths, iterRentMonths, monthKey, monthLabelFr, startOfMonth } from '../lib/rentMonths.js';
+import { addMonths, monthKey, monthLabelFr, startOfMonth } from '../lib/rentMonths.js';
+import {
+  attachCoClients,
+  formatPartyNames,
+  markParties,
+  rentalSearchExtras,
+  resolvePartyIds,
+  saleSearchExtras,
+  savePartyIds,
+} from '../lib/dealParties.js';
 
 const router = Router();
 router.use(requireAuth);
 router.use(requirePermission);
+
+const SCHEDULE_KINDS = ['mensuel', 'trimestriel', 'semestriel', 'annuel', 'versement'] as const;
+const SCHEDULE_KIND_MONTHS: Record<(typeof SCHEDULE_KINDS)[number], number> = {
+  mensuel: 1,
+  trimestriel: 3,
+  semestriel: 6,
+  annuel: 12,
+  versement: 1,
+};
+
+function scheduleKindOf(value: unknown) {
+  const kind = String(value || '');
+  return (SCHEDULE_KINDS as readonly string[]).includes(kind) ? kind : null;
+}
+
+async function saveScheduleKind(id: string, kind: string | null) {
+  await prisma.$executeRawUnsafe('UPDATE PaymentSchedule SET kind = ? WHERE id = ?', kind, id);
+}
+
+async function attachScheduleKinds<T extends { id: string }>(rows: T[]) {
+  if (!rows.length) return rows;
+  const ids = rows.map((row) => row.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const kinds = await prisma.$queryRawUnsafe<{ id: string; kind: string | null }[]>(
+    `SELECT id, kind FROM PaymentSchedule WHERE id IN (${placeholders})`,
+    ...ids,
+  );
+  const byId = new Map(kinds.map((row) => [row.id, row.kind]));
+  return rows.map((row) => ({ ...row, kind: byId.get(row.id) || null }));
+}
 
 async function syncPropertyOccupancy(propertyId: string) {
   const [sale, rental] = await Promise.all([
@@ -58,42 +97,65 @@ async function applyPropertyOccupancy(propertyId: string, explicit?: unknown, de
   await syncPropertyOccupancy(propertyId);
 }
 
-/** Sync des mois de loyer (idempotent) + recalcul totalPaid / remaining */
+function rentMonthSettled(row: { status: string; amount: number; payments?: { amount: number }[] }) {
+  if (row.status === 'paid') return true;
+  const paid = schedulePaidTotal(row.payments || []);
+  return paid + 0.01 >= Number(row.amount || 0);
+}
+
+/** Un seul mois ouvert : le suivant n’est créé que lorsque le mois en cours est soldé. */
 async function syncRentalMonthSchedules(
   rentalId: string,
-  opts?: { startDate?: Date | null; endDate?: Date | null; monthlyRent?: number; horizonMonths?: number },
+  opts?: { startDate?: Date | null; endDate?: Date | null; monthlyRent?: number },
 ) {
   const rental = await prisma.rental.findUnique({ where: { id: rentalId } });
   if (!rental) return [];
 
-  const start = opts?.startDate ?? rental.startDate ?? rental.contractDate ?? rental.createdAt;
+  const start = startOfMonth(opts?.startDate ?? rental.startDate ?? rental.contractDate ?? rental.createdAt);
   const end = opts?.endDate !== undefined ? opts.endDate : rental.endDate;
-  const rent = opts?.monthlyRent ?? rental.monthlyRent;
-  const months = iterRentMonths(start, end, opts?.horizonMonths ?? 6);
+  const endMonth = end ? startOfMonth(end) : null;
+  const rent = Number(opts?.monthlyRent ?? rental.monthlyRent);
 
-  const existing = await prisma.paymentSchedule.findMany({ where: { rentalId } });
-  const byKey = new Map(existing.map((s) => [monthKey(new Date(s.dueDate)), s]));
+  let existing = await prisma.paymentSchedule.findMany({
+    where: { rentalId },
+    include: { payments: true },
+    orderBy: { dueDate: 'asc' },
+  });
 
-  for (const m of months) {
-    const key = monthKey(m);
-    const label = `Loyer ${monthLabelFr(m)}`;
-    const found = byKey.get(key);
-    if (!found) {
+  const firstOpen = existing.findIndex((row) => !rentMonthSettled(row));
+  if (firstOpen >= 0) {
+    const extras = existing.slice(firstOpen + 1).filter((row) => (
+      row.status !== 'paid' && schedulePaidTotal(row.payments) <= 0.001
+    ));
+    if (extras.length) {
+      await prisma.paymentSchedule.deleteMany({ where: { id: { in: extras.map((row) => row.id) } } });
+      const dropped = new Set(extras.map((row) => row.id));
+      existing = existing.filter((row) => !dropped.has(row.id));
+    }
+  }
+
+  const open = existing.find((row) => !rentMonthSettled(row));
+  if (!open) {
+    const last = existing[existing.length - 1];
+    const next = last ? addMonths(startOfMonth(new Date(last.dueDate)), 1) : start;
+    const withinLease = !endMonth || next.getTime() <= endMonth.getTime();
+    const alreadyThere = existing.some((row) => monthKey(startOfMonth(new Date(row.dueDate))) === monthKey(next));
+    if (withinLease && !alreadyThere) {
       await prisma.paymentSchedule.create({
         data: {
           rentalId,
-          dueDate: m,
+          dueDate: next,
           amount: rent,
-          label,
+          label: `Loyer ${monthLabelFr(next)}`,
           status: 'pending',
         },
       });
-    } else if (found.status !== 'paid' && found.amount !== rent) {
-      await prisma.paymentSchedule.update({
-        where: { id: found.id },
-        data: { amount: rent, label: found.label || label },
-      });
     }
+  } else if (schedulePaidTotal(open.payments) <= 0.001 && Math.abs(Number(open.amount) - rent) > 0.01) {
+    await prisma.paymentSchedule.update({
+      where: { id: open.id },
+      data: { amount: rent, label: open.label || `Loyer ${monthLabelFr(new Date(open.dueDate))}` },
+    });
   }
 
   return recalculateRentalBalances(rentalId);
@@ -172,7 +234,8 @@ async function recalculateRentalBalances(rentalId: string) {
   });
 }
 
-function buildSaleWhere(q: string, status: string, clientId: string, projectId = '') {
+async function buildSaleWhere(q: string, status: string, clientId: string, projectId = '') {
+  const { nameHits, partyOfClient } = await saleSearchExtras(q, clientId);
   return {
     AND: [
       q
@@ -184,11 +247,14 @@ function buildSaleWhere(q: string, status: string, clientId: string, projectId =
               { client: { reference: { contains: q } } },
               { property: { name: { contains: q } } },
               { property: { reference: { contains: q } } },
+              ...(nameHits.length ? [{ id: { in: nameHits } }] : []),
             ],
           }
         : {},
       status ? { status } : {},
-      clientId ? { clientId } : {},
+      clientId
+        ? { OR: [{ clientId }, ...(partyOfClient.length ? [{ id: { in: partyOfClient } }] : [])] }
+        : {},
       projectId ? { property: { projectId } } : {},
     ],
   };
@@ -205,17 +271,17 @@ function saleListFilters(req: { query: Record<string, unknown> }) {
 
 router.get('/sales/export/csv', async (req, res) => {
   const { q, status, clientId, projectId } = saleListFilters(req);
-  const where = buildSaleWhere(q, status, clientId, projectId);
-  const sales = await prisma.sale.findMany({
+  const where = await buildSaleWhere(q, status, clientId, projectId);
+  const sales = await attachCoClients('Sale', await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
     orderBy: { createdAt: 'desc' },
     take: 5000,
-  });
+  }));
   const header = 'Référence;Client;Bien;Prix net;Payé;Reste;Statut;Date contrat';
   const rows = sales.map(
     (s) =>
-      `${s.reference};${s.client.firstName} ${s.client.lastName};${s.property.name};${s.netPrice};${s.totalPaid};${s.remaining};${s.status};${s.contractDate ? s.contractDate.toISOString().slice(0, 10) : ''}`
+      `${s.reference};${formatPartyNames(s.client, s.coClients)};${s.property.name};${s.netPrice};${s.totalPaid};${s.remaining};${s.status};${s.contractDate ? s.contractDate.toISOString().slice(0, 10) : ''}`
   );
   const csv = [header, ...rows].join('\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -225,19 +291,19 @@ router.get('/sales/export/csv', async (req, res) => {
 
 router.get('/sales/export/xlsx', async (req, res) => {
   const { q, status, clientId, projectId } = saleListFilters(req);
-  const where = buildSaleWhere(q, status, clientId, projectId);
-  const sales = await prisma.sale.findMany({
+  const where = await buildSaleWhere(q, status, clientId, projectId);
+  const sales = await attachCoClients('Sale', await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
     orderBy: { createdAt: 'desc' },
-  });
+  }));
   sendExcel(
     res,
     'ventes-gic.xlsx',
     'Ventes',
     sales.map((s) => ({
       Référence: s.reference,
-      Client: `${s.client.firstName} ${s.client.lastName}`,
+      Client: `${formatPartyNames(s.client, s.coClients)}`,
       Bien: s.property.name,
       'Prix net': s.netPrice,
       Payé: s.totalPaid,
@@ -250,13 +316,13 @@ router.get('/sales/export/xlsx', async (req, res) => {
 
 router.get('/sales/export/pdf', async (req, res) => {
   const { q, status, clientId, projectId } = saleListFilters(req);
-  const where = buildSaleWhere(q, status, clientId, projectId);
-  const sales = await prisma.sale.findMany({
+  const where = await buildSaleWhere(q, status, clientId, projectId);
+  const sales = await attachCoClients('Sale', await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
     orderBy: { createdAt: 'desc' },
     take: 200,
-  });
+  }));
   await sendPdfTable(
     res,
     'ventes-gic.pdf',
@@ -271,7 +337,7 @@ router.get('/sales/export/pdf', async (req, res) => {
     ],
     sales.map((s) => ({
       ref: s.reference,
-      client: `${s.client.firstName} ${s.client.lastName}`,
+      client: `${formatPartyNames(s.client, s.coClients)}`,
       bien: s.property.name,
       net: s.netPrice,
       paye: s.totalPaid,
@@ -282,7 +348,7 @@ router.get('/sales/export/pdf', async (req, res) => {
 
 router.get('/sales/stats', async (req, res) => {
   const { q, status, clientId, projectId } = saleListFilters(req);
-  const baseWhere = buildSaleWhere(q, status, clientId, projectId);
+  const baseWhere = await buildSaleWhere(q, status, clientId, projectId);
   const activeFilter = { AND: [baseWhere, { status: { notIn: ['annulée', 'résiliée'] } }] };
   const [total, soldees, enCours, agg] = await Promise.all([
     prisma.sale.count({ where: activeFilter }),
@@ -317,7 +383,7 @@ router.get('/sales', async (req, res) => {
         ? { remaining: order as 'asc' | 'desc' }
         : { createdAt: order as 'asc' | 'desc' };
 
-  const where = buildSaleWhere(q, status, clientId, projectId);
+  const where = await buildSaleWhere(q, status, clientId, projectId);
   const [items, total] = await Promise.all([
     prisma.sale.findMany({
       where,
@@ -333,7 +399,7 @@ router.get('/sales', async (req, res) => {
     }),
     prisma.sale.count({ where }),
   ]);
-  res.json({ items, total, page, limit, pages: Math.ceil(total / limit) || 1 });
+  res.json({ items: await attachCoClients('Sale', items), total, page, limit, pages: Math.ceil(total / limit) || 1 });
 });
 
 router.post('/sales', async (req, res) => {
@@ -341,6 +407,8 @@ router.post('/sales', async (req, res) => {
   if (!clientId || !propertyId || salePrice == null) {
     return res.status(400).json({ message: 'Client, bien et prix obligatoires' });
   }
+  const parties = await resolvePartyIds(req.body.coClientIds, clientId);
+  if ('error' in parties) return res.status(400).json({ message: parties.error });
   const paymentPlan = req.body.paymentPlan === 'echeancier' ? 'echeancier' : 'avance';
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   if (!property) return res.status(404).json({ message: 'Bien introuvable' });
@@ -351,8 +419,21 @@ router.post('/sales', async (req, res) => {
     return res.status(400).json({ message: 'Une vente active existe déjà pour ce bien' });
   }
   const netPrice = Number(salePrice) - Number(discount || 0);
-  const advanceAmount = Number(advance || 0);
-  const remaining = netPrice - advanceAmount;
+  const advanceAmount = Math.max(0, Number(advance || 0));
+  const paidRaw = req.body.advancePaid;
+  const advancePaidNow = paidRaw === undefined || paidRaw === null || paidRaw === ''
+    ? advanceAmount
+    : Math.max(0, Number(paidRaw));
+  if (!Number.isFinite(advanceAmount) || !Number.isFinite(advancePaidNow)) {
+    return res.status(400).json({ message: 'Montant d\'avance invalide' });
+  }
+  if (advancePaidNow > advanceAmount + 0.01) {
+    return res.status(400).json({ message: 'L\'avance versée dépasse l\'avance demandée' });
+  }
+  if (advancePaidNow > netPrice + 0.01) {
+    return res.status(400).json({ message: 'L\'avance versée dépasse le prix net' });
+  }
+  const remaining = netPrice - advancePaidNow;
   const reference = await nextReference('VNT');
   const sale = await prisma.$transaction(async (tx) => {
     const created = await tx.sale.create({
@@ -364,7 +445,7 @@ router.post('/sales', async (req, res) => {
         discount: Number(discount || 0),
         advance: advanceAmount,
         netPrice,
-        totalPaid: advanceAmount,
+        totalPaid: advancePaidNow,
         remaining,
         contractType,
         paymentPlan,
@@ -388,20 +469,22 @@ router.post('/sales', async (req, res) => {
     });
     return created;
   });
+  await savePartyIds('Sale', sale.id, parties.ids);
+  await markParties(parties.ids, 'buyer');
   try {
     await prisma.$executeRawUnsafe('UPDATE Property SET type = ? WHERE id = ?', 'vente', propertyId);
   } catch { /* type column */ }
   await audit(req, 'création', 'Sale', sale.id, reference);
 
   let advancePaymentId: string | null = null;
-  if (advanceAmount > 0) {
+  if (advancePaidNow > 0) {
     const receiptNo = await nextReference('REC');
     const client = sale.client;
     const payment = await prisma.payment.create({
       data: {
         receiptNo,
         saleId: sale.id,
-        amount: advanceAmount,
+        amount: advancePaidNow,
         nature: 'acompte',
         operationType: req.body.advanceMode || req.body.paymentMode || 'especes',
         bank: req.body.advanceBank || null,
@@ -483,7 +566,9 @@ router.get('/sales/:id', async (req, res) => {
     },
   });
   if (!sale) return res.status(404).json({ message: 'Vente introuvable' });
-  res.json(sale);
+  const [enriched] = await attachCoClients('Sale', [sale]);
+  enriched.schedules = await attachScheduleKinds(enriched.schedules || []);
+  res.json(enriched);
 });
 
 router.get('/sales/:id/schedules', async (req, res) => {
@@ -493,13 +578,14 @@ router.get('/sales/:id/schedules', async (req, res) => {
     orderBy: { dueDate: 'asc' },
     include: { payments: { orderBy: { date: 'desc' } } },
   });
-  res.json(items);
+  res.json(await attachScheduleKinds(items));
 });
 
 router.post('/sales/:id/schedules', async (req, res) => {
   const saleId = String(req.params.id);
   const { dueDate, amount, label, remark } = req.body;
   if (!dueDate || amount == null) return res.status(400).json({ message: 'Date et montant requis' });
+  const kind = scheduleKindOf(req.body.kind) || 'versement';
   const item = await prisma.paymentSchedule.create({
     data: {
       saleId,
@@ -509,13 +595,16 @@ router.post('/sales/:id/schedules', async (req, res) => {
       remark: remark || null,
     },
   });
-  res.status(201).json(item);
+  await saveScheduleKind(item.id, kind);
+  res.status(201).json({ ...item, kind });
 });
 
 router.post('/sales/:id/schedules/generate', async (req, res) => {
   const saleId = String(req.params.id);
   const count = Math.max(1, Math.min(60, Number(req.body.count) || 12));
   const startDate = req.body.startDate ? new Date(req.body.startDate) : new Date();
+  const kind = scheduleKindOf(req.body.kind) || 'mensuel';
+  const step = SCHEDULE_KIND_MONTHS[kind as keyof typeof SCHEDULE_KIND_MONTHS] || 1;
   const sale = await prisma.sale.findUnique({ where: { id: saleId } });
   if (!sale) return res.status(404).json({ message: 'Vente introuvable' });
   const total = sale.remaining > 0 ? sale.remaining : sale.netPrice;
@@ -524,18 +613,18 @@ router.post('/sales/:id/schedules/generate', async (req, res) => {
   const items = [];
   for (let i = 0; i < count; i++) {
     const d = new Date(startDate);
-    d.setMonth(d.getMonth() + i);
+    d.setMonth(d.getMonth() + i * step);
     const amt = i === count - 1 ? Math.round((total - per * (count - 1)) * 100) / 100 : per;
-    items.push(
-      await prisma.paymentSchedule.create({
-        data: {
-          saleId,
-          dueDate: d,
-          amount: amt,
-          label: `Échéance ${i + 1}/${count}`,
-        },
-      })
-    );
+    const item = await prisma.paymentSchedule.create({
+      data: {
+        saleId,
+        dueDate: d,
+        amount: amt,
+        label: `Échéance ${i + 1}/${count}`,
+      },
+    });
+    await saveScheduleKind(item.id, kind);
+    items.push({ ...item, kind });
   }
   res.status(201).json(items);
 });
@@ -559,6 +648,12 @@ router.put('/sales/:id', async (req, res) => {
   if (req.body.sellerLegalizationNo !== undefined) data.sellerLegalizationNo = req.body.sellerLegalizationNo || null;
   if (req.body.buyerSignatureDate !== undefined) data.buyerSignatureDate = req.body.buyerSignatureDate || null;
   if (req.body.buyerLegalizationNo !== undefined) data.buyerLegalizationNo = req.body.buyerLegalizationNo || null;
+  if (req.body.coClientIds !== undefined) {
+    const parties = await resolvePartyIds(req.body.coClientIds, sale.clientId);
+    if ('error' in parties) return res.status(400).json({ message: parties.error });
+    await savePartyIds('Sale', id, parties.ids);
+    await markParties(parties.ids, 'buyer');
+  }
   const updated = await prisma.sale.update({ where: { id }, data });
   await applyPropertyOccupancy(updated.propertyId, req.body.propertyStatus, 'vente');
   await audit(req, 'modification', 'Sale', id, updated.reference);
@@ -663,7 +758,59 @@ router.delete('/sales/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-function buildRentalWhere(q: string, status: string, clientId: string, projectId = '') {
+type RentPay = 'retard' | 'paye' | 'a_payer';
+
+function monthIndex(d: Date) {
+  return d.getFullYear() * 12 + d.getMonth();
+}
+
+function rentPayFromDates(firstUnpaid: Date | null, leaseStart: Date | null): RentPay {
+  const now = monthIndex(new Date());
+  const due = firstUnpaid || leaseStart;
+  if (!due) return 'paye';
+  const month = monthIndex(due);
+  if (month < now) return 'retard';
+  if (month === now) return 'a_payer';
+  return 'paye';
+}
+
+async function rentPayIndex() {
+  const [schedules, rentals] = await Promise.all([
+    prisma.paymentSchedule.findMany({
+      where: { rentalId: { not: null } },
+      select: { rentalId: true, dueDate: true, label: true, status: true },
+      orderBy: { dueDate: 'asc' },
+    }),
+    prisma.rental.findMany({ select: { id: true, startDate: true, contractDate: true } }),
+  ]);
+  const grouped = new Map<string, { dueDate: Date; label: string | null; status: string }[]>();
+  for (const row of schedules) {
+    if (!row.rentalId) continue;
+    const list = grouped.get(row.rentalId) || [];
+    list.push({ dueDate: new Date(row.dueDate), label: row.label, status: row.status });
+    grouped.set(row.rentalId, list);
+  }
+  const byId = new Map<string, { status: RentPay; dueDate: string | null; label: string | null }>();
+  const ids: Record<RentPay, string[]> = { retard: [], paye: [], a_payer: [] };
+  for (const rental of rentals) {
+    const months = grouped.get(rental.id) || [];
+    const open = months.find((month) => month.status !== 'paid');
+    const status = rentPayFromDates(
+      open?.dueDate || null,
+      months.length ? null : (rental.startDate || rental.contractDate),
+    );
+    byId.set(rental.id, {
+      status,
+      dueDate: open ? open.dueDate.toISOString() : null,
+      label: open?.label || null,
+    });
+    ids[status].push(rental.id);
+  }
+  return { byId, ids };
+}
+
+async function buildRentalWhere(q: string, status: string, clientId: string, projectId = '', pay = '') {
+  const { nameHits, partyOfClient } = await rentalSearchExtras(q, clientId);
   return {
     AND: [
       q
@@ -675,12 +822,18 @@ function buildRentalWhere(q: string, status: string, clientId: string, projectId
               { client: { reference: { contains: q } } },
               { property: { name: { contains: q } } },
               { property: { reference: { contains: q } } },
+              ...(nameHits.length ? [{ id: { in: nameHits } }] : []),
             ],
           }
         : {},
       status ? { status } : {},
-      clientId ? { clientId } : {},
+      clientId
+        ? { OR: [{ clientId }, ...(partyOfClient.length ? [{ id: { in: partyOfClient } }] : [])] }
+        : {},
       projectId ? { property: { projectId } } : {},
+      pay === 'retard' || pay === 'paye' || pay === 'a_payer'
+        ? { id: { in: (await rentPayIndex()).ids[pay as RentPay] } }
+        : {},
     ],
   };
 }
@@ -691,21 +844,25 @@ function rentalListFilters(req: { query: Record<string, unknown> }) {
     status: String(req.query.status || ''),
     clientId: String(req.query.clientId || ''),
     projectId: String(req.query.projectId || ''),
+    pay: String(req.query.pay || ''),
   };
 }
 
+const rentPayLabel: Record<RentPay, string> = { paye: 'Payé', retard: 'En retard', a_payer: 'À payer' };
+
 router.get('/rentals/export/csv', async (req, res) => {
-  const { q, status, clientId, projectId } = rentalListFilters(req);
-  const where = buildRentalWhere(q, status, clientId, projectId);
-  const rentals = await prisma.rental.findMany({
+  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
+  const where = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const rentals = await attachCoClients('Rental', await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
     orderBy: { createdAt: 'desc' },
-  });
-  const header = 'Référence;Locataire;Bien;Mensualité;Payé;Reste;Statut;Date contrat;Description';
+  }));
+  const payIndex = await rentPayIndex();
+  const header = 'Référence;Locataire;Bien;Mensualité;Payé;Reste;Statut;Loyer;Date contrat;Description';
   const rows = rentals.map(
     (r) =>
-      `${r.reference};${r.client.firstName} ${r.client.lastName};${r.property.name};${r.monthlyRent};${r.totalPaid};${r.remaining};${r.status};${r.contractDate ? r.contractDate.toISOString().slice(0, 10) : ''};${(r.description || '').replace(/;/g, ',')}`
+      `${r.reference};${formatPartyNames(r.client, r.coClients)};${r.property.name};${r.monthlyRent};${r.totalPaid};${r.remaining};${r.status};${rentPayLabel[payIndex.byId.get(r.id)?.status || 'paye']};${r.contractDate ? r.contractDate.toISOString().slice(0, 10) : ''};${(r.description || '').replace(/;/g, ',')}`
   );
   const csv = [header, ...rows].join('\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -714,39 +871,42 @@ router.get('/rentals/export/csv', async (req, res) => {
 });
 
 router.get('/rentals/export/xlsx', async (req, res) => {
-  const { q, status, clientId, projectId } = rentalListFilters(req);
-  const where = buildRentalWhere(q, status, clientId, projectId);
-  const rentals = await prisma.rental.findMany({
+  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
+  const where = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const rentals = await attachCoClients('Rental', await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
     orderBy: { createdAt: 'desc' },
-  });
+  }));
+  const payIndex = await rentPayIndex();
   sendExcel(
     res,
     'locations-gic.xlsx',
     'Locations',
     rentals.map((r) => ({
       Référence: r.reference,
-      Locataire: `${r.client.firstName} ${r.client.lastName}`,
+      Locataire: `${formatPartyNames(r.client, r.coClients)}`,
       Bien: r.property.name,
       Mensualité: r.monthlyRent,
       Payé: r.totalPaid,
       Reste: r.remaining,
       Statut: r.status,
+      Loyer: rentPayLabel[payIndex.byId.get(r.id)?.status || 'paye'],
       'Date contrat': r.contractDate ? r.contractDate.toISOString().slice(0, 10) : '',
     }))
   );
 });
 
 router.get('/rentals/export/pdf', async (req, res) => {
-  const { q, status, clientId, projectId } = rentalListFilters(req);
-  const where = buildRentalWhere(q, status, clientId, projectId);
-  const rentals = await prisma.rental.findMany({
+  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
+  const where = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const rentals = await attachCoClients('Rental', await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
     orderBy: { createdAt: 'desc' },
     take: 200,
-  });
+  }));
+  const payIndex = await rentPayIndex();
   await sendPdfTable(
     res,
     'locations-gic.pdf',
@@ -757,25 +917,29 @@ router.get('/rentals/export/pdf', async (req, res) => {
       { key: 'bien', label: 'Bien' },
       { key: 'loyer', label: 'Mensualité' },
       { key: 'statut', label: 'Statut' },
+      { key: 'loyerStatut', label: 'Loyer' },
     ],
     rentals.map((r) => ({
       ref: r.reference,
-      client: `${r.client.firstName} ${r.client.lastName}`,
+      client: `${formatPartyNames(r.client, r.coClients)}`,
       bien: r.property.name,
       loyer: r.monthlyRent,
       statut: r.status,
+      loyerStatut: rentPayLabel[payIndex.byId.get(r.id)?.status || 'paye'],
     }))
   );
 });
 
 router.get('/rentals/stats', async (req, res) => {
-  const { q, status, clientId, projectId } = rentalListFilters(req);
-  const baseWhere = buildRentalWhere(q, status, clientId, projectId);
+  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
+  const baseWhere = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const lateWhere = await buildRentalWhere(q, status, clientId, projectId, 'retard');
   const activeFilter = { AND: [baseWhere, { status: 'active' }] };
-  const [total, actives, terminees, agg] = await Promise.all([
+  const [total, actives, terminees, enRetard, agg] = await Promise.all([
     prisma.rental.count({ where: baseWhere }),
     prisma.rental.count({ where: activeFilter }),
     prisma.rental.count({ where: { AND: [baseWhere, { status: 'terminée' }] } }),
+    prisma.rental.count({ where: lateWhere }),
     prisma.rental.aggregate({
       _sum: { totalPaid: true, remaining: true, monthlyRent: true },
       where: status ? baseWhere : activeFilter,
@@ -785,6 +949,7 @@ router.get('/rentals/stats', async (req, res) => {
     total,
     actives,
     terminees,
+    enRetard,
     encaisse: agg._sum.totalPaid || 0,
     reste: agg._sum.remaining || 0,
     mensualites: agg._sum.monthlyRent || 0,
@@ -792,7 +957,7 @@ router.get('/rentals/stats', async (req, res) => {
 });
 
 router.get('/rentals', async (req, res) => {
-  const { q, status, clientId, projectId } = rentalListFilters(req);
+  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
   const sort = String(req.query.sort || 'createdAt');
   const order = req.query.order === 'asc' ? 'asc' : 'desc';
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -805,8 +970,8 @@ router.get('/rentals', async (req, res) => {
         ? { monthlyRent: order as 'asc' | 'desc' }
         : { createdAt: order as 'asc' | 'desc' };
 
-  const where = buildRentalWhere(q, status, clientId, projectId);
-  const [items, total] = await Promise.all([
+  const where = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const [items, total, payIndex] = await Promise.all([
     prisma.rental.findMany({
       where,
       include: {
@@ -819,8 +984,18 @@ router.get('/rentals', async (req, res) => {
       take: limit,
     }),
     prisma.rental.count({ where }),
+    rentPayIndex(),
   ]);
-  res.json({ items, total, page, limit, pages: Math.ceil(total / limit) || 1 });
+  const withPay = items.map((item) => {
+    const rentPay = payIndex.byId.get(item.id);
+    return {
+      ...item,
+      rentPayStatus: rentPay?.status || 'paye',
+      rentDueDate: rentPay?.dueDate || null,
+      rentDueLabel: rentPay?.label || null,
+    };
+  });
+  res.json({ items: await attachCoClients('Rental', withPay), total, page, limit, pages: Math.ceil(total / limit) || 1 });
 });
 
 router.post('/rentals', async (req, res) => {
@@ -828,6 +1003,8 @@ router.post('/rentals', async (req, res) => {
   if (!clientId || !propertyId || monthlyRent == null) {
     return res.status(400).json({ message: 'Client, bien et mensualité obligatoires' });
   }
+  const parties = await resolvePartyIds(req.body.coClientIds, clientId);
+  if ('error' in parties) return res.status(400).json({ message: parties.error });
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   if (!property) return res.status(404).json({ message: 'Bien introuvable' });
   const activeRental = await prisma.rental.findFirst({
@@ -879,6 +1056,8 @@ router.post('/rentals', async (req, res) => {
     });
     return created;
   });
+  await savePartyIds('Rental', rental.id, parties.ids);
+  await markParties(parties.ids, 'tenant');
   try {
     await prisma.$executeRawUnsafe('UPDATE Property SET type = ? WHERE id = ?', 'location', propertyId);
   } catch { /* type column */ }
@@ -926,8 +1105,12 @@ router.get('/rentals/:id/history', async (req, res) => {
 });
 
 router.get('/rentals/:id', async (req, res) => {
+  const rentalId = String(req.params.id);
+  const head = await prisma.rental.findUnique({ where: { id: rentalId }, select: { id: true, status: true } });
+  if (!head) return res.status(404).json({ message: 'Location introuvable' });
+  if (head.status !== 'terminée') await syncRentalMonthSchedules(rentalId);
   const rental = await prisma.rental.findUnique({
-    where: { id: String(req.params.id) },
+    where: { id: rentalId },
     include: {
       client: true,
       property: {
@@ -957,7 +1140,8 @@ router.get('/rentals/:id', async (req, res) => {
     },
   });
   if (!rental) return res.status(404).json({ message: 'Location introuvable' });
-  res.json(rental);
+  const [enriched] = await attachCoClients('Rental', [rental]);
+  res.json(enriched);
 });
 
 router.get('/rentals/:id/schedules', async (req, res) => {
@@ -1022,7 +1206,6 @@ router.post('/rentals/:id/schedules/generate', async (req, res) => {
     startDate,
     endDate: effectiveEnd,
     monthlyRent: rental.monthlyRent,
-    horizonMonths: count || 6,
   });
   await audit(req, 'génération', 'PaymentSchedule', rentalId, `${items.length} mois de loyer`);
   res.status(201).json(items);
@@ -1076,7 +1259,7 @@ async function assertScheduleOrder(
   return { error: null, siblings, idx };
 }
 
-router.post('/schedules/:id/advance', async (req, res) => {
+router.post('/schedules/:id/advance', upload.single('proof'), async (req, res) => {
   const id = String(req.params.id);
   const schedule = await prisma.paymentSchedule.findUnique({
     where: { id },
@@ -1115,8 +1298,23 @@ router.post('/schedules/:id/advance', async (req, res) => {
   }
 
   const operationType = String(req.body.operationType || 'especes');
-  const payerName = req.body.payerName != null ? String(req.body.payerName) : null;
-  const bank = req.body.bank != null ? String(req.body.bank) : null;
+  const payerName = req.body.payerName != null && String(req.body.payerName).trim()
+    ? String(req.body.payerName).trim()
+    : null;
+  const bank = req.body.bank != null && String(req.body.bank).trim()
+    ? String(req.body.bank).trim()
+    : null;
+  const operationNo = req.body.operationNo != null && String(req.body.operationNo).trim()
+    ? String(req.body.operationNo).trim()
+    : null;
+  const internalRef = req.body.internalRef != null && String(req.body.internalRef).trim()
+    ? String(req.body.internalRef).trim()
+    : null;
+  try {
+    await assertUniquePaymentRefs({ internalRef, operationNo });
+  } catch (e) {
+    return res.status(400).json({ message: e instanceof Error ? e.message : 'Doublon détecté' });
+  }
   const receiptNo = await nextReference('REC');
   const payAmount = Math.min(amount, reste);
   const created = await prisma.$transaction(async (tx) => {
@@ -1133,6 +1331,9 @@ router.post('/schedules/:id/advance', async (req, res) => {
         operationType,
         payerName,
         bank,
+        operationNo,
+        internalRef,
+        proofFile: req.file ? `/uploads/${req.file.filename}` : null,
         date: req.body.date ? new Date(String(req.body.date)) : new Date(),
       },
     });
@@ -1295,8 +1496,10 @@ router.put('/schedules/:id', async (req, res) => {
     if (req.body.status === 'pending') data.paidAt = null;
   }
   const item = await prisma.paymentSchedule.update({ where: { id }, data });
+  const kind = req.body.kind !== undefined ? scheduleKindOf(req.body.kind) : undefined;
+  if (kind !== undefined && item.saleId) await saveScheduleKind(id, kind);
   if (item.rentalId) await recalculateRentalBalances(item.rentalId);
-  res.json(item);
+  res.json(kind !== undefined ? { ...item, kind } : item);
 });
 
 router.delete('/schedules/:id', async (req, res) => {
@@ -1329,6 +1532,12 @@ router.put('/rentals/:id', async (req, res) => {
   if (req.body.landlordLegalizationNo !== undefined) data.landlordLegalizationNo = req.body.landlordLegalizationNo || null;
   if (req.body.tenantSignatureDate !== undefined) data.tenantSignatureDate = req.body.tenantSignatureDate || null;
   if (req.body.tenantLegalizationNo !== undefined) data.tenantLegalizationNo = req.body.tenantLegalizationNo || null;
+  if (req.body.coClientIds !== undefined) {
+    const parties = await resolvePartyIds(req.body.coClientIds, rental.clientId);
+    if ('error' in parties) return res.status(400).json({ message: parties.error });
+    await savePartyIds('Rental', id, parties.ids);
+    await markParties(parties.ids, 'tenant');
+  }
   const updated = await prisma.rental.update({ where: { id }, data });
   await applyPropertyOccupancy(updated.propertyId, req.body.propertyStatus, 'location');
   if (
@@ -1805,6 +2014,20 @@ router.post('/payments', upload.single('proof'), async (req, res) => {
       return res.status(400).json({
         message: `Le montant dépasse le reste à payer (${Number(sale.remaining).toLocaleString('fr-MA')} MAD)`,
       });
+    }
+    if (nature === 'complement_avance') {
+      const already = await prisma.payment.aggregate({
+        where: { saleId, OR: [
+          { nature: { in: ['acompte', 'Acompte', 'Avance', 'avance', 'complement_avance'] } },
+        ] },
+        _sum: { amount: true },
+      });
+      const gap = Math.max(0, Number(sale.advance || 0) - Number(already._sum.amount || 0));
+      if (Number(amount) > gap + 0.01) {
+        return res.status(400).json({
+          message: `Le complément dépasse le reste de l'avance (${gap.toLocaleString('fr-MA')} MAD)`,
+        });
+      }
     }
   }
   if (rentalId) {

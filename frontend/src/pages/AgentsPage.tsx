@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { AgentFormFields, emptyAgentForm, agentToForm, type AgentFormData } from '../components/AgentFormFields';
+import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import MacAvatar from '../components/MacAvatar';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -144,19 +145,19 @@ export default function AgentsPage() {
     e.preventDefault();
     setError('');
     try {
+      const fields = omitPhotoFields(form);
       const body = {
-        ...form,
-        email: form.email.trim() || null,
-        phone1: form.phone1.trim() || null,
-        phone2: form.phone2.trim() || null,
-        address: form.address.trim() || null,
-        remark: form.remark.trim() || null,
+        ...fields,
+        email: fields.email.trim() || null,
+        phone1: fields.phone1.trim() || null,
+        phone2: fields.phone2.trim() || null,
+        address: fields.address.trim() || null,
+        remark: fields.remark.trim() || null,
       };
-      if (editId) {
-        await api(`/agents/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await api('/agents', { method: 'POST', body: JSON.stringify(body) });
-      }
+      const saved = editId
+        ? await api<{ id: string }>(`/agents/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api<{ id: string }>('/agents', { method: 'POST', body: JSON.stringify(body) });
+      await uploadEntityPhoto(`/agents/${saved.id}/photo`, form.photoFile);
       setOpen(false);
       load(page);
     } catch (err) {

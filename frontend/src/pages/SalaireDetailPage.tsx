@@ -65,11 +65,11 @@ export default function SalaireDetailPage() {
       <h2>${worker.firstName} ${worker.lastName}</h2>
       <p>Période : ${dateFrom} → ${dateTo}</p>
       <p>Journées : ${s.totalDays.toFixed(2)} · Salaire/j : ${formatMad(s.dailySalary)}</p>
-      <p>Brut : ${formatMad(s.brut)} · Primes : ${formatMad(s.bonuses)} · Avances : −${formatMad(s.advances)}</p>
+      <p>Brut : ${formatMad(s.brut)} · Heures sup : ${formatMad(s.bonuses)} · Avances : −${formatMad(s.advances)}</p>
       <p><b>Net : ${formatMad(s.net)}</b></p>
       <h3>Pointages validés (${detail.pointages?.length || 0})</h3>
       <table border="1" cellpadding="4" style="border-collapse:collapse;width:100%">
-        <tr><th>Date</th><th>Chantier</th><th>Total j.</th><th>Avance</th><th>Prime</th></tr>
+        <tr><th>Date</th><th>Chantier</th><th>Total j.</th><th>Avance</th><th>Heure sup</th></tr>
         ${(detail.pointages || []).map((p: { date: string; chantier?: { name: string }; totalDay: number; advance: number; bonus: number }) => `<tr>
           <td>${formatDate(p.date)}</td><td>${p.chantier?.name || '—'}</td><td>${p.totalDay}</td><td>${p.advance}</td><td>${p.bonus}</td>
         </tr>`).join('')}

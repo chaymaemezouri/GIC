@@ -267,7 +267,7 @@ Design premium, sidebar icônes macOS, navbar menus déroulants groupés.
 - **Module Référentiels complet** : KPI, pagination, filtres catégorie/statut, export CSV, CRUD avec audit
 - **Module Engins complet** : KPI parc/missions/alertes, 3 onglets, pagination, export CSV, fiche 360°
 - **Module Salaires complet** : KPI masse brute/nette, filtres période, pagination, export CSV, fiche détail par ouvrier
-- **Formule GIC** : Net = (journées validées × salaire/j) + primes − avances
+- **Formule GIC** : Net = (journées validées × salaire/j) + heures sup − avances
 - **Module Pointage complet** : KPI jour/période, saisie journalière, historique paginé, export CSV
 - **Validation pointage** : par ouvrier ou journée entière, statuts brouillon/validé
 - **Fiche ouvrier 360°** : Infos, Affectations, Pointages, Salaire calculé, Historique

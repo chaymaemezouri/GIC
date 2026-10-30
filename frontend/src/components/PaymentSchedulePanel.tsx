@@ -2,7 +2,12 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Calendar, Check, Circle, Plus, Trash2, Wand2 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
-import { api, formatDate, formatMad } from '../lib/api';
+import { api, formatDate, formatMad, uploadForm } from '../lib/api';
+import { fileUrl } from '../lib/photoUrl';
+import { DocumentFileActions } from './DocumentScanner';
+import { printPaymentReceipt } from '../lib/printPayment';
+import { isBankPaymentMode, paymentModeLabel, payerRelationLabel, parsePayerName } from '../lib/paymentMode';
+import { PaymentModeFields } from './PaymentModeFields';
 import { Btn, Card, Input, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th } from './ui';
 
 type SchedulePayment = {
@@ -11,6 +16,11 @@ type SchedulePayment = {
   date: string;
   operationType?: string | null;
   receiptNo?: string;
+  proofFile?: string | null;
+  bank?: string | null;
+  operationNo?: string | null;
+  internalRef?: string | null;
+  payerName?: string | null;
 };
 
 type Schedule = {
@@ -18,6 +28,7 @@ type Schedule = {
   dueDate: string;
   amount: number;
   label?: string | null;
+  kind?: string | null;
   status: string;
   paidAt?: string | null;
   remark?: string | null;
@@ -65,8 +76,9 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
   const [selected, setSelected] = useState<Schedule | null>(null);
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [payMode, setPayMode] = useState('especes');
-  const [form, setForm] = useState({ dueDate: '', amount: '', label: '', remark: '' });
-  const [genForm, setGenForm] = useState({ count: '12', startDate: new Date().toISOString().slice(0, 10) });
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [form, setForm] = useState({ dueDate: '', amount: '', label: '', remark: '', kind: 'versement' });
+  const [genForm, setGenForm] = useState({ count: '12', startDate: new Date().toISOString().slice(0, 10), kind: 'mensuel' });
 
   const base = `/transactions/${entityType}/${entityId}/schedules`;
   const cardMode = entityType === 'sales';
@@ -91,6 +103,15 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
   const overdueCount = sorted.filter(isOverdue).length;
   const paidTotal = sorted.reduce((a, s) => a + paidOf(s), 0);
   const totalPending = sorted.reduce((a, s) => a + resteOf(s), 0);
+
+  function kindLabel(kind?: string | null) {
+    if (kind === 'mensuel') return t('fields.scheduleKindMonthly');
+    if (kind === 'trimestriel') return t('fields.scheduleKindQuarterly');
+    if (kind === 'semestriel') return t('fields.scheduleKindSemiannual');
+    if (kind === 'annuel') return t('fields.scheduleKindAnnual');
+    if (kind === 'versement') return t('fields.scheduleKindInstallment');
+    return entityType === 'sales' ? t('fields.scheduleKindInstallment') : '';
+  }
 
   function monthTitle(dueDate: string, label?: string | null) {
     if (label && label.trim()) return label.trim();
@@ -125,7 +146,7 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
     try {
       await api(base, { method: 'POST', body: JSON.stringify(form) });
       setAddOpen(false);
-      setForm({ dueDate: '', amount: '', label: '', remark: '' });
+      setForm({ dueDate: '', amount: '', label: '', remark: '', kind: 'versement' });
       onReload();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -137,7 +158,11 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
     try {
       await api(`${base}/generate`, {
         method: 'POST',
-        body: JSON.stringify({ count: Number(genForm.count), startDate: genForm.startDate }),
+        body: JSON.stringify({
+          count: Number(genForm.count),
+          startDate: genForm.startDate,
+          ...(entityType === 'sales' ? { kind: genForm.kind } : {}),
+        }),
       });
       setGenOpen(false);
       onReload();
@@ -162,7 +187,24 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
     setError('');
     setSelected(s);
     setPayMode('especes');
+    setProofFile(null);
     setAdvanceAmount(resteOf(s) > 0 ? String(resteOf(s)) : '');
+  }
+
+  async function postSchedulePayment(scheduleId: string, amount: number) {
+    if (proofFile) {
+      const fd = new FormData();
+      fd.append('amount', String(amount));
+      fd.append('operationType', payMode);
+      fd.append('proof', proofFile);
+      await uploadForm(`/transactions/schedules/${scheduleId}/advance`, fd);
+      setProofFile(null);
+      return;
+    }
+    await api(`/transactions/schedules/${scheduleId}/advance`, {
+      method: 'POST',
+      body: JSON.stringify({ amount, operationType: payMode }),
+    });
   }
 
   async function addAdvance(e: FormEvent) {
@@ -174,10 +216,7 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
     setBusyId(selectedLive.id);
     setError('');
     try {
-      await api(`/transactions/schedules/${selectedLive.id}/advance`, {
-        method: 'POST',
-        body: JSON.stringify({ amount, operationType: payMode }),
-      });
+      await postSchedulePayment(selectedLive.id, amount);
       onReload();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -192,10 +231,7 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
     setBusyId(selectedLive.id);
     setError('');
     try {
-      await api(`/transactions/schedules/${selectedLive.id}/advance`, {
-        method: 'POST',
-        body: JSON.stringify({ amount: selectedReste, operationType: payMode }),
-      });
+      await postSchedulePayment(selectedLive.id, selectedReste);
       onReload();
       setSelected(null);
     } catch (err) {
@@ -260,6 +296,15 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
       >
         <form id="sched-add" onSubmit={addSchedule} className="grid gap-3">
           <Input label={`${t('fields.dueDate')} *`} type="date" required value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+          {entityType === 'sales' && (
+            <Select label={t('fields.scheduleKind')} value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+              <option value="versement">{t('fields.scheduleKindInstallment')}</option>
+              <option value="mensuel">{t('fields.scheduleKindMonthly')}</option>
+              <option value="trimestriel">{t('fields.scheduleKindQuarterly')}</option>
+              <option value="semestriel">{t('fields.scheduleKindSemiannual')}</option>
+              <option value="annuel">{t('fields.scheduleKindAnnual')}</option>
+            </Select>
+          )}
           <Input label={`${t('fields.amountMad')} *`} type="number" required min="0" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
           <Input label={t('fields.label')} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
           <Input label={t('fields.remark')} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
@@ -275,6 +320,15 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
               ? t('msg.scheduleGenSalesHint')
               : t('msg.scheduleGenRentalHint')}
           </p>
+          {entityType === 'sales' && (
+            <Select label={t('fields.scheduleKind')} value={genForm.kind} onChange={(e) => setGenForm({ ...genForm, kind: e.target.value })}>
+              <option value="mensuel">{t('fields.scheduleKindMonthly')}</option>
+              <option value="trimestriel">{t('fields.scheduleKindQuarterly')}</option>
+              <option value="semestriel">{t('fields.scheduleKindSemiannual')}</option>
+              <option value="annuel">{t('fields.scheduleKindAnnual')}</option>
+              <option value="versement">{t('fields.scheduleKindInstallment')}</option>
+            </Select>
+          )}
           <Input label={t('fields.installmentCount')} type="number" min="1" max="60" value={genForm.count} onChange={(e) => setGenForm({ ...genForm, count: e.target.value })} />
           <Input label={t('fields.startDate')} type="date" value={genForm.startDate} onChange={(e) => setGenForm({ ...genForm, startDate: e.target.value })} />
         </form>
@@ -397,6 +451,10 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
                     )}
                   </div>
                   <p className="text-[12px] font-semibold text-gic-ink leading-tight">{monthTitle(s.dueDate, s.label)}</p>
+                  <p className="text-[11px] text-gic-muted mt-0.5">{formatDate(s.dueDate)}</p>
+                  {kindLabel(s.kind) && (
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-gic-ink mt-0.5">{kindLabel(s.kind)}</p>
+                  )}
                   <p className={`text-[11px] mt-1 tabular-nums ${fullyPaid ? 'text-gic-emerald' : partial ? 'text-[#007aff]' : 'text-gic-muted'}`}>
                     {fullyPaid ? formatMad(s.amount) : partial ? `${t('rental.remaining')} ${formatMad(resteOf(s))}` : formatMad(s.amount)}
                   </p>
@@ -431,6 +489,18 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
         >
           {selectedLive && (
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-gic-border px-3 py-2">
+                  <p className="text-[10px] uppercase text-gic-muted">{t('fields.dueDate')}</p>
+                  <p className="text-[13px] font-semibold">{formatDate(selectedLive.dueDate)}</p>
+                </div>
+                {kindLabel(selectedLive.kind) && (
+                  <div className="rounded-lg border border-gic-border px-3 py-2">
+                    <p className="text-[10px] uppercase text-gic-muted">{t('fields.scheduleKind')}</p>
+                    <p className="text-[13px] font-semibold">{kindLabel(selectedLive.kind)}</p>
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-3 gap-2">
                 <div className="rounded-lg border border-gic-border px-3 py-2">
                   <p className="text-[10px] uppercase text-gic-muted">{t('fields.amount')}</p>
@@ -458,6 +528,12 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
                           {formatDate(pay.date)}
                           {pay.operationType ? ` · ${pay.operationType}` : ''}
                           {pay.receiptNo ? ` · ${pay.receiptNo}` : ''}
+                          {pay.proofFile ? (
+                            <>
+                              {' · '}
+                              <a href={fileUrl(pay.proofFile)} className="text-[#007aff] hover:opacity-70">{t('common.view')}</a>
+                            </>
+                          ) : null}
                         </span>
                         <span className="flex items-center gap-1">
                           <span className="font-medium">{formatMad(pay.amount)}</span>
@@ -488,6 +564,14 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
                     <option value="virement">{t('fields.modeTransfer')}</option>
                     <option value="cheque">{t('fields.modeCheck')}</option>
                   </Select>
+                  <div className="sm:col-span-3">
+                    <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</p>
+                    <DocumentFileActions
+                      accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+                    />
+                    {proofFile && <p className="mt-1 text-[11px] text-gic-ink">{proofFile.name}</p>}
+                  </div>
                   <div className="flex items-end">
                     <Btn type="submit" disabled={!!busyId} className="w-full">{t('rental.addAdvance')}</Btn>
                   </div>

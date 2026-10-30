@@ -76,12 +76,6 @@ function num(v: string) {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-function rateOrNull(v: string) {
-  if (v === '' || v == null) return null;
-  const n = Number(v);
-  return Number.isNaN(n) || n <= 0 ? null : n;
-}
-
 function cellClass(locked: boolean, width = 'w-16') {
   return `${width} rounded-lg border px-2 py-1 text-[11px] ${
     locked ? 'border-gic-border/60 bg-[#f5f5f7] text-gic-muted cursor-not-allowed' : 'border-gic-border bg-white'
@@ -232,7 +226,7 @@ export default function PointageWorkerSummary({
 
   function lineWage(l: Line, e = rowFor(l)) {
     const days = num(e.days);
-    const rate = rateOrNull(e.dayRate) ?? l.workforce.dailySalary ?? 0;
+    const rate = l.workforce.dailySalary || 0;
     return { days, rate, sum: Math.round(days * rate * 100) / 100 };
   }
 
@@ -324,7 +318,6 @@ export default function PointageWorkerSummary({
       method: 'PUT',
       body: JSON.stringify({
         dayValue: num(e.days),
-        dayRate: rateOrNull(e.dayRate),
         advance: num(e.advance),
         bonus: num(e.bonus),
         ...(validatedValue != null ? { validated: validatedValue } : {}),
@@ -416,7 +409,7 @@ export default function PointageWorkerSummary({
       const e = rowFor(l);
       const d = num(e.days);
       days += d;
-      brut += d * (rateOrNull(e.dayRate) ?? l.workforce.dailySalary ?? 0);
+      brut += d * (l.workforce.dailySalary || 0);
       advances += num(e.advance);
       bonuses += num(e.bonus);
     }
@@ -473,7 +466,7 @@ export default function PointageWorkerSummary({
   function printLines() {
     if (!selected) return;
     const days = (l: Line) => num(rowFor(l).days);
-    const rate = (l: Line) => rateOrNull(rowFor(l).dayRate) ?? l.workforce.dailySalary ?? 0;
+    const rate = (l: Line) => l.workforce.dailySalary || 0;
     const advance = (l: Line) => num(rowFor(l).advance);
     const bonus = (l: Line) => num(rowFor(l).bonus);
     const sum = (list: Line[], fn: (l: Line) => number) => list.reduce((s, l) => s + fn(l), 0);
@@ -773,17 +766,7 @@ export default function PointageWorkerSummary({
                             onChange={(ev) => patch(l, { days: ev.target.value })}
                           />
                         </Td>
-                        <Td mac>
-                          <input
-                            className={cellClass(locked, 'w-20')}
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            readOnly={locked}
-                            value={e.dayRate}
-                            onChange={(ev) => patch(l, { dayRate: ev.target.value })}
-                          />
-                        </Td>
+                        <Td mac className="mac-table-muted">{formatMad(l.workforce.dailySalary || 0)}</Td>
                         <Td mac>
                           {(() => {
                             const wage = lineWage(l, e);

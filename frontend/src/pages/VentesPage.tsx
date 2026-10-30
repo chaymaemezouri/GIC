@@ -12,11 +12,13 @@ import {
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { SaleFormFields, emptySaleForm, saleFormToCreateBody, attachSaleCreateFiles, type SaleFormData } from '../components/SaleFormFields';
+import { PartyNames, partyLabel, type PartyPerson } from '../components/PartyNames';
 import { isBankPaymentMode } from '../lib/paymentMode';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { printSaleReceipt } from '../lib/printSale';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
+import { DocumentFileActions } from '../components/DocumentScanner';
 import { propertyDealOf } from '../lib/propertyDeal';
 
 type Sale = {
@@ -29,6 +31,7 @@ type Sale = {
   remaining: number;
   pending?: boolean;
   client: { id: string; firstName: string; lastName: string; reference: string };
+  coClients?: PartyPerson[];
   property: { id: string; name: string; reference: string };
   _count?: { schedules?: number };
 };
@@ -336,7 +339,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
       ],
       columns: [
         { label: t('columns.ref'), value: (s) => s.reference },
-        { label: t('columns.client'), value: (s) => `${s.client.firstName} ${s.client.lastName}` },
+        { label: t('columns.client'), value: (s) => partyLabel(s.client, s.coClients) },
         { label: t('columns.property'), value: (s) => s.property.name },
         { label: t('columns.netPrice'), value: (s) => formatMad(s.netPrice), align: 'right', total: (rows) => formatMad(rows.reduce((sum, s) => sum + Number(s.netPrice || 0), 0)) },
         { label: t('columns.paid'), value: (s) => formatMad(s.totalPaid), align: 'right', total: (rows) => formatMad(rows.reduce((sum, s) => sum + Number(s.totalPaid || 0), 0)) },
@@ -575,9 +578,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
                         {t('fields.selectClient')}
                       </button>
                     ) : (
-                      <Link to={`/clients/${s.client.id}`} className="hover:text-[#007aff]" onClick={(e) => e.stopPropagation()}>
-                        {s.client.firstName} {s.client.lastName}
-                      </Link>
+                      <PartyNames client={s.client} coClients={s.coClients} />
                     )}
                   </Td>
                   <Td mac className="mac-table-muted">
@@ -667,10 +668,8 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
           )}
           <div>
             <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</label>
-            <input
-              type="file"
+            <DocumentFileActions
               accept=".pdf,.jpg,.jpeg,.png,.webp"
-              className="block w-full text-[12px]"
               onChange={(e) => setPayForm({ ...payForm, proof: e.target.files?.[0] || null })}
             />
           </div>

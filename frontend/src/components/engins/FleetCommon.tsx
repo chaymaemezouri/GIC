@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, fetchChantierList, fetchEnginList, fetchWorkforceList, formatMad } from '../../lib/api';
 import {
   COST_CATEGORIES,
@@ -30,6 +30,12 @@ export function invalidateFleetRefs() {
 export function useFleetRefs() {
   const [engins, setEngins] = useState<EnginRef[]>([]);
   const [chantiers, setChantiers] = useState<ChantierRef[]>([]);
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => {
+    invalidateFleetRefs();
+    cachedAt = 0;
+    setVersion((n) => n + 1);
+  }, []);
   useEffect(() => {
     if (Date.now() - cachedAt > CACHE_TTL) {
       enginCache = null;
@@ -40,8 +46,8 @@ export function useFleetRefs() {
     chantierCache = chantierCache || fetchChantierList<ChantierRef>().catch(() => []);
     enginCache.then(setEngins);
     chantierCache.then(setChantiers);
-  }, []);
-  return { engins, chantiers };
+  }, [version]);
+  return { engins, chantiers, reload };
 }
 
 export function useTranches(chantierId?: string | null) {

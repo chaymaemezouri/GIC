@@ -12,6 +12,7 @@ import {
   parseExcelProjectRows,
 } from '../lib/importProjects.js';
 import { sendExcel } from '../lib/exportExcel.js';
+import { attachCoClients, decoratePropertyParties } from '../lib/dealParties.js';
 
 function buildPropertyWhere(q: string, status: string, projectId: string) {
   return {
@@ -335,7 +336,7 @@ router.get('/projects/:id/sales', async (req, res) => {
     },
     orderBy: { createdAt: 'desc' },
   });
-  res.json(sales);
+  res.json(await attachCoClients('Sale', sales));
 });
 
 router.get('/projects/:id/rentals', async (req, res) => {
@@ -348,7 +349,7 @@ router.get('/projects/:id/rentals', async (req, res) => {
     },
     orderBy: { createdAt: 'desc' },
   });
-  res.json(rentals);
+  res.json(await attachCoClients('Rental', rentals));
 });
 
 router.get('/projects/:id/documents', async (req, res) => {
@@ -909,7 +910,8 @@ router.get('/properties', async (req, res) => {
     prisma.property.count({ where }),
   ]);
   const types = await loadPropertyTypes(items.map((p) => p.id));
-  res.json({ items: withPropertyTypes(items, types), total, page, limit, pages: Math.ceil(total / limit) || 1 });
+  const withParties = await decoratePropertyParties(items);
+  res.json({ items: withPropertyTypes(withParties, types), total, page, limit, pages: Math.ceil(total / limit) || 1 });
 });
 
 router.get('/properties/:id/history', async (req, res) => {
@@ -943,7 +945,8 @@ router.get('/properties/:id', async (req, res) => {
   const types = await loadPropertyTypes([property.id]);
   const type = types.get(property.id) || propertyDealType((property as { type?: string }).type, property.status);
   const deal = type === 'location' ? 'location' as const : 'vente' as const;
-  res.json({ ...property, type, status: occupancyForDeal(deal, property.status) });
+  const [withParties] = await decoratePropertyParties([property]);
+  res.json({ ...withParties, type, status: occupancyForDeal(deal, property.status) });
 });
 
 async function ensurePropertyContract(

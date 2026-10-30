@@ -230,8 +230,8 @@ router.delete('/:id/clients/:clientId', async (req, res) => {
 router.post('/:id/photo', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Photo requise' });
   const ext = path.extname(req.file.originalname).toLowerCase();
-  if (!['.jpg', '.jpeg', '.png'].includes(ext)) {
-    return res.status(400).json({ message: 'Format photo : JPG ou PNG' });
+  if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
+    return res.status(400).json({ message: 'Format photo : JPG, PNG ou WebP' });
   }
   const photo = `/uploads/${req.file.filename}`;
   const agent = await prisma.agent.update({

@@ -5,6 +5,7 @@ import { api, fetchProjectList } from '../lib/api';
 import { occupancyForDeal, occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
 import { Input, Select } from './ui';
 import { ClientFormPicker } from './ClientFormPicker';
+import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 
 export type BienFormData = {
   name: string;
@@ -21,6 +22,8 @@ export type BienFormData = {
   titleNumber: string;
   description: string;
   contractualDesc: string;
+  photoFile: File | null;
+  photoUrl: string;
 };
 
 export function emptyBienForm(): BienFormData {
@@ -39,6 +42,7 @@ export function emptyBienForm(): BienFormData {
     titleNumber: '',
     description: '',
     contractualDesc: '',
+    ...emptyPhotoFields(),
   };
 }
 
@@ -59,6 +63,7 @@ export function bienToForm(p: Record<string, unknown>): BienFormData {
     titleNumber: String(p.titleNumber || ''),
     description: String(p.description || ''),
     contractualDesc: String(p.contractualDesc || ''),
+    ...photoFieldsFrom(p as { photo?: string | null }),
   };
 }
 
@@ -200,6 +205,7 @@ export function BienFormFields({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <FormPhotoField file={form.photoFile} photoUrl={form.photoUrl} onFile={(photoFile) => setForm({ ...form, photoFile })} />
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide">{t('fields.sectionIdentification')}</p>
       <Input className="sm:col-span-2" label={`${t('fields.nameDesignation')} *`} required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       <Input label={t('fields.city')} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />

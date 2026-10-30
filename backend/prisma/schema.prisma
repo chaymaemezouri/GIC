@@ -406,6 +406,8 @@ model Sale {
   /// avance | echeancier — mode de règlement choisi à la création
   paymentPlan       String   @default("avance")
   description       String?
+  /// Autres acheteurs, ids JSON (2 maximum), en plus du client principal
+  partyClientIds    String?
   status            String   @default("brouillon")
   resiliationMotif  String?
   resiliatedAt      DateTime?
@@ -439,6 +441,8 @@ model Rental {
   remaining         Float    @default(0)
   contractType      String?
   description       String?
+  /// Autres locataires, ids JSON (2 maximum), en plus du client principal
+  partyClientIds    String?
   status            String   @default("active")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -456,6 +460,7 @@ model PaymentSchedule {
   dueDate   DateTime
   amount    Float
   label     String?
+  kind      String?
   status    String    @default("pending")
   paidAt    DateTime?
   remark    String?
@@ -659,6 +664,11 @@ model Purchase {
   deliveryStatus String  @default("non_livre")
   remark        String?
   proofFile     String?
+  /// Contrôle du chef, distinct du cycle : valide | non_valide
+  chefReview       String?
+  chefReviewRemark String?
+  chefReviewedAt   DateTime?
+  chefReviewedBy   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   history       PurchaseHistory[]

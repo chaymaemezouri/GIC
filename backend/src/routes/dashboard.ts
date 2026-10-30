@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { ENGAGED_STATUSES, OPEN_STATUSES } from '../lib/purchaseWorkflow.js';
+import { attachCoClients } from '../lib/dealParties.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -262,7 +263,7 @@ router.get('/', async (req, res) => {
     },
     charts,
     recent: {
-      sales: recentSales,
+      sales: await attachCoClients('Sale', recentSales),
       clients: recentClients,
     },
     immobilier: {

@@ -8,6 +8,7 @@ import PortalLoginPage from './pages/PortalLoginPage';
 import ForbiddenPage from './pages/ForbiddenPage';
 import { FEATURE_FLAGS } from './lib/featureFlags';
 import { useI18n } from './i18n/I18nContext';
+import { PdfPreviewHost } from './components/PdfPreview';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ClientsPage = lazy(() => import('./pages/ClientsPage'));
@@ -78,6 +79,7 @@ const EntrepriseDetailPage = lazy(() => import('./pages/EntrepriseDetailPage'));
 const ReconnuDetailPage = lazy(() => import('./pages/ReconnuDetailPage'));
 const CaisseBureauPage = lazy(() => import('./pages/CaisseBureauPage'));
 const SupplierPortalPage = lazy(() => import('./pages/SupplierPortalPage'));
+const FilePreviewPage = lazy(() => import('./pages/FilePreviewPage'));
 
 function PageLoader() {
   const { t } = useI18n();
@@ -111,9 +113,11 @@ export default function App() {
     <AuthProvider>
       <DialogProvider>
         <BrowserRouter>
+        <PdfPreviewHost />
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/apercu" element={<FilePreviewPage />} />
             <Route path="/portal/login" element={<PortalLoginPage />} />
             <Route path="/portal" element={<SupplierPortalPage />} />
             <Route

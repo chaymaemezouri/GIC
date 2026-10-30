@@ -10,6 +10,7 @@ import { useI18n } from '../i18n/I18nContext';
 
 import { PaymentFormFields, paymentToForm, paymentFormToUpdateBody, paymentFormToFormData, type PaymentFormData } from '../components/PaymentFormFields';
 import { fileUrl } from '../lib/documentDisplay';
+import { FileInlinePreview } from '../components/PdfPreview';
 import { printPaymentReceipt } from '../lib/printPayment';
 
 type Tab = 'infos' | 'historique';
@@ -207,9 +208,12 @@ export default function PaiementDetailPage() {
                     label={t('fields.proof')}
                     value={
                       payment.proofFile ? (
-                        <a href={fileUrl(payment.proofFile)} target="_blank" rel="noreferrer" className="text-[#007aff] hover:opacity-70 inline-flex items-center gap-1">
-                          {t('fields.viewDownload')}
-                        </a>
+                        <span className="block space-y-2">
+                          <a href={fileUrl(payment.proofFile)} target="_blank" rel="noreferrer" className="text-[#007aff] hover:opacity-70 inline-flex items-center gap-1">
+                            {t('fields.viewDownload')}
+                          </a>
+                          <FileInlinePreview src={fileUrl(payment.proofFile)} />
+                        </span>
                       ) : '—'
                     }
                   />

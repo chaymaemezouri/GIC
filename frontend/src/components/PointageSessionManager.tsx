@@ -74,6 +74,8 @@ type Worker = {
 
 const DAY_STEP = 0.125;
 const HOURS_PER_DAY = 8;
+/** 0 → 1 jour, par pas de 1 h (0,125 j). */
+const DAY_OPTIONS = Array.from({ length: Math.round(1 / DAY_STEP) + 1 }, (_, i) => fmtDays(i * DAY_STEP));
 
 function todayIso() {
   const d = new Date();
@@ -117,15 +119,47 @@ function fmtDays(n: number) {
   return Number.isFinite(n) ? String(Math.round(n * 1000) / 1000) : '0';
 }
 
+function dayChoices(current: string) {
+  const value = fmtDays(num(current));
+  return DAY_OPTIONS.includes(value) ? DAY_OPTIONS : [...DAY_OPTIONS, value];
+}
+
+function DaySelect({
+  value,
+  locked,
+  onChange,
+  className,
+  ariaLabel,
+}: {
+  value: string;
+  locked?: boolean;
+  onChange: (value: string) => void;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  const selected = fmtDays(num(value));
+  return (
+    <select
+      className={className}
+      disabled={locked}
+      value={selected}
+      aria-label={ariaLabel}
+      onChange={(ev) => onChange(ev.target.value)}
+    >
+      {dayChoices(value).map((option) => (
+        <option key={option} value={option}>{option.replace('.', ',')}</option>
+      ))}
+    </select>
+  );
+}
+
 function num(v: string) {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-function rateOrNull(v: string) {
-  if (v === '' || v == null) return null;
-  const n = Number(v);
-  return Number.isNaN(n) || n <= 0 ? null : n;
+function workerRate(worker?: { dailySalary?: number | null } | null) {
+  return worker?.dailySalary || 0;
 }
 
 function cellClass(locked: boolean, width = 'w-16') {
@@ -492,7 +526,7 @@ export default function PointageSessionManager({
     for (const r of rows) {
       const e = rowFor(r.workforceId);
       const d = num(e.days);
-      const rate = rateOrNull(e.dayRate) ?? r.worker?.dailySalary ?? 0;
+      const rate = workerRate(r.worker);
       days += d;
       brut += d * rate;
       advances += num(e.advance);
@@ -564,7 +598,6 @@ export default function PointageSessionManager({
         return {
           workforceId: r.workforceId,
           dayValue: Math.min(1, num(e.days)),
-          dayRate: rateOrNull(e.dayRate),
           advance: num(e.advance),
           bonus: num(e.bonus),
           ...(validate ? { validated: true } : {}),
@@ -723,7 +756,7 @@ export default function PointageSessionManager({
   function printList() {
     if (!detail) return;
     const days = (r: SessionRow) => num(rowFor(r.workforceId).days);
-    const rate = (r: SessionRow) => rateOrNull(rowFor(r.workforceId).dayRate) ?? r.worker.dailySalary ?? 0;
+    const rate = (r: SessionRow) => workerRate(r.worker);
     const advance = (r: SessionRow) => num(rowFor(r.workforceId).advance);
     const bonus = (r: SessionRow) => num(rowFor(r.workforceId).bonus);
     const sum = (list: SessionRow[], fn: (r: SessionRow) => number) => list.reduce((s, r) => s + fn(r), 0);
@@ -986,14 +1019,11 @@ export default function PointageSessionManager({
       />
       <div className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-gic-muted">
         <span>{t('pointageMgmt.bulkApply')}</span>
-        <input
-          className="w-16 rounded-lg border border-gic-border bg-white px-2 py-1 text-[11px]"
-          type="number"
-          min={0}
-          max={1}
-          step={DAY_STEP}
+        <DaySelect
+          className="w-20 rounded-lg border border-gic-border bg-white px-2 py-1 text-[11px]"
           value={bulkDays}
-          onChange={(e) => setBulkDays(clampDays(e.target.value))}
+          ariaLabel={t('columns.days')}
+          onChange={(value) => setBulkDays(clampDays(value))}
         />
         <span>{t('columns.days')}</span>
         <Btn variant="secondary" className="!py-1" onClick={applyBulkDays} disabled={!detail}>{t('pointageMgmt.apply')}</Btn>
@@ -1119,7 +1149,7 @@ export default function PointageSessionManager({
                       const e = rowFor(r.workforceId);
                       const locked = !!r.line?.validated;
                       const d = num(e.days);
-                      const rate = rateOrNull(e.dayRate) ?? r.worker.dailySalary ?? 0;
+                      const rate = workerRate(r.worker);
                       const dirty = !!drafts[r.workforceId] || !r.line;
                       return (
                         <tr key={r.workforceId} className={locked ? 'bg-gic-emerald-soft/20' : dirty ? 'bg-[#007aff]/[0.03]' : ''}>
@@ -1131,30 +1161,16 @@ export default function PointageSessionManager({
                             {r.worker.category && <span className="block text-[10px] text-gic-muted">{r.worker.category}</span>}
                           </Td>
                           <Td mac>
-                            <input
-                              className={cellClass(locked)}
-                              type="number"
-                              min={0}
-                              max={1}
-                              step={DAY_STEP}
-                              readOnly={locked}
+                            <DaySelect
+                              className={cellClass(locked, 'w-20')}
+                              locked={locked}
                               value={e.days}
-                              onChange={(ev) => patchRow(r.workforceId, { days: ev.target.value })}
-                              title={t('msg.dayStepHint')}
+                              ariaLabel={t('columns.days')}
+                              onChange={(value) => patchRow(r.workforceId, { days: value })}
                             />
                           </Td>
                           <Td mac className="mac-table-muted">{(d * HOURS_PER_DAY).toFixed(1)} h</Td>
-                          <Td mac>
-                            <input
-                              className={cellClass(locked, 'w-20')}
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              readOnly={locked}
-                              value={e.dayRate}
-                              onChange={(ev) => patchRow(r.workforceId, { dayRate: ev.target.value })}
-                            />
-                          </Td>
+                          <Td mac className="mac-table-muted">{formatMad(rate)}</Td>
                           <Td mac className="mac-table-muted">{formatMad(d * rate)}</Td>
                           <Td mac>
                             {(() => {
