@@ -1,3 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma/index.js';
+import { extendWithWorkspace } from './workspace.js';
 
-export const prisma = new PrismaClient();
+export const prisma = extendWithWorkspace(new PrismaClient());

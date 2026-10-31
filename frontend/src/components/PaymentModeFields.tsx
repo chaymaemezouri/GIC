@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useI18n } from '../i18n/I18nContext';
 import {
   PAYMENT_MODE_OPTIONS,
@@ -28,11 +27,10 @@ export function PaymentModeFields({
 }) {
   const { t } = useI18n();
   const parsed = parsePayerName(values.payerName);
-  const [relation, setRelation] = useState(parsed.relation || 'client');
+  const relation = parsed.relation || 'client';
   const bank = isBankPaymentMode(values.operationType);
 
   function setRelationAndName(nextRelation: string, name: string) {
-    setRelation(nextRelation);
     onChange({ payerName: composePayerName(nextRelation, name) });
   }
 
@@ -77,11 +75,15 @@ export function PaymentModeFields({
         />
       )}
       {bank && (
-        <Input
-          label={t('fields.operationNo')}
-          value={values.operationNo || ''}
-          onChange={(e) => onChange({ operationNo: e.target.value })}
-        />
+        <div>
+          <Input
+            label={t('fields.operationNo')}
+            value={values.operationNo || ''}
+            onChange={(e) => onChange({ operationNo: e.target.value })}
+            onBlur={(e) => onChange({ operationNo: e.target.value.trim().replace(/\s+/g, ' ') })}
+          />
+          <p className="mt-1 text-[11px] text-gic-muted">{t('fields.operationNoUnique')}</p>
+        </div>
       )}
       {showInternalRef && (
         <Input

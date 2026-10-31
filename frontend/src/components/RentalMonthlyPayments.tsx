@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Check, Circle, Pencil, Printer, Trash2 } from 'lucide-react';
 import { api, formatDate, formatMad, uploadForm } from '../lib/api';
 import { fileUrl } from '../lib/photoUrl';
-import { DocumentFileActions } from './DocumentScanner';
+import { displayPayerName, paymentModeLabel } from '../lib/paymentMode';
 import { printPaymentReceipt, printPaymentsReceipt } from '../lib/printPayment';
-import { Btn, Input, MacActionBtn, Modal, Select } from './ui';
+import { DocumentFileActions } from './DocumentScanner';
+import { PaymentModeFields } from './PaymentModeFields';
+import { Btn, Input, MacActionBtn, Modal } from './ui';
 import { useI18n } from '../i18n/I18nContext';
 
 export type MonthPayment = {
@@ -14,6 +16,10 @@ export type MonthPayment = {
   operationType?: string | null;
   receiptNo?: string;
   proofFile?: string | null;
+  bank?: string | null;
+  operationNo?: string | null;
+  internalRef?: string | null;
+  payerName?: string | null;
 };
 
 export type MonthSchedule = {
@@ -71,6 +77,10 @@ export default function RentalMonthlyPayments({
   const [selected, setSelected] = useState<MonthSchedule | null>(null);
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [payMode, setPayMode] = useState('especes');
+  const [payBank, setPayBank] = useState('');
+  const [payOperationNo, setPayOperationNo] = useState('');
+  const [payInternalRef, setPayInternalRef] = useState('');
+  const [payPayerName, setPayPayerName] = useState('');
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [editPayId, setEditPayId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
@@ -135,14 +145,25 @@ export default function RentalMonthlyPayments({
     setError('');
     setSelected(s);
     setPayMode('especes');
+    setPayBank('');
+    setPayOperationNo('');
+    setPayInternalRef('');
+    setPayPayerName('');
     setAdvanceAmount(resteOf(s) > 0 ? String(resteOf(s)) : '');
   }
 
   async function postMonthPayment(scheduleId: string, amount: number) {
+    const extras = {
+      operationType: payMode,
+      payerName: payPayerName || undefined,
+      bank: payBank || undefined,
+      operationNo: payOperationNo || undefined,
+      internalRef: payInternalRef || undefined,
+    };
     if (proofFile) {
       const fd = new FormData();
       fd.append('amount', String(amount));
-      fd.append('operationType', payMode);
+      Object.entries(extras).forEach(([k, v]) => { if (v) fd.append(k, v); });
       fd.append('proof', proofFile);
       await uploadForm(`/transactions/schedules/${scheduleId}/advance`, fd);
       setProofFile(null);
@@ -150,7 +171,7 @@ export default function RentalMonthlyPayments({
     }
     await api(`/transactions/schedules/${scheduleId}/advance`, {
       method: 'POST',
-      body: JSON.stringify({ amount, operationType: payMode }),
+      body: JSON.stringify({ amount, ...extras }),
     });
   }
 
@@ -279,7 +300,12 @@ export default function RentalMonthlyPayments({
       date: pay.date,
       amount: pay.amount,
       operationType: pay.operationType,
+      bank: pay.bank,
+      operationNo: pay.operationNo,
+      internalRef: pay.internalRef,
+      payerName: displayPayerName(pay.payerName) === '—' ? '' : displayPayerName(pay.payerName),
       nature: month.label || monthTitle(month.dueDate),
+      scheduleLabel: month.label || monthTitle(month.dueDate),
       rental: {
         reference: receipt?.reference,
         client: { firstName: receipt?.firstName || '', lastName: receipt?.lastName || '' },
@@ -507,11 +533,13 @@ export default function RentalMonthlyPayments({
                             onChange={(e) => setEditAmount(e.target.value)}
                             required
                           />
-                          <Select label={t('fields.mode')} value={editMode} onChange={(e) => setEditMode(e.target.value)}>
-                            <option value="especes">{t('fields.modeCash')}</option>
-                            <option value="virement">{t('fields.modeTransfer')}</option>
-                            <option value="cheque">{t('fields.modeCheck')}</option>
-                          </Select>
+                          <PaymentModeFields
+                            values={{ operationType: editMode }}
+                            showInternalRef={false}
+                            onChange={(patch) => {
+                              if (patch.operationType != null) setEditMode(patch.operationType);
+                            }}
+                          />
                           <div className="flex gap-1 pb-0.5">
                             <Btn type="submit" disabled={!!busyId}>{t('common.save')}</Btn>
                             <Btn type="button" variant="secondary" onClick={() => setEditPayId(null)}>{t('common.cancel')}</Btn>
@@ -521,7 +549,11 @@ export default function RentalMonthlyPayments({
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-gic-muted">
                             {formatDate(pay.date)}
-                            {pay.operationType ? ` · ${pay.operationType}` : ''}
+                            {pay.operationType ? ` · ${paymentModeLabel(pay.operationType)}` : ''}
+                            {pay.bank ? ` · ${pay.bank}` : ''}
+                            {pay.operationNo ? ` · ${pay.operationNo}` : ''}
+                            {pay.internalRef ? ` · ${pay.internalRef}` : ''}
+                            {pay.payerName ? ` · ${displayPayerName(pay.payerName)}` : ''}
                             {pay.receiptNo ? ` · ${pay.receiptNo}` : ''}
                           </span>
                           <span className="flex items-center gap-1">
@@ -559,11 +591,24 @@ export default function RentalMonthlyPayments({
                   onChange={(e) => setAdvanceAmount(e.target.value)}
                   required
                 />
-                <Select label={t('fields.mode')} value={payMode} onChange={(e) => setPayMode(e.target.value)}>
-                  <option value="especes">{t('fields.modeCash')}</option>
-                  <option value="virement">{t('fields.modeTransfer')}</option>
-                  <option value="cheque">{t('fields.modeCheck')}</option>
-                </Select>
+                <div className="sm:col-span-3 grid gap-2 sm:grid-cols-2">
+                  <PaymentModeFields
+                    values={{
+                      operationType: payMode,
+                      bank: payBank,
+                      operationNo: payOperationNo,
+                      internalRef: payInternalRef,
+                      payerName: payPayerName,
+                    }}
+                    onChange={(patch) => {
+                      if (patch.operationType != null) setPayMode(patch.operationType);
+                      if (patch.bank != null) setPayBank(patch.bank);
+                      if (patch.operationNo != null) setPayOperationNo(patch.operationNo);
+                      if (patch.internalRef != null) setPayInternalRef(patch.internalRef);
+                      if (patch.payerName != null) setPayPayerName(patch.payerName);
+                    }}
+                  />
+                </div>
                 <div className="sm:col-span-3">
                   <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</p>
                   <DocumentFileActions

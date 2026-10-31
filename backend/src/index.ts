@@ -26,6 +26,8 @@ import { uploadDir } from './lib/uploadPaths.js';
 import { backfillPointageSessions, repairPointageSessionExclusions } from './lib/pointageSessions.js';
 import { migrateLegacyPurchases } from './lib/purchaseWorkflow.js';
 import { migrateEnginFleet } from './lib/enginCosts.js';
+import { prisma } from './lib/prisma.js';
+import { ensureWorkspaceColumns } from './lib/workspace.js';
 
 const app = express();
 app.use(
@@ -109,6 +111,7 @@ process.on('unhandledRejection', (reason) => {
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {
   console.log(`GIC API prête sur http://localhost:${port}`);
+  ensureWorkspaceColumns(prisma).catch((err) => console.error('Espaces de travail', err));
   repairPointageSessionExclusions()
     .catch((err) => console.error('Réparation exclusions pointage', err))
     .then(() => backfillPointageSessions())

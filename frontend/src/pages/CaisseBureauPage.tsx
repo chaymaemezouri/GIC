@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  Eye, Printer, Paperclip, Plus, Pencil, Trash2,
+  Eye, Printer, Plus, Pencil, Trash2,
   Wallet, TrendingDown, TrendingUp, SlidersHorizontal, Check,
 } from 'lucide-react';
 import { api, formatDate, formatMad, uploadForm, type PaginatedResponse } from '../lib/api';
@@ -22,6 +22,7 @@ import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import { FileInlinePreview } from '../components/PdfPreview';
+import { FilePieceLinks, fileUrl } from '../lib/documentDisplay';
 
 type Movement = {
   id: string;
@@ -580,18 +581,9 @@ export default function CaisseBureauPage() {
                       <span className="block text-[10px] text-gic-muted">{m.chantier.name}</span>
                     )}
                   </Td>
-                  <Td mac>
+                  <Td mac onClick={(e) => e.stopPropagation()}>
                     {m.proofFile ? (
-                      <a
-                        href={m.proofFile}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex text-[#007aff]"
-                        title={t('common.pieceShort')}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Paperclip size={14} />
-                      </a>
+                      <FilePieceLinks path={m.proofFile} label={t('fields.proof')} />
                     ) : (
                       <span className="mac-table-muted">—</span>
                     )}
@@ -693,14 +685,17 @@ export default function CaisseBureauPage() {
               <p><span className="text-gic-muted">{t('msg.colonWork')}</span> {viewItem.workLabel}</p>
             )}
             <p><span className="text-gic-muted">{t('msg.colonRemark')}</span> {viewItem.remark || '—'}</p>
-            {viewItem.proofFile && (
-              <div className="space-y-2">
-                <a href={viewItem.proofFile} target="_blank" rel="noreferrer" className="text-[#007aff]">
-                  {t('fields.viewDownload')}
-                </a>
-                <FileInlinePreview src={viewItem.proofFile} />
-              </div>
-            )}
+            <div className="space-y-2">
+              <p className="text-gic-muted">{t('fields.proofDocument')}</p>
+              {viewItem.proofFile ? (
+                <>
+                  <FilePieceLinks path={viewItem.proofFile} />
+                  <FileInlinePreview src={fileUrl(viewItem.proofFile)} />
+                </>
+              ) : (
+                <p>—</p>
+              )}
+            </div>
           </div>
         )}
       </Modal>

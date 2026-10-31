@@ -13,6 +13,7 @@ import {
 } from '../components/ui';
 import { RentalFormFields, emptyRentalForm, rentalToForm, rentalFormToBody, type RentalFormData } from '../components/RentalFormFields';
 import { PartyNames, partyLabel, type PartyPerson } from '../components/PartyNames';
+import { PaymentModeFields } from '../components/PaymentModeFields';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { printRentalReceipt } from '../lib/printRental';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -115,6 +116,8 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
   const [statusFilter, setStatusFilter] = useState('');
   const [payFilter, setPayFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
+  const [propertyFilter, setPropertyFilter] = useState('');
+  const [clientProperties, setClientProperties] = useState<{ id: string; reference: string; name: string }[]>([]);
   const [sort, setSort] = useState('createdAt');
   const [order, setOrder] = useState<SortOrder>('desc');
   const [showFilters, setShowFilters] = useState(false);
@@ -125,35 +128,46 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
   const [terminateId, setTerminateId] = useState<string | null>(null);
   const [terminateMotif, setTerminateMotif] = useState('');
   const [form, setForm] = useState<RentalFormData>(emptyRentalForm());
-  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '' });
+  const [payForm, setPayForm] = useState({
+    amount: '',
+    operationType: 'especes',
+    payerName: '',
+    bank: '',
+    operationNo: '',
+    internalRef: '',
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const selection = useRowSelection<Rental>();
 
-  function buildExportQuery(overrides?: { q?: string; status?: string; clientId?: string; pay?: string }) {
+  function buildExportQuery(overrides?: { q?: string; status?: string; clientId?: string; pay?: string; propertyId?: string }) {
     const qs = new URLSearchParams();
     const qVal = overrides?.q !== undefined ? overrides.q : q;
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
     const pay = overrides?.pay !== undefined ? overrides.pay : payFilter;
+    const propertyId = overrides?.propertyId !== undefined ? overrides.propertyId : propertyFilter;
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (pay) qs.set('pay', pay);
     if (clientId) qs.set('clientId', clientId);
+    if (propertyId) qs.set('propertyId', propertyId);
     if (projectId) qs.set('projectId', projectId);
     return qs.toString();
   }
 
-  function buildListQuery(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string; pay?: string }) {
+  function buildListQuery(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string; pay?: string; propertyId?: string }) {
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
     const qVal = overrides?.q !== undefined ? overrides.q : q;
     const pay = overrides?.pay !== undefined ? overrides.pay : payFilter;
+    const propertyId = overrides?.propertyId !== undefined ? overrides.propertyId : propertyFilter;
     const qs = new URLSearchParams();
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (pay) qs.set('pay', pay);
     if (clientId) qs.set('clientId', clientId);
+    if (propertyId) qs.set('propertyId', propertyId);
     if (projectId) qs.set('projectId', projectId);
     qs.set('sort', sort);
     qs.set('order', order);
@@ -169,16 +183,17 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
     }).then(setProperties);
   }
 
-  function load(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string; pay?: string }) {
+  function load(pageNum = page, overrides?: { status?: string; clientId?: string; q?: string; pay?: string; propertyId?: string }) {
     setLoading(true);
     setError('');
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
     const qVal = overrides?.q !== undefined ? overrides.q : q;
     const pay = overrides?.pay !== undefined ? overrides.pay : payFilter;
-    const statsQs = buildExportQuery({ q: qVal, status, clientId, pay });
+    const propertyId = overrides?.propertyId !== undefined ? overrides.propertyId : propertyFilter;
+    const statsQs = buildExportQuery({ q: qVal, status, clientId, pay, propertyId });
     Promise.all([
-      api<PaginatedResponse<Rental>>(`/transactions/rentals?${buildListQuery(pageNum, { q: qVal, status, clientId, pay })}`),
+      api<PaginatedResponse<Rental>>(`/transactions/rentals?${buildListQuery(pageNum, { q: qVal, status, clientId, pay, propertyId })}`),
       api<Stats>(`/transactions/rentals/stats?${statsQs}`),
       projectId
         ? fetchPropertyList<CatalogProperty>({ projectId, limit: 100 })
@@ -214,6 +229,18 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
     fetchClientList<{ id: string; reference: string; firstName: string; lastName: string }>().then(setClients);
     refreshProperties();
   }, [projectId]);
+
+  useEffect(() => {
+    if (!clientFilter) {
+      setClientProperties([]);
+      return;
+    }
+    api(`/clients/${clientFilter}`)
+      .then((c: { properties?: { id: string; reference: string; name: string }[] }) => {
+        setClientProperties(c.properties || []);
+      })
+      .catch(() => setClientProperties([]));
+  }, [clientFilter]);
 
   useEffect(() => {
     if (!showFilters) return;
@@ -287,7 +314,7 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
         body: JSON.stringify({ rentalId: payOpen, ...payForm }),
       });
       setPayOpen(null);
-      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '' });
+      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', operationNo: '', internalRef: '' });
       load(page);
       onChanged?.();
     } catch (err) {
@@ -357,7 +384,8 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
     return '—';
   }
 
-  const hasActiveFilters = !!statusFilter || !!clientFilter || !!payFilter;
+  const hasActiveFilters = !!statusFilter || !!clientFilter || !!propertyFilter || !!payFilter;
+  const propertyChoices = clientFilter && clientProperties.length > 0 ? clientProperties : properties;
 
   const headerActions = (
     <>
@@ -426,6 +454,21 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
               onSubmit={() => { setPage(1); load(1); }}
               placeholder={t('msg.searchRefTenantProperty')}
             />
+            {propertyChoices.length > 1 && (
+              <MacSelect
+                value={propertyFilter}
+                onChange={(v) => {
+                  setPropertyFilter(v);
+                  setPage(1);
+                  load(1, { propertyId: v });
+                }}
+                options={[
+                  { value: '', label: t('common.allProperties') },
+                  ...propertyChoices.map((p) => ({ value: p.id, label: `${p.reference} — ${p.name}` })),
+                ]}
+                className="w-56 shrink-0"
+              />
+            )}
             <div className="flex items-center gap-1 shrink-0">
               <MacSelect
                 value={sort}
@@ -500,8 +543,9 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                     className={`mac-filter-menu-item${clientFilter === '' ? ' mac-filter-menu-item-active' : ''}`}
                     onClick={() => {
                       setClientFilter('');
+                      setPropertyFilter('');
                       setPage(1);
-                      load(1, { clientId: '' });
+                      load(1, { clientId: '', propertyId: '' });
                     }}
                   >
                     <span>Tous</span>
@@ -515,8 +559,9 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                       className={`mac-filter-menu-item${clientFilter === c.id ? ' mac-filter-menu-item-active' : ''}`}
                       onClick={() => {
                         setClientFilter(c.id);
+                        setPropertyFilter('');
                         setPage(1);
-                        load(1, { clientId: c.id });
+                        load(1, { clientId: c.id, propertyId: '' });
                       }}
                     >
                       <span className="truncate">{c.reference} — {c.lastName}</span>
@@ -533,8 +578,9 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
                           setStatusFilter('');
                           setPayFilter('');
                           setClientFilter('');
+                          setPropertyFilter('');
                           setPage(1);
-                          load(1, { status: '', clientId: '', pay: '' });
+                          load(1, { status: '', clientId: '', pay: '', propertyId: '' });
                           setShowFilters(false);
                         }}
                       >
@@ -697,14 +743,10 @@ export default function LocationsPage({ projectId, embedded, onChanged }: Locati
       >
         <form id="rental-pay-form" onSubmit={addPayment} className="grid gap-3">
           <Input label={t('fields.amountMadRequired')} required type="number" min="0" step="0.01" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} />
-          <Select label={t('fields.mode')} value={payForm.operationType} onChange={(e) => setPayForm({ ...payForm, operationType: e.target.value })}>
-            <option value="especes">{t('fields.modeCash')}</option>
-            <option value="virement">{t('fields.modeTransfer')}</option>
-            <option value="cheque">{t('fields.modeCheck')}</option>
-            <option value="carte">{t('fields.modeCard')}</option>
-          </Select>
-          <Input label={t('fields.payerNameShort')} value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} />
-          <Input label={t('fields.bankRef')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
+          <PaymentModeFields
+            values={payForm}
+            onChange={(patch) => setPayForm({ ...payForm, ...patch })}
+          />
         </form>
       </Modal>
 

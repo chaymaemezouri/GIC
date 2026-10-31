@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Download, Eye, Printer, Paperclip, Plus, Pencil, Trash2,
+  Download, Eye, Printer, Paperclip, Plus, Pencil, Trash2, MessageSquare,
   Wallet, TrendingDown, TrendingUp, FileCheck, SlidersHorizontal, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { api, downloadCsv, downloadExcel, formatDate, formatMad, uploadForm, type PaginatedResponse } from '../lib/api';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
-  Modal, PageHeader, Pagination, Select, TableWrap, Td, Th,
+  Modal, PageHeader, Pagination, Select, TableWrap, Td, Textarea, Th,
 } from '../components/ui';
-import { printMovementReceipt } from '../lib/printMovement';
+import { displayMovementRemark, printMovementReceipt } from '../lib/printMovement';
 import { escHtml } from '../lib/companyPrint';
 import { fetchAllRows, printRows } from '../lib/listPrint';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
@@ -30,6 +30,7 @@ type Movement = {
   debit: number;
   credit: number;
   remark?: string;
+  notation?: string | null;
   proofFile?: string;
   invoiceFile?: string;
   deliveryNoteFile?: string;
@@ -130,6 +131,10 @@ export default function FinancePage() {
   const [accountEditId, setAccountEditId] = useState<string | null>(null);
   const [accountForm, setAccountForm] = useState<AccountForm>(emptyAccountForm());
   const [accountError, setAccountError] = useState('');
+  const [notationRow, setNotationRow] = useState<Movement | null>(null);
+  const [notationDraft, setNotationDraft] = useState('');
+  const [notationError, setNotationError] = useState('');
+  const [notationSaving, setNotationSaving] = useState(false);
   const selection = useRowSelection<Movement>();
 
   function buildStatsQuery(overrides?: FilterOverrides) {
@@ -356,6 +361,7 @@ export default function FinancePage() {
       fd.append('debit', form.debit || '0');
       fd.append('credit', form.credit || '0');
       if (form.remark) fd.append('remark', form.remark);
+      fd.append('notation', form.notation || '');
       if (form.date) fd.append('date', form.date);
       if (form.invoiceFileObj) fd.append('invoice', form.invoiceFileObj);
       if (form.deliveryNoteFileObj) fd.append('deliveryNote', form.deliveryNoteFileObj);
@@ -426,6 +432,8 @@ export default function FinancePage() {
           ].filter(Boolean).join(' · '),
         },
         { label: t('columns.mode'), value: (m) => m.mode },
+        { label: t('columns.remark'), value: (m) => displayMovementRemark(m.remark) },
+        { label: t('columns.notation'), value: (m) => (m.notation || '').trim() },
         {
           label: t('columns.debit'),
           value: (m) => (Number(m.debit) ? formatMad(Number(m.debit)) : ''),
@@ -705,6 +713,8 @@ export default function FinancePage() {
                 <Th mac>{t('columns.designation')}</Th>
                 <Th mac>{t('columns.account')}</Th>
                 <Th mac>{t('columns.mode')}</Th>
+                <Th mac>{t('columns.remark')}</Th>
+                <Th mac>{t('columns.notation')}</Th>
                 <Th mac>{t('columns.debit')}</Th>
                 <Th mac>{t('columns.credit')}</Th>
                 <Th mac>{t('columns.pieces')}</Th>
@@ -745,6 +755,27 @@ export default function FinancePage() {
                     )}
                   </Td>
                   <Td mac className="capitalize mac-table-muted">{m.mode || '—'}</Td>
+                  <Td mac className="mac-table-muted max-w-[180px] truncate" title={displayMovementRemark(m.remark) || undefined}>
+                    {displayMovementRemark(m.remark) || '—'}
+                  </Td>
+                  <Td mac className="max-w-[200px]" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="block w-full text-left"
+                      title={m.notation?.trim() || t('actions.editNotation')}
+                      onClick={() => {
+                        setNotationRow(m);
+                        setNotationDraft(m.notation || '');
+                        setNotationError('');
+                      }}
+                    >
+                      {m.notation?.trim() ? (
+                        <span className="block truncate text-[12px]">{m.notation}</span>
+                      ) : (
+                        <span className="text-[11px] text-gic-muted">{t('fields.notationToDiscuss')}</span>
+                      )}
+                    </button>
+                  </Td>
                   <Td mac className="text-gic-coral">
                     {Number(m.debit) ? formatMad(Number(m.debit)) : '—'}
                   </Td>
@@ -755,6 +786,16 @@ export default function FinancePage() {
                   <Td mac className="mac-td-actions">
                     <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
                       <MacActionBtn icon={Eye} tone="blue" title={t('actions.detailShort')} onClick={() => navigate(`/balance/${m.id}`)} />
+                      <MacActionBtn
+                        icon={MessageSquare}
+                        tone="blue"
+                        title={t('actions.editNotation')}
+                        onClick={() => {
+                          setNotationRow(m);
+                          setNotationDraft(m.notation || '');
+                          setNotationError('');
+                        }}
+                      />
                       <MacActionBtn
                         icon={Printer}
                         tone="gray"
@@ -776,6 +817,48 @@ export default function FinancePage() {
         )}
         <Pagination page={page} pages={pages} total={total} limit={PAGE_SIZE} onPage={(p) => load(p)} mac />
       </Card>
+
+      <Modal
+        open={!!notationRow}
+        title={t('actions.editNotation')}
+        onClose={() => setNotationRow(null)}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => setNotationRow(null)}>{t('common.cancel')}</Btn>
+            <Btn
+              disabled={notationSaving}
+              onClick={async () => {
+                if (!notationRow) return;
+                setNotationSaving(true);
+                setNotationError('');
+                try {
+                  const updated = await api<Movement>(`/finance/movements/${notationRow.id}/notation`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ notation: notationDraft }),
+                  });
+                  setItems((prev) => prev.map((row) => (row.id === updated.id ? { ...row, notation: updated.notation } : row)));
+                  setNotationRow(null);
+                } catch (err) {
+                  setNotationError(err instanceof Error ? err.message : t('msg.serverError'));
+                } finally {
+                  setNotationSaving(false);
+                }
+              }}
+            >
+              {t('common.save')}
+            </Btn>
+          </>
+        }
+      >
+        <p className="mb-2 text-[12px] text-gic-muted">{notationRow?.designation}</p>
+        <Textarea
+          label={t('fields.notationToDiscuss')}
+          placeholder={t('fields.notationPlaceholder')}
+          value={notationDraft}
+          onChange={(e) => setNotationDraft(e.target.value)}
+        />
+        {notationError && <p className="mt-2 text-[11px] text-gic-coral">{notationError}</p>}
+      </Modal>
 
       <Modal
         open={formOpen}

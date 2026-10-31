@@ -2,6 +2,11 @@ generator client {
   provider = "prisma-client-js"
 }
 
+generator workspaceClient {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
@@ -17,6 +22,7 @@ model User {
   photo         String?
   sidebarPrefs  Json?
   role          String   @default("SUPER_ADMIN")
+  workspaceId   String   @default("demo")
   isActive      Boolean  @default(true)
   twoFactorEnabled Boolean @default(false)
   twoFactorSecret  String?
@@ -32,6 +38,7 @@ model User {
 
 model InternalStaff {
   id               String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference        String?  @unique
   firstName        String
   lastName         String
@@ -66,6 +73,7 @@ model InternalStaff {
 
 model AuditLog {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   userId     String?
   user       User?    @relation(fields: [userId], references: [id])
   action     String
@@ -78,6 +86,7 @@ model AuditLog {
 
 model InternalStaffDocument {
   id        String        @id @default(cuid())
+  workspaceId     String   @default("demo")
   staffId   String
   staff     InternalStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
   docType   String
@@ -88,6 +97,7 @@ model InternalStaffDocument {
 
 model InternalStaffSalaryRecord {
   id           String        @id @default(cuid())
+  workspaceId     String   @default("demo")
   staffId      String
   staff        InternalStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
   periodYear   Int
@@ -110,6 +120,7 @@ model InternalStaffSalaryRecord {
 
 model Notification {
   id        String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   title     String
@@ -134,6 +145,7 @@ model DropdownOption {
 
 model Agent {
   id          String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference   String?  @unique
   photo       String?
   remark      String?
@@ -151,6 +163,7 @@ model Agent {
 
 model Reconnu {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference  String?  @unique
   firstName  String
   lastName   String
@@ -168,6 +181,7 @@ model Reconnu {
 /// Société sous-traitante (Intervenants).
 model Entreprise {
   id          String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference   String   @unique
   companyName String
   phone       String?
@@ -184,6 +198,7 @@ model Entreprise {
 
 model OfficeCashMovement {
   id           String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   date         DateTime @default(now())
   /// entree | sortie
   direction    String
@@ -206,6 +221,7 @@ model OfficeCashMovement {
 
 model Mandant {
   id            String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference     String?  @unique
   photo         String?
   remark        String?
@@ -225,6 +241,7 @@ model Mandant {
 
 model Client {
   id              String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference       String   @unique
   photo           String?
   firstName       String
@@ -258,6 +275,7 @@ model Client {
 
 model ClientAgentHistory {
   id                String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   clientId          String
   client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   previousAgentId   String?
@@ -270,6 +288,7 @@ model ClientAgentHistory {
 
 model ClientMandant {
   id        String  @id @default(cuid())
+  workspaceId     String   @default("demo")
   clientId  String
   mandantId String
   client    Client  @relation(fields: [clientId], references: [id])
@@ -280,6 +299,7 @@ model ClientMandant {
 
 model Location {
   id          String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   name        String
   city        String?
   description String?
@@ -289,6 +309,7 @@ model Location {
 
 model Project {
   id            String         @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference     String?        @unique
   name          String
   ownershipType String         @default("personnel") // personnel | client
@@ -316,6 +337,7 @@ model Project {
 
 model ProjectImage {
   id        String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   projectId String
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   path      String
@@ -326,6 +348,7 @@ model ProjectImage {
 
 model Tranche {
   id        String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   name      String
   projectId String
   project   Project  @relation(fields: [projectId], references: [id])
@@ -334,6 +357,7 @@ model Tranche {
 
 model Bloc {
   id        String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   name      String
   trancheId String
   tranche   Tranche  @relation(fields: [trancheId], references: [id])
@@ -342,6 +366,7 @@ model Bloc {
 
 model Lot {
   id     String  @id @default(cuid())
+  workspaceId     String   @default("demo")
   name   String
   blocId String
   bloc   Bloc    @relation(fields: [blocId], references: [id])
@@ -350,6 +375,7 @@ model Lot {
 
 model Floor {
   id         String     @id @default(cuid())
+  workspaceId     String   @default("demo")
   name       String
   lotId      String
   lot        Lot        @relation(fields: [lotId], references: [id])
@@ -358,6 +384,7 @@ model Floor {
 
 model Property {
   id               String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference        String   @unique
   titleNumber      String?
   name             String
@@ -386,6 +413,7 @@ model Property {
 
 model Sale {
   id                String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference         String   @unique
   clientId          String
   client            Client   @relation(fields: [clientId], references: [id])
@@ -421,6 +449,7 @@ model Sale {
 
 model Rental {
   id                String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference         String   @unique
   clientId          String
   client            Client   @relation(fields: [clientId], references: [id])
@@ -453,6 +482,7 @@ model Rental {
 
 model PaymentSchedule {
   id        String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   saleId    String?
   sale      Sale?     @relation(fields: [saleId], references: [id], onDelete: Cascade)
   rentalId  String?
@@ -470,6 +500,7 @@ model PaymentSchedule {
 
 model Payment {
   id            String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   receiptNo     String   @unique
   saleId        String?
   sale          Sale?    @relation(fields: [saleId], references: [id])
@@ -491,6 +522,7 @@ model Payment {
 
 model CashAccount {
   id           String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   name         String
   type         String   @default("caisse")
   isActive     Boolean  @default(true)
@@ -504,6 +536,7 @@ model CashAccount {
 
 model CashMovement {
   id               String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   date             DateTime @default(now())
   designation      String
   accountId        String
@@ -512,6 +545,8 @@ model CashMovement {
   debit            Float    @default(0)
   credit           Float    @default(0)
   remark           String?
+  /// Note interne à discuter sur la ligne de balance
+  notation         String?
   proofFile        String?
   invoiceFile      String?
   deliveryNoteFile String?
@@ -526,6 +561,7 @@ model CashMovement {
 
 model WorkforcePayrollRecord {
   id          String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference   String?   @unique
   workforceId String
   workforce   Workforce @relation(fields: [workforceId], references: [id], onDelete: Cascade)
@@ -554,6 +590,7 @@ model WorkforcePayrollRecord {
 
 model WorkforcePayrollPayment {
   id          String                  @id @default(cuid())
+  workspaceId     String   @default("demo")
   recordId    String
   record      WorkforcePayrollRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
   amount      Float
@@ -568,6 +605,7 @@ model WorkforcePayrollPayment {
 /// Prime ou avance hors pointage (plusieurs lignes possibles).
 model WorkforcePayrollAdjustment {
   id          String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   workforceId String
   workforce   Workforce @relation(fields: [workforceId], references: [id], onDelete: Cascade)
   chantierId  String    @default("")
@@ -586,6 +624,7 @@ model WorkforcePayrollAdjustment {
 
 model Supplier {
   id            String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference     String   @unique
   companyName   String
   contactName   String?
@@ -625,6 +664,7 @@ model PurchaseDesignation {
 
 model Purchase {
   id            String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference     String   @unique
   date          DateTime @default(now())
   family        String?
@@ -679,6 +719,7 @@ model Purchase {
 
 model PurchaseLine {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   purchaseId String
   purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
   product    String
@@ -697,6 +738,7 @@ model PurchaseLine {
 
 model PurchaseDelivery {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   purchaseId String
   purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
   date       DateTime @default(now())
@@ -709,6 +751,7 @@ model PurchaseDelivery {
 
 model PurchaseDeliveryItem {
   id               String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   deliveryId       String
   delivery         PurchaseDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
   lineId           String
@@ -720,6 +763,7 @@ model PurchaseDeliveryItem {
 
 model PurchasePayment {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   purchaseId String
   purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
   /// avance | complement | solde
@@ -735,6 +779,7 @@ model PurchasePayment {
 
 model PurchaseHistory {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   purchaseId String
   purchase   Purchase @relation(fields: [purchaseId], references: [id])
   userName   String?
@@ -746,6 +791,7 @@ model PurchaseHistory {
 
 model Chantier {
   id           String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   name         String
   address      String?
   startDate    DateTime?
@@ -787,6 +833,7 @@ model Chantier {
 
 model ChantierImage {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   chantierId String
   chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
   path       String
@@ -797,6 +844,7 @@ model ChantierImage {
 
 model ChantierTranche {
   id                 String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   name               String
   chantierId         String
   chantier           Chantier  @relation(fields: [chantierId], references: [id], onDelete: Cascade)
@@ -810,6 +858,7 @@ model ChantierTranche {
 
 model ChantierStockItem {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   chantierId String
   chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
   name       String
@@ -823,6 +872,7 @@ model ChantierStockItem {
 
 model ChantierSubcontractor {
   id          String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   chantierId  String
   chantier    Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
   companyName String
@@ -852,6 +902,7 @@ model ChantierSubcontractor {
 /// Suivi d'une phase (ou de la tâche complète) sous-traitée.
 model SubcontractFollow {
   id              String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   subcontractorId String
   subcontractor   ChantierSubcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
   label           String
@@ -865,6 +916,7 @@ model SubcontractFollow {
 
 model SubcontractorPayment {
   id              String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   subcontractorId String
   subcontractor   ChantierSubcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
   amount          Float
@@ -880,6 +932,7 @@ model SubcontractorPayment {
 
 model ChantierCamera {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   chantierId String
   chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
   name       String
@@ -891,6 +944,7 @@ model ChantierCamera {
 
 model Workforce {
   id            String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   reference     String?  @unique
   photo         String?
   firstName     String
@@ -929,6 +983,7 @@ model Workforce {
 /// Affectation chauffeur ↔ véhicule / engin (historisée)
 model DriverAssignment {
   id          String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   workforceId String
   workforce   Workforce @relation(fields: [workforceId], references: [id], onDelete: Cascade)
   enginId     String
@@ -941,6 +996,7 @@ model DriverAssignment {
 
 model WorkforceDocument {
   id          String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   workforceId String
   workforce   Workforce @relation(fields: [workforceId], references: [id])
   docType     String
@@ -951,6 +1007,7 @@ model WorkforceDocument {
 
 model WorkforceAssignment {
   id           String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   workforceId  String
   workforce    Workforce @relation(fields: [workforceId], references: [id])
   chantierId   String
@@ -966,6 +1023,7 @@ model WorkforceAssignment {
 /// Un pointage (opération) = une journée pour un chantier ou une tranche.
 model PointageSession {
   id          String     @id @default(cuid())
+  workspaceId     String   @default("demo")
   chantierId  String
   chantier    Chantier   @relation(fields: [chantierId], references: [id], onDelete: Cascade)
   /// "" = chantier entier, sinon nom de la tranche
@@ -983,6 +1041,7 @@ model PointageSession {
 
 model Pointage {
   id            String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   date          DateTime
   workforceId   String
   workforce     Workforce @relation(fields: [workforceId], references: [id])
@@ -1007,6 +1066,7 @@ model Pointage {
 
 model WorkProgress {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   chantierId String
   chantier   Chantier @relation(fields: [chantierId], references: [id])
   tranche    String?
@@ -1024,6 +1084,7 @@ model WorkProgress {
 
 model Engin {
   id            String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   code          String?  @unique
   /// engin | materiel
   kind          String   @default("engin")
@@ -1098,6 +1159,7 @@ model Engin {
 /// Entrée, sortie, affectation ou transfert d'une quantité de matériel.
 model MaterielMovement {
   id           String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   enginId      String
   engin        Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
   chantierId   String?
@@ -1120,6 +1182,7 @@ model MaterielMovement {
 /// Affectation d'un engin / matériel à un projet, chantier ou tranche (historisée)
 model EnginAssignment {
   id            String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   enginId       String
   engin         Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
   projectId     String?
@@ -1159,6 +1222,7 @@ model EnginAssignment {
 /// Pointage d'utilisation (heures / kilométrage)
 model EnginUsage {
   id            String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   enginId       String
   engin         Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
   assignmentId  String?
@@ -1187,6 +1251,7 @@ model EnginUsage {
 /// Dépenses liées à l'engin / matériel (hors entretien, réparation, carburant)
 model EnginExpense {
   id            String    @id @default(cuid())
+  workspaceId     String   @default("demo")
   enginId       String
   engin         Engin     @relation(fields: [enginId], references: [id], onDelete: Cascade)
   date          DateTime
@@ -1210,6 +1275,7 @@ model EnginExpense {
 
 model Maintenance {
   id            String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   enginId       String
   engin         Engin    @relation(fields: [enginId], references: [id])
   date          DateTime @default(now())
@@ -1238,6 +1304,7 @@ model Maintenance {
 
 model Mission {
   id            String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   enginId       String
   engin         Engin    @relation(fields: [enginId], references: [id])
   date          DateTime @default(now())
@@ -1255,6 +1322,7 @@ model Mission {
 /// Checklist de documents standards par fiche (client, chantier, ouvrier…).
 model DocumentChecklist {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   entityType String
   entityId   String
   /// { custom, labels, hidden }
@@ -1266,6 +1334,7 @@ model DocumentChecklist {
 
 model Document {
   id          String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   name        String
   category    String?
   /// pending | valid | invalid
@@ -1306,6 +1375,7 @@ model Document {
 
 model ArchiveEntry {
   id          String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   registerNo  String?
   date        DateTime @default(now())
   subject     String
@@ -1333,6 +1403,7 @@ model Counter {
 
 model ConversationMessage {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   entityType String
   entityId   String
   channel    String
@@ -1350,6 +1421,7 @@ model ConversationMessage {
 
 model FuelLog {
   id           String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   enginId      String
   engin        Engin    @relation(fields: [enginId], references: [id], onDelete: Cascade)
   date         DateTime @default(now())
@@ -1367,6 +1439,7 @@ model FuelLog {
 
 model GpsPosition {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   enginId    String
   engin      Engin    @relation(fields: [enginId], references: [id], onDelete: Cascade)
   lat        Float
@@ -1411,6 +1484,7 @@ model CompanySettings {
 
 model SupplierDocument {
   id         String   @id @default(cuid())
+  workspaceId     String   @default("demo")
   supplierId String
   supplier   Supplier @relation(fields: [supplierId], references: [id])
   purchaseId String?

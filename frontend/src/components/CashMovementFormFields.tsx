@@ -1,6 +1,6 @@
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentFileActions } from './DocumentScanner';
-import { Input, Select } from './ui';
+import { Input, Select, Textarea } from './ui';
 import { fileUrl } from '../lib/documentDisplay';
 
 export type CashAccountOption = {
@@ -19,6 +19,7 @@ export type CashMovementFormData = {
   debit: string;
   credit: string;
   remark: string;
+  notation: string;
   date: string;
   proofFile?: string | null;
   invoiceFile?: string | null;
@@ -38,6 +39,7 @@ export function emptyCashMovementForm(): CashMovementFormData {
     debit: '',
     credit: '',
     remark: '',
+    notation: '',
     date: new Date().toISOString().slice(0, 10),
     proofFile: null,
     invoiceFile: null,
@@ -58,6 +60,7 @@ export function movementToForm(m: Record<string, unknown>): CashMovementFormData
     debit: Number(m.debit) > 0 ? String(m.debit) : '',
     credit: Number(m.credit) > 0 ? String(m.credit) : '',
     remark: String(m.remark || ''),
+    notation: String(m.notation || ''),
     date: m.date ? String(m.date).slice(0, 10) : new Date().toISOString().slice(0, 10),
     proofFile: (m.proofFile as string) || null,
     invoiceFile: (m.invoiceFile as string) || null,
@@ -142,6 +145,14 @@ export function CashMovementFormFields({
       <Input label={t('fields.debitMad')} type="number" min="0" step="0.01" value={form.debit} onChange={(e) => setForm({ ...form, debit: e.target.value, credit: e.target.value ? '' : form.credit })} />
       <Input label={t('fields.creditMad')} type="number" min="0" step="0.01" value={form.credit} onChange={(e) => setForm({ ...form, credit: e.target.value, debit: e.target.value ? '' : form.debit })} />
       <Input className="sm:col-span-2" label={t('fields.remark')} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
+      <div className="sm:col-span-2">
+        <Textarea
+          label={t('fields.notationToDiscuss')}
+          placeholder={t('fields.notationPlaceholder')}
+          value={form.notation}
+          onChange={(e) => setForm({ ...form, notation: e.target.value })}
+        />
+      </div>
       <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2">
         <FileField label={t('fields.invoice')} existing={form.invoiceFile} onChange={(f) => setForm({ ...form, invoiceFileObj: f })} currentFileLabel={t('fields.currentFile')} viewDownloadLabel={t('fields.viewDownload')} />
         <FileField label={t('fields.deliveryNote')} existing={form.deliveryNoteFile} onChange={(f) => setForm({ ...form, deliveryNoteFileObj: f })} currentFileLabel={t('fields.currentFile')} viewDownloadLabel={t('fields.viewDownload')} />

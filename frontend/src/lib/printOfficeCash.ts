@@ -37,7 +37,7 @@ export async function printOfficeCashReceipt(m: OfficeRow) {
     <p><span class="k">Débit :</span> ${escHtml(debit ? formatMad(debit) : '—')}</p>
     <p><span class="k">Crédit :</span> ${escHtml(credit ? formatMad(credit) : '—')}</p>
     ${m.remark ? `<p><span class="k">Remarque :</span> ${escHtml(m.remark)}</p>` : ''}
-    <p><span class="k">Pièce jointe :</span> ${m.proofFile ? 'Oui' : 'Non'}</p>
+    <p><span class="k">Pièce justificatif :</span> ${m.proofFile ? 'Oui' : 'Non'}</p>
   </div>`;
   return printWithCompany({ title: 'Caisse bureau', bodyHtml });
 }

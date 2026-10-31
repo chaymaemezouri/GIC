@@ -72,11 +72,13 @@ async function upsertAutomaticMovement(opts: {
   debit: number;
   credit: number;
   remarkExtra?: string;
+  proofFile?: string | null;
   req?: Request;
 }) {
   const account = await resolveAccount(opts.mode);
   const tag = movementTag(opts.sourceType, opts.sourceId);
   const remark = [tag, opts.remarkExtra].filter(Boolean).join(' · ');
+  const proofFile = opts.proofFile || null;
 
   const existing = await findMovementBySource(opts.sourceType, opts.sourceId);
   if (existing) {
@@ -90,6 +92,7 @@ async function upsertAutomaticMovement(opts: {
         debit: opts.debit,
         credit: opts.credit,
         remark,
+        proofFile,
         isAutomatic: true,
         sourceType: opts.sourceType,
         sourceId: opts.sourceId,
@@ -108,6 +111,7 @@ async function upsertAutomaticMovement(opts: {
       debit: opts.debit,
       credit: opts.credit,
       remark,
+      proofFile,
       isAutomatic: true,
       sourceType: opts.sourceType,
       sourceId: opts.sourceId,
@@ -149,6 +153,7 @@ export async function syncEncaissementMovement(
     debit: 0,
     credit: payment.amount,
     remarkExtra: payment.payerName ? `Payeur: ${payment.payerName}` : payment.receiptNo,
+    proofFile: payment.proofFile,
     req,
   });
 }
@@ -167,6 +172,7 @@ export async function syncPurchaseMovement(
     debit: purchase.totalPrice,
     credit: 0,
     remarkExtra: `${purchase.reference}${supplierLabel}`,
+    proofFile: purchase.proofFile,
     req,
   });
 }

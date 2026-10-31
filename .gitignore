@@ -5,3 +5,4 @@ uploads
 *.db-journal
 .env
 .DS_Store
+backend/src/generated

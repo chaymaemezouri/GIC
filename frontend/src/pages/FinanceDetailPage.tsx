@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Printer, History, Paperclip, Wallet, TrendingDown, TrendingUp, Info as InfoIcon } from 'lucide-react';
 import { api, formatDate, formatMad } from '../lib/api';
-import { Btn, Card, KpiCard, PageBackLink, TableWrap, Td, Th } from '../components/ui';
+import { Btn, Card, KpiCard, PageBackLink, TableWrap, Td, Textarea, Th } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
-import { printMovementReceipt } from '../lib/printMovement';
+import { displayMovementRemark, printMovementReceipt } from '../lib/printMovement';
 import { FilePieceLinks } from '../lib/documentDisplay';
 import { FileInlinePreview } from '../components/PdfPreview';
 
@@ -30,11 +30,19 @@ export default function FinanceDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
+  const [notationDraft, setNotationDraft] = useState('');
+  const [notationSaving, setNotationSaving] = useState(false);
+  const [notationError, setNotationError] = useState('');
 
   function load() {
     if (!id) return;
     setError('');
-    api(`/finance/movements/${id}`).then(setMovement).catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+    api(`/finance/movements/${id}`)
+      .then((row) => {
+        setMovement(row);
+        setNotationDraft(String(row?.notation || ''));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }
 
   function loadHistory() {
@@ -160,16 +168,47 @@ export default function FinanceDetailPage() {
               <Info label={t('fields.createdBy')} value={movement.createdBy || '—'} />
               <Info label={t('fields.createdAt')} value={formatDate(movement.createdAt)} />
             </div>
-            {movement.remark && (
-              <div className="mac-section-card">
-                <p className="mac-info-label">{t('fields.remark')}</p>
-                <p className="text-[12px] text-gic-muted whitespace-pre-wrap">{movement.remark}</p>
-              </div>
-            )}
-            {pieces.length > 0 && (
-              <div className="mac-section-card space-y-2">
-                <p className="mac-info-label">{t('fields.proof')}</p>
-                {pieces.map((p) => (
+            <div className="mac-section-card">
+              <p className="mac-info-label">{t('fields.remark')}</p>
+              <p className="text-[12px] text-gic-muted whitespace-pre-wrap">
+                {displayMovementRemark(movement.remark) || '—'}
+              </p>
+            </div>
+            <div className="mac-section-card space-y-2">
+              <Textarea
+                label={t('fields.notationToDiscuss')}
+                placeholder={t('fields.notationPlaceholder')}
+                value={notationDraft}
+                onChange={(e) => setNotationDraft(e.target.value)}
+              />
+              {notationError && <p className="text-[11px] text-gic-coral">{notationError}</p>}
+              <Btn
+                disabled={notationSaving}
+                onClick={async () => {
+                  if (!id) return;
+                  setNotationSaving(true);
+                  setNotationError('');
+                  try {
+                    const updated = await api(`/finance/movements/${id}/notation`, {
+                      method: 'PUT',
+                      body: JSON.stringify({ notation: notationDraft }),
+                    });
+                    setMovement(updated);
+                    setNotationDraft(String(updated?.notation || ''));
+                  } catch (err) {
+                    setNotationError(err instanceof Error ? err.message : t('msg.serverError'));
+                  } finally {
+                    setNotationSaving(false);
+                  }
+                }}
+              >
+                {t('common.save')}
+              </Btn>
+            </div>
+            <div className="mac-section-card space-y-2">
+              <p className="mac-info-label">{t('fields.proofDocument')}</p>
+              {pieces.length > 0 ? (
+                pieces.map((p) => (
                   <div key={p.label} className="space-y-2 text-[12px]">
                     <div className="flex items-center gap-2">
                       <Paperclip size={12} className="text-gic-muted shrink-0" />
@@ -177,9 +216,11 @@ export default function FinanceDetailPage() {
                     </div>
                     <FileInlinePreview src={p.path!} />
                   </div>
-                ))}
-              </div>
-            )}
+                ))
+              ) : (
+                <p className="text-[12px] text-gic-muted">—</p>
+              )}
+            </div>
           </div>
         )}
 

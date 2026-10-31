@@ -1,4 +1,3 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -20,7 +19,9 @@ import { SaleFormFields, saleToForm, saleFormToUpdateBody, emptySaleForm, type S
 import { partyLabel } from '../components/PartyNames';
 import { printSaleReceipt } from '../lib/printSale';
 import PaymentSchedulePanel from '../components/PaymentSchedulePanel';
-import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
+import { displayPayerName, isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
+import { PaymentModeFields } from '../components/PaymentModeFields';
+import { printPaymentReceipt as printReceipt } from '../lib/printPayment';
 import { fileUrl } from '../lib/documentDisplay';
 import { FileInlinePreview } from '../components/PdfPreview';
 
@@ -62,7 +63,16 @@ export default function VenteDetailPage() {
   const [newClientId, setNewClientId] = useState('');
   const [createNewSale, setCreateNewSale] = useState(false);
   const [form, setForm] = useState<SaleFormData>(emptySaleForm());
-  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null as File | null });
+  const [payForm, setPayForm] = useState({
+    amount: '',
+    operationType: 'especes',
+    payerName: '',
+    bank: '',
+    nature: 'acompte',
+    operationNo: '',
+    internalRef: '',
+    proof: null as File | null,
+  });
 
   function roundMad(n: number) {
     return Math.round(Number(n || 0) * 100) / 100;
@@ -96,6 +106,8 @@ export default function VenteDetailPage() {
       payerName: '',
       bank: '',
       nature,
+      operationNo: '',
+      internalRef: '',
       proof: null,
     });
     setPayOpen(true);
@@ -108,6 +120,8 @@ export default function VenteDetailPage() {
     payerName?: string | null;
     bank?: string | null;
     nature?: string | null;
+    operationNo?: string | null;
+    internalRef?: string | null;
   }) {
     setEditPayId(p.id);
     const nature = p.nature === 'solde' || p.nature === 'complement_avance' ? p.nature : 'acompte';
@@ -117,6 +131,8 @@ export default function VenteDetailPage() {
       payerName: p.payerName || '',
       bank: p.bank || '',
       nature,
+      operationNo: p.operationNo || '',
+      internalRef: p.internalRef || '',
       proof: null,
     });
     setPayOpen(true);
@@ -263,6 +279,8 @@ export default function VenteDetailPage() {
           fd.append('nature', payForm.nature || 'acompte');
           if (payForm.payerName) fd.append('payerName', payForm.payerName);
           if (payForm.bank) fd.append('bank', payForm.bank);
+          if (payForm.operationNo) fd.append('operationNo', payForm.operationNo);
+          if (payForm.internalRef) fd.append('internalRef', payForm.internalRef);
           fd.append('proof', payForm.proof);
           await uploadForm(`/transactions/payments/${editPayId}`, fd, 'PUT');
         } else {
@@ -274,6 +292,8 @@ export default function VenteDetailPage() {
               nature: payForm.nature || 'acompte',
               payerName: payForm.payerName || null,
               bank: payForm.bank || null,
+              operationNo: payForm.operationNo || null,
+              internalRef: payForm.internalRef || null,
             }),
           });
         }
@@ -285,12 +305,14 @@ export default function VenteDetailPage() {
         fd.append('nature', payForm.nature || 'acompte');
         if (payForm.payerName) fd.append('payerName', payForm.payerName);
         if (payForm.bank) fd.append('bank', payForm.bank);
+        if (payForm.operationNo) fd.append('operationNo', payForm.operationNo);
+        if (payForm.internalRef) fd.append('internalRef', payForm.internalRef);
         if (payForm.proof) fd.append('proof', payForm.proof);
         await uploadForm('/transactions/payments', fd);
       }
       setPayOpen(false);
       setEditPayId(null);
-      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null });
+      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', operationNo: '', internalRef: '', proof: null });
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -344,14 +366,12 @@ export default function VenteDetailPage() {
   }
 
   async function printPaymentReceipt(p: any) {
-
-    await printWithCompany({ title: `Reçu ${p.receiptNo}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px">
-      <h2>GIC — Reçu ${p.receiptNo}</h2>
-      <p>Vente: ${sale.reference}</p>
-      <p>Montant: ${formatMad(p.amount)}</p>
-      <p>Mode: ${p.operationType || '—'}</p>
-      <p>Date: ${formatDate(p.date)}</p>
-    </body></html>`, { grid: true }) });
+    await printReceipt({
+      ...p,
+      sale: { reference: sale.reference, client: sale.client },
+      scheduleLabel: p.scheduleId ? scheduleLabelOf(p.scheduleId) : undefined,
+      payerName: displayPayerName(p.payerName) === '—' ? '' : displayPayerName(p.payerName),
+    });
   }
 
   if (!sale && !error) {
@@ -727,6 +747,9 @@ export default function VenteDetailPage() {
                       <Th mac>{t('columns.amount')}</Th>
                       <Th mac>{t('fields.nature')}</Th>
                       <Th mac>{t('columns.mode')}</Th>
+                      <Th mac>{t('columns.bank')}</Th>
+                      <Th mac>{t('fields.operationNo')}</Th>
+                      <Th mac>{t('fields.internalRef')}</Th>
                       <Th mac>{t('fields.payer')}</Th>
                       <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
                     </tr>
@@ -740,7 +763,10 @@ export default function VenteDetailPage() {
                         <Td mac className="font-medium">{formatMad(p.amount)}</Td>
                         <Td mac>{paymentNatureLabel(p.nature)}</Td>
                         <Td mac>{paymentModeLabel(p.operationType)}</Td>
-                        <Td mac className="mac-table-muted">{p.payerName || '—'}</Td>
+                        <Td mac className="mac-table-muted">{isBankPaymentMode(p.operationType) ? (p.bank || '—') : '—'}</Td>
+                        <Td mac className="mac-table-muted">{p.operationNo || '—'}</Td>
+                        <Td mac className="mac-table-muted">{p.internalRef || '—'}</Td>
+                        <Td mac className="mac-table-muted">{displayPayerName(p.payerName)}</Td>
                         <Td mac className="mac-td-actions">
                           <div className="mac-actions">
                             <MacActionBtn icon={Printer} tone="gray" title={t('actions.printReceipt')} onClick={() => printPaymentReceipt(p)} />
@@ -775,6 +801,8 @@ export default function VenteDetailPage() {
                     <Th mac>{t('fields.nature')}</Th>
                     <Th mac>{t('columns.mode')}</Th>
                     <Th mac>{t('columns.bank')}</Th>
+                    <Th mac>{t('fields.operationNo')}</Th>
+                    <Th mac>{t('fields.internalRef')}</Th>
                     <Th mac>{t('columns.proof')}</Th>
                     <Th mac>{t('fields.payer')}</Th>
                     <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
@@ -793,6 +821,8 @@ export default function VenteDetailPage() {
                       <Td mac className="mac-table-muted">
                         {isBankPaymentMode(p.operationType) ? (p.bank || '—') : '—'}
                       </Td>
+                      <Td mac className="mac-table-muted">{p.operationNo || '—'}</Td>
+                      <Td mac className="mac-table-muted">{p.internalRef || '—'}</Td>
                       <Td mac>
                         {p.proofFile ? (
                           <a href={fileUrl(p.proofFile)} target="_blank" rel="noreferrer" className="text-[#007aff] hover:opacity-70">
@@ -802,7 +832,7 @@ export default function VenteDetailPage() {
                           <span className="mac-table-muted">—</span>
                         )}
                       </Td>
-                      <Td mac className="mac-table-muted">{p.payerName || '—'}</Td>
+                      <Td mac className="mac-table-muted">{displayPayerName(p.payerName)}</Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions">
                           <MacActionBtn icon={Printer} tone="gray" title={t('actions.printReceipt')} onClick={() => printPaymentReceipt(p)} />
@@ -933,16 +963,10 @@ export default function VenteDetailPage() {
             onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
             readOnly={payForm.nature === 'solde'}
           />
-          <Select label={t('fields.mode')} value={payForm.operationType} onChange={(e) => setPayForm({ ...payForm, operationType: e.target.value })}>
-            <option value="especes">{t('fields.modeCash')}</option>
-            <option value="virement">{t('fields.modeTransfer')}</option>
-            <option value="cheque">{t('fields.modeCheck')}</option>
-            <option value="carte">{t('fields.modeCard')}</option>
-          </Select>
-          <Input label={t('fields.payerName')} value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} />
-          {isBankPaymentMode(payForm.operationType) && (
-            <Input label={t('fields.bankRef')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
-          )}
+          <PaymentModeFields
+            values={payForm}
+            onChange={(patch) => setPayForm({ ...payForm, ...patch })}
+          />
           <div>
             <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</label>
             <DocumentFileActions

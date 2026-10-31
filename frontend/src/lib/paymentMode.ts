@@ -38,10 +38,11 @@ export const PAYER_RELATION_OPTIONS = [
   { value: 'famille', labelKey: 'fields.payerRelationFamily' },
 ] as const;
 
-export function payerRelationLabel(value?: string | null) {
-  if (value === 'famille') return 'Membre de la famille';
-  if (value === 'client') return 'Le client';
-  return '';
+export function displayPayerName(raw?: string | null) {
+  const { relation, name } = parsePayerName(raw);
+  if (!name && relation !== 'famille') return '—';
+  if (relation === 'famille') return name ? `Famille — ${name}` : 'Membre de la famille';
+  return name || 'Le client';
 }
 
 export function parsePayerName(raw?: string | null) {
@@ -53,6 +54,6 @@ export function parsePayerName(raw?: string | null) {
 
 export function composePayerName(relation: string, name: string) {
   const trimmed = name.trim();
-  if (!trimmed && relation !== 'famille') return '';
-  return `[${relation === 'famille' ? 'famille' : 'client'}] ${trimmed}`.trim();
+  if (relation === 'famille') return `[famille] ${trimmed}`.trim();
+  return trimmed ? `[client] ${trimmed}` : '';
 }

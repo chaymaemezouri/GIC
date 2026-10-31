@@ -13,7 +13,7 @@ import {
 } from '../components/ui';
 import { SaleFormFields, emptySaleForm, saleFormToCreateBody, attachSaleCreateFiles, type SaleFormData } from '../components/SaleFormFields';
 import { PartyNames, partyLabel, type PartyPerson } from '../components/PartyNames';
-import { isBankPaymentMode } from '../lib/paymentMode';
+import { PaymentModeFields } from '../components/PaymentModeFields';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { printSaleReceipt } from '../lib/printSale';
 import { useRowSelection } from '../hooks/useRowSelection';
@@ -123,6 +123,8 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
   const [q, setQ] = useState(embedded ? '' : (searchParams.get('q') || ''));
   const [statusFilter, setStatusFilter] = useState(embedded ? '' : (searchParams.get('status') || ''));
   const [clientFilter, setClientFilter] = useState(embedded ? '' : (searchParams.get('clientId') || ''));
+  const [propertyFilter, setPropertyFilter] = useState(embedded ? '' : (searchParams.get('propertyId') || ''));
+  const [clientProperties, setClientProperties] = useState<{ id: string; reference: string; name: string }[]>([]);
   const [sort, setSort] = useState(embedded ? 'createdAt' : (searchParams.get('sort') || 'createdAt'));
   const [order, setOrder] = useState<SortOrder>(
     embedded
@@ -136,36 +138,49 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
   const [resiliateId, setResiliateId] = useState<string | null>(null);
   const [resiliateMotif, setResiliateMotif] = useState('');
   const [form, setForm] = useState<SaleFormData>(emptySaleForm());
-  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null as File | null });
+  const [payForm, setPayForm] = useState({
+    amount: '',
+    operationType: 'especes',
+    payerName: '',
+    bank: '',
+    nature: 'acompte',
+    operationNo: '',
+    internalRef: '',
+    proof: null as File | null,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const selection = useRowSelection<Sale>();
 
-  function buildStatsQuery(overrides?: { q?: string; status?: string; clientId?: string }) {
+  function buildStatsQuery(overrides?: { q?: string; status?: string; clientId?: string; propertyId?: string }) {
     const qs = new URLSearchParams();
     const qVal = overrides?.q !== undefined ? overrides.q : q;
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
+    const propertyId = overrides?.propertyId !== undefined ? overrides.propertyId : propertyFilter;
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (clientId) qs.set('clientId', clientId);
+    if (propertyId) qs.set('propertyId', propertyId);
     if (projectId) qs.set('projectId', projectId);
     return qs.toString();
   }
 
   function buildListQuery(
     pageNum = page,
-    overrides?: { q?: string; status?: string; clientId?: string; sort?: string; order?: SortOrder },
+    overrides?: { q?: string; status?: string; clientId?: string; propertyId?: string; sort?: string; order?: SortOrder },
   ) {
     const qVal = overrides?.q !== undefined ? overrides.q : q;
     const status = overrides?.status !== undefined ? overrides.status : statusFilter;
     const clientId = overrides?.clientId !== undefined ? overrides.clientId : clientFilter;
+    const propertyId = overrides?.propertyId !== undefined ? overrides.propertyId : propertyFilter;
     const sortVal = overrides?.sort !== undefined ? overrides.sort : sort;
     const orderVal = overrides?.order !== undefined ? overrides.order : order;
     const qs = new URLSearchParams();
     if (qVal) qs.set('q', qVal);
     if (status) qs.set('status', status);
     if (clientId) qs.set('clientId', clientId);
+    if (propertyId) qs.set('propertyId', propertyId);
     if (projectId) qs.set('projectId', projectId);
     qs.set('sort', sortVal);
     qs.set('order', orderVal);
@@ -180,6 +195,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
     if (q) qs.set('q', q);
     if (statusFilter) qs.set('status', statusFilter);
     if (clientFilter) qs.set('clientId', clientFilter);
+    if (propertyFilter) qs.set('propertyId', propertyFilter);
     if (sort !== 'createdAt') qs.set('sort', sort);
     if (order !== defaultOrderForSort(sort)) qs.set('order', order);
     if (pageNum > 1) qs.set('page', String(pageNum));
@@ -195,7 +211,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
 
   function load(
     pageNum = page,
-    overrides?: { q?: string; status?: string; clientId?: string; sort?: string; order?: SortOrder },
+    overrides?: { q?: string; status?: string; clientId?: string; propertyId?: string; sort?: string; order?: SortOrder },
   ) {
     setLoading(true);
     setError('');
@@ -203,6 +219,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
       q: overrides?.q,
       status: overrides?.status,
       clientId: overrides?.clientId,
+      propertyId: overrides?.propertyId,
     });
     Promise.all([
       api<PaginatedResponse<Sale>>(`/transactions/sales?${buildListQuery(pageNum, overrides)}`),
@@ -241,6 +258,18 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
     fetchClientList<{ id: string; reference: string; firstName: string; lastName: string }>().then(setClients);
     refreshProperties();
   }, [projectId]);
+
+  useEffect(() => {
+    if (!clientFilter) {
+      setClientProperties([]);
+      return;
+    }
+    api(`/clients/${clientFilter}`)
+      .then((c: { properties?: { id: string; reference: string; name: string }[] }) => {
+        setClientProperties(c.properties || []);
+      })
+      .catch(() => setClientProperties([]));
+  }, [clientFilter]);
 
   useEffect(() => {
     if (!showFilters) return;
@@ -300,6 +329,8 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
       fd.append('nature', payForm.nature || 'acompte');
       if (payForm.payerName) fd.append('payerName', payForm.payerName);
       if (payForm.bank) fd.append('bank', payForm.bank);
+      if (payForm.operationNo) fd.append('operationNo', payForm.operationNo);
+      if (payForm.internalRef) fd.append('internalRef', payForm.internalRef);
       if (payForm.proof) fd.append('proof', payForm.proof);
       await uploadForm('/transactions/payments', fd);
       setPayOpen(null);
@@ -364,7 +395,8 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
     { id: 'résiliée', label: t('common.resiliatedPlural') },
   ];
 
-  const hasActiveFilters = !!statusFilter || !!clientFilter || !!q;
+  const hasActiveFilters = !!statusFilter || !!clientFilter || !!propertyFilter || !!q;
+  const propertyChoices = clientFilter && clientProperties.length > 0 ? clientProperties : properties;
 
   const headerActions = (
     <>
@@ -427,8 +459,9 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
               value={clientFilter}
               onChange={(v) => {
                 setClientFilter(v);
+                setPropertyFilter('');
                 setPage(1);
-                load(1, { clientId: v });
+                load(1, { clientId: v, propertyId: '' });
               }}
               options={[
                 { value: '', label: t('common.allClients') },
@@ -436,6 +469,21 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
               ]}
               className="w-48 shrink-0"
             />
+            {propertyChoices.length > 1 && (
+              <MacSelect
+                value={propertyFilter}
+                onChange={(v) => {
+                  setPropertyFilter(v);
+                  setPage(1);
+                  load(1, { propertyId: v });
+                }}
+                options={[
+                  { value: '', label: t('common.allProperties') },
+                  ...propertyChoices.map((p) => ({ value: p.id, label: `${p.reference} — ${p.name}` })),
+                ]}
+                className="w-56 shrink-0"
+              />
+            )}
             <MacSelect
               value={sort}
               onChange={(v) => {
@@ -503,9 +551,10 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
                         onClick={() => {
                           setStatusFilter('');
                           setClientFilter('');
+                          setPropertyFilter('');
                           setQ('');
                           setPage(1);
-                          load(1, { q: '', status: '', clientId: '' });
+                          load(1, { q: '', status: '', clientId: '', propertyId: '' });
                           setShowFilters(false);
                         }}
                       >
@@ -651,21 +700,15 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
       >
         <form id="pay-form" onSubmit={addPayment} className="grid gap-3">
           <Input label={t('fields.amountMadRequired')} required type="number" min="0" step="0.01" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} />
-          <Select label={t('fields.paymentModeFull')} value={payForm.operationType} onChange={(e) => setPayForm({ ...payForm, operationType: e.target.value })}>
-            <option value="especes">{t('fields.modeCash')}</option>
-            <option value="virement">{t('fields.modeTransfer')}</option>
-            <option value="cheque">{t('fields.modeCheck')}</option>
-            <option value="carte">{t('fields.modeCard')}</option>
-          </Select>
           <Select label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })}>
             <option value="acompte">{t('fields.paymentNatureAdvance')}</option>
             <option value="echeance">{t('fields.paymentNatureInstallment')}</option>
             <option value="solde">{t('fields.paymentNatureBalance')}</option>
           </Select>
-          <Input label={t('fields.payerNameShort')} value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} />
-          {isBankPaymentMode(payForm.operationType) && (
-            <Input label={t('fields.bankRefOperation')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
-          )}
+          <PaymentModeFields
+            values={payForm}
+            onChange={(patch) => setPayForm({ ...payForm, ...patch })}
+          />
           <div>
             <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</label>
             <DocumentFileActions

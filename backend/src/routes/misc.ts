@@ -681,6 +681,7 @@ router.get('/audit', async (req, res) => {
 });
 
 import { getOrCreateCompanySettings } from '../lib/companySettings.js';
+import { companySettingsId } from '../lib/workspace.js';
 
 router.get('/settings/company', async (_req, res) => {
   res.json(await getOrCreateCompanySettings());
@@ -698,8 +699,8 @@ router.put('/settings/company', async (req, res) => {
     if (b[key] !== undefined) data[key] = b[key] == null ? null : String(b[key]);
   }
   if (b.printShowLogo !== undefined) data.printShowLogo = b.printShowLogo === true || b.printShowLogo === 'true';
-  const row = await prisma.companySettings.update({ where: { id: 'default' }, data: data as never });
-  await audit(req, 'modification', 'CompanySettings', 'default', 'Paramètres société / liste banque');
+  const row = await prisma.companySettings.update({ where: { id: companySettingsId() }, data: data as never });
+  await audit(req, 'modification', 'CompanySettings', companySettingsId(), 'Paramètres société / liste banque');
   res.json(row);
 });
 
@@ -712,10 +713,10 @@ router.post('/settings/company/logo', async (req, res, next) => {
       await getOrCreateCompanySettings();
       const logoPath = `/uploads/${req.file.filename}`;
       const row = await prisma.companySettings.update({
-        where: { id: 'default' },
+        where: { id: companySettingsId() },
         data: { logoPath },
       });
-      await audit(req, 'upload', 'CompanySettings', 'default', 'Logo société');
+      await audit(req, 'upload', 'CompanySettings', companySettingsId(), 'Logo société');
       res.json(row);
     } catch (e) {
       next(e);

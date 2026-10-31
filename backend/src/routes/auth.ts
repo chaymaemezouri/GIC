@@ -22,10 +22,14 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-function signToken(user: { id: string; email: string; role: string }) {
+function signToken(user: { id: string; email: string; role: string; workspaceId?: string }) {
   const secret = process.env.JWT_SECRET || 'dev';
   const expiresIn = (process.env.JWT_EXPIRES_IN || '8h') as jwt.SignOptions['expiresIn'];
-  return jwt.sign({ id: user.id, email: user.email, role: user.role }, secret, { expiresIn });
+  return jwt.sign(
+    { id: user.id, email: user.email, role: user.role, workspaceId: user.workspaceId || 'demo' },
+    secret,
+    { expiresIn },
+  );
 }
 
 function serializeSessionUser(user: {
@@ -86,8 +90,9 @@ router.post('/login', async (req, res) => {
     where: { id: user.id },
     data: { lastLoginAt: new Date() },
   });
-  const token = signToken(user);
-  req.user = { id: user.id, email: user.email, role: user.role };
+  const workspaceId = (user as { workspaceId?: string }).workspaceId || 'demo';
+  const token = signToken({ ...user, workspaceId });
+  req.user = { id: user.id, email: user.email, role: user.role, workspaceId };
   await audit(req, 'connexion', 'User', user.id);
   res.json({
     token,
@@ -118,7 +123,8 @@ router.post('/2fa/verify', async (req, res) => {
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
-    const token = signToken(user);
+    const workspaceId = (user as { workspaceId?: string }).workspaceId || 'demo';
+    const token = signToken({ ...user, workspaceId });
     await audit(req, 'connexion_2fa', 'User', user.id);
     res.json({
       token,

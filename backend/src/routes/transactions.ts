@@ -4,7 +4,11 @@ import { nextReference } from '../lib/references.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../lib/audit.js';
-import { assertUniquePaymentRefs } from '../lib/uniqueness.js';
+import {
+  assertUniquePaymentRefs,
+  normalizePaymentRef,
+  uniquePaymentViolationMessage,
+} from '../lib/uniqueness.js';
 import { notifyAllAdmins } from '../lib/notifications.js';
 import { sendExcel } from '../lib/exportExcel.js';
 import { sendPdfTable } from '../lib/exportPdf.js';
@@ -234,7 +238,7 @@ async function recalculateRentalBalances(rentalId: string) {
   });
 }
 
-async function buildSaleWhere(q: string, status: string, clientId: string, projectId = '') {
+async function buildSaleWhere(q: string, status: string, clientId: string, projectId = '', propertyId = '') {
   const { nameHits, partyOfClient } = await saleSearchExtras(q, clientId);
   return {
     AND: [
@@ -256,6 +260,7 @@ async function buildSaleWhere(q: string, status: string, clientId: string, proje
         ? { OR: [{ clientId }, ...(partyOfClient.length ? [{ id: { in: partyOfClient } }] : [])] }
         : {},
       projectId ? { property: { projectId } } : {},
+      propertyId ? { propertyId } : {},
     ],
   };
 }
@@ -266,12 +271,13 @@ function saleListFilters(req: { query: Record<string, unknown> }) {
     status: String(req.query.status || ''),
     clientId: String(req.query.clientId || ''),
     projectId: String(req.query.projectId || ''),
+    propertyId: String(req.query.propertyId || ''),
   };
 }
 
 router.get('/sales/export/csv', async (req, res) => {
-  const { q, status, clientId, projectId } = saleListFilters(req);
-  const where = await buildSaleWhere(q, status, clientId, projectId);
+  const { q, status, clientId, projectId, propertyId } = saleListFilters(req);
+  const where = await buildSaleWhere(q, status, clientId, projectId, propertyId);
   const sales = await attachCoClients('Sale', await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
@@ -290,8 +296,8 @@ router.get('/sales/export/csv', async (req, res) => {
 });
 
 router.get('/sales/export/xlsx', async (req, res) => {
-  const { q, status, clientId, projectId } = saleListFilters(req);
-  const where = await buildSaleWhere(q, status, clientId, projectId);
+  const { q, status, clientId, projectId, propertyId } = saleListFilters(req);
+  const where = await buildSaleWhere(q, status, clientId, projectId, propertyId);
   const sales = await attachCoClients('Sale', await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
@@ -315,8 +321,8 @@ router.get('/sales/export/xlsx', async (req, res) => {
 });
 
 router.get('/sales/export/pdf', async (req, res) => {
-  const { q, status, clientId, projectId } = saleListFilters(req);
-  const where = await buildSaleWhere(q, status, clientId, projectId);
+  const { q, status, clientId, projectId, propertyId } = saleListFilters(req);
+  const where = await buildSaleWhere(q, status, clientId, projectId, propertyId);
   const sales = await attachCoClients('Sale', await prisma.sale.findMany({
     where,
     include: { client: true, property: true },
@@ -347,8 +353,8 @@ router.get('/sales/export/pdf', async (req, res) => {
 });
 
 router.get('/sales/stats', async (req, res) => {
-  const { q, status, clientId, projectId } = saleListFilters(req);
-  const baseWhere = await buildSaleWhere(q, status, clientId, projectId);
+  const { q, status, clientId, projectId, propertyId } = saleListFilters(req);
+  const baseWhere = await buildSaleWhere(q, status, clientId, projectId, propertyId);
   const activeFilter = { AND: [baseWhere, { status: { notIn: ['annulée', 'résiliée'] } }] };
   const [total, soldees, enCours, agg] = await Promise.all([
     prisma.sale.count({ where: activeFilter }),
@@ -370,7 +376,7 @@ router.get('/sales/stats', async (req, res) => {
 });
 
 router.get('/sales', async (req, res) => {
-  const { q, status, clientId, projectId } = saleListFilters(req);
+  const { q, status, clientId, projectId, propertyId } = saleListFilters(req);
   const sort = String(req.query.sort || 'createdAt');
   const order = req.query.order === 'asc' ? 'asc' : 'desc';
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -383,7 +389,7 @@ router.get('/sales', async (req, res) => {
         ? { remaining: order as 'asc' | 'desc' }
         : { createdAt: order as 'asc' | 'desc' };
 
-  const where = await buildSaleWhere(q, status, clientId, projectId);
+  const where = await buildSaleWhere(q, status, clientId, projectId, propertyId);
   const [items, total] = await Promise.all([
     prisma.sale.findMany({
       where,
@@ -809,7 +815,7 @@ async function rentPayIndex() {
   return { byId, ids };
 }
 
-async function buildRentalWhere(q: string, status: string, clientId: string, projectId = '', pay = '') {
+async function buildRentalWhere(q: string, status: string, clientId: string, projectId = '', pay = '', propertyId = '') {
   const { nameHits, partyOfClient } = await rentalSearchExtras(q, clientId);
   return {
     AND: [
@@ -831,6 +837,7 @@ async function buildRentalWhere(q: string, status: string, clientId: string, pro
         ? { OR: [{ clientId }, ...(partyOfClient.length ? [{ id: { in: partyOfClient } }] : [])] }
         : {},
       projectId ? { property: { projectId } } : {},
+      propertyId ? { propertyId } : {},
       pay === 'retard' || pay === 'paye' || pay === 'a_payer'
         ? { id: { in: (await rentPayIndex()).ids[pay as RentPay] } }
         : {},
@@ -845,14 +852,15 @@ function rentalListFilters(req: { query: Record<string, unknown> }) {
     clientId: String(req.query.clientId || ''),
     projectId: String(req.query.projectId || ''),
     pay: String(req.query.pay || ''),
+    propertyId: String(req.query.propertyId || ''),
   };
 }
 
 const rentPayLabel: Record<RentPay, string> = { paye: 'Payé', retard: 'En retard', a_payer: 'À payer' };
 
 router.get('/rentals/export/csv', async (req, res) => {
-  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
-  const where = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const { q, status, clientId, projectId, pay, propertyId } = rentalListFilters(req);
+  const where = await buildRentalWhere(q, status, clientId, projectId, pay, propertyId);
   const rentals = await attachCoClients('Rental', await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
@@ -871,8 +879,8 @@ router.get('/rentals/export/csv', async (req, res) => {
 });
 
 router.get('/rentals/export/xlsx', async (req, res) => {
-  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
-  const where = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const { q, status, clientId, projectId, pay, propertyId } = rentalListFilters(req);
+  const where = await buildRentalWhere(q, status, clientId, projectId, pay, propertyId);
   const rentals = await attachCoClients('Rental', await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
@@ -898,8 +906,8 @@ router.get('/rentals/export/xlsx', async (req, res) => {
 });
 
 router.get('/rentals/export/pdf', async (req, res) => {
-  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
-  const where = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const { q, status, clientId, projectId, pay, propertyId } = rentalListFilters(req);
+  const where = await buildRentalWhere(q, status, clientId, projectId, pay, propertyId);
   const rentals = await attachCoClients('Rental', await prisma.rental.findMany({
     where,
     include: { client: true, property: true },
@@ -931,9 +939,9 @@ router.get('/rentals/export/pdf', async (req, res) => {
 });
 
 router.get('/rentals/stats', async (req, res) => {
-  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
-  const baseWhere = await buildRentalWhere(q, status, clientId, projectId, pay);
-  const lateWhere = await buildRentalWhere(q, status, clientId, projectId, 'retard');
+  const { q, status, clientId, projectId, pay, propertyId } = rentalListFilters(req);
+  const baseWhere = await buildRentalWhere(q, status, clientId, projectId, pay, propertyId);
+  const lateWhere = await buildRentalWhere(q, status, clientId, projectId, 'retard', propertyId);
   const activeFilter = { AND: [baseWhere, { status: 'active' }] };
   const [total, actives, terminees, enRetard, agg] = await Promise.all([
     prisma.rental.count({ where: baseWhere }),
@@ -957,7 +965,7 @@ router.get('/rentals/stats', async (req, res) => {
 });
 
 router.get('/rentals', async (req, res) => {
-  const { q, status, clientId, projectId, pay } = rentalListFilters(req);
+  const { q, status, clientId, projectId, pay, propertyId } = rentalListFilters(req);
   const sort = String(req.query.sort || 'createdAt');
   const order = req.query.order === 'asc' ? 'asc' : 'desc';
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -970,7 +978,7 @@ router.get('/rentals', async (req, res) => {
         ? { monthlyRent: order as 'asc' | 'desc' }
         : { createdAt: order as 'asc' | 'desc' };
 
-  const where = await buildRentalWhere(q, status, clientId, projectId, pay);
+  const where = await buildRentalWhere(q, status, clientId, projectId, pay, propertyId);
   const [items, total, payIndex] = await Promise.all([
     prisma.rental.findMany({
       where,
@@ -1304,12 +1312,8 @@ router.post('/schedules/:id/advance', upload.single('proof'), async (req, res) =
   const bank = req.body.bank != null && String(req.body.bank).trim()
     ? String(req.body.bank).trim()
     : null;
-  const operationNo = req.body.operationNo != null && String(req.body.operationNo).trim()
-    ? String(req.body.operationNo).trim()
-    : null;
-  const internalRef = req.body.internalRef != null && String(req.body.internalRef).trim()
-    ? String(req.body.internalRef).trim()
-    : null;
+  const operationNo = normalizePaymentRef(req.body.operationNo);
+  const internalRef = normalizePaymentRef(req.body.internalRef);
   try {
     await assertUniquePaymentRefs({ internalRef, operationNo });
   } catch (e) {
@@ -1317,7 +1321,9 @@ router.post('/schedules/:id/advance', upload.single('proof'), async (req, res) =
   }
   const receiptNo = await nextReference('REC');
   const payAmount = Math.min(amount, reste);
-  const created = await prisma.$transaction(async (tx) => {
+  let created;
+  try {
+  created = await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.create({
       data: {
         receiptNo,
@@ -1340,6 +1346,11 @@ router.post('/schedules/:id/advance', upload.single('proof'), async (req, res) =
     if (schedule.saleId) await applySalePaymentDelta(tx, schedule.saleId, payAmount);
     return payment;
   });
+  } catch (e) {
+    const uniqueMsg = uniquePaymentViolationMessage(e);
+    if (uniqueMsg) return res.status(400).json({ message: uniqueMsg });
+    throw e;
+  }
   await refreshScheduleFromPayments(id);
   if (schedule.rentalId) await recalculateRentalBalances(schedule.rentalId);
   await audit(req, 'paiement', 'PaymentSchedule', id, `${schedule.label || id} · avance ${payAmount}`);
@@ -1910,14 +1921,18 @@ router.put('/payments/:id', upload.single('proof'), async (req, res) => {
     return res.status(400).json({ message: 'Montant invalide' });
   }
 
+  const nextOperationNo = req.body.operationNo !== undefined
+    ? normalizePaymentRef(req.body.operationNo)
+    : payment.operationNo;
+  const nextInternalRef = req.body.internalRef !== undefined
+    ? normalizePaymentRef(req.body.internalRef)
+    : payment.internalRef;
   try {
-    if (req.body.internalRef || req.body.operationNo) {
-      await assertUniquePaymentRefs({
-        internalRef: req.body.internalRef,
-        operationNo: req.body.operationNo,
-        excludeId: id,
-      });
-    }
+    await assertUniquePaymentRefs({
+      internalRef: nextInternalRef,
+      operationNo: nextOperationNo,
+      excludeId: id,
+    });
   } catch (e) {
     return res.status(400).json({ message: e instanceof Error ? e.message : 'Doublon détecté' });
   }
@@ -1945,18 +1960,25 @@ router.put('/payments/:id', upload.single('proof'), async (req, res) => {
   if (req.body.operationType !== undefined) data.operationType = req.body.operationType || null;
   if (req.body.bank !== undefined) data.bank = req.body.bank || null;
   if (req.body.payerName !== undefined) data.payerName = req.body.payerName || null;
-  if (req.body.operationNo !== undefined) data.operationNo = req.body.operationNo || null;
-  if (req.body.internalRef !== undefined) data.internalRef = req.body.internalRef || null;
+  if (req.body.operationNo !== undefined) data.operationNo = nextOperationNo;
+  if (req.body.internalRef !== undefined) data.internalRef = nextInternalRef;
   if (req.file) data.proofFile = `/uploads/${req.file.filename}`;
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.payment.update({ where: { id }, data });
-    if (delta !== 0) {
-      if (payment.saleId) await applySalePaymentDelta(tx, payment.saleId, delta);
-      if (payment.rentalId) await applyRentalPaymentDelta(tx, payment.rentalId, delta);
-    }
-    return row;
-  });
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.payment.update({ where: { id }, data });
+      if (delta !== 0) {
+        if (payment.saleId) await applySalePaymentDelta(tx, payment.saleId, delta);
+        if (payment.rentalId) await applyRentalPaymentDelta(tx, payment.rentalId, delta);
+      }
+      return row;
+    });
+  } catch (e) {
+    const uniqueMsg = uniquePaymentViolationMessage(e);
+    if (uniqueMsg) return res.status(400).json({ message: uniqueMsg });
+    throw e;
+  }
 
   if (payment.scheduleId && delta !== 0) await refreshScheduleFromPayments(payment.scheduleId);
   if (payment.rentalId && delta !== 0) await recalculateRentalBalances(payment.rentalId);
@@ -2036,14 +2058,18 @@ router.post('/payments', upload.single('proof'), async (req, res) => {
       return res.status(400).json({ message: 'Location non éligible au paiement' });
     }
   }
+  const operationNoNorm = normalizePaymentRef(operationNo);
+  const internalRefNorm = normalizePaymentRef(internalRef);
   try {
-    await assertUniquePaymentRefs({ internalRef, operationNo });
+    await assertUniquePaymentRefs({ internalRef: internalRefNorm, operationNo: operationNoNorm });
   } catch (e) {
     return res.status(400).json({ message: e instanceof Error ? e.message : 'Doublon détecté' });
   }
   const receiptNo = await nextReference('REC');
   const proofFile = req.file ? `/uploads/${req.file.filename}` : null;
-  const payment = await prisma.$transaction(async (tx) => {
+  let payment;
+  try {
+  payment = await prisma.$transaction(async (tx) => {
     const created = await tx.payment.create({
       data: {
         receiptNo,
@@ -2054,8 +2080,8 @@ router.post('/payments', upload.single('proof'), async (req, res) => {
         operationType,
         bank,
         payerName,
-        operationNo: operationNo || null,
-        internalRef: internalRef || null,
+        operationNo: operationNoNorm,
+        internalRef: internalRefNorm,
         proofFile,
         date: req.body.date ? new Date(req.body.date) : new Date(),
       },
@@ -2085,6 +2111,11 @@ router.post('/payments', upload.single('proof'), async (req, res) => {
     }
     return created;
   });
+  } catch (e) {
+    const uniqueMsg = uniquePaymentViolationMessage(e);
+    if (uniqueMsg) return res.status(400).json({ message: uniqueMsg });
+    throw e;
+  }
   if (rentalId) await recalculateRentalBalances(rentalId);
   await audit(req, 'création', 'Payment', payment.id, receiptNo);
   const full = await prisma.payment.findUnique({

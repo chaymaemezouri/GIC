@@ -13,6 +13,7 @@ export const ECC_COMPANY = {
 
 export const GIC_DEMO_ACCOUNTS = [
   { label: 'Super administrateur', email: 'admin@gic.ma', password: 'Admin@2026', portal: 'interne' },
+  { label: 'Administrateur Omar (espace vide)', email: 'omar@gic.ma', password: 'Omar@2026', portal: 'interne' },
   { label: 'Comptable', email: 'comptable@gic.ma', password: 'Comptable@2026', portal: 'interne' },
   { label: 'Commercial', email: 'commercial@gic.ma', password: 'Commercial@2026', portal: 'interne' },
   { label: 'Chef de chantier', email: 'chef@gic.ma', password: 'Chef@2026', portal: 'interne' },

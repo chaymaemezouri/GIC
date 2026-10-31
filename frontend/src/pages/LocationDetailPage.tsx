@@ -17,6 +17,8 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { DocumentFileActions } from '../components/DocumentScanner';
+import { PaymentModeFields } from '../components/PaymentModeFields';
+import { displayPayerName, isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 
 import { RentalFormFields, rentalToForm, rentalFormToBody, type RentalFormData } from '../components/RentalFormFields';
 import { printRentalReceipt } from '../lib/printRental';
@@ -57,7 +59,16 @@ export default function LocationDetailPage() {
     coClientId2: '', coClientId3: '',
     landlordSignatureDate: '', landlordLegalizationNo: '', tenantSignatureDate: '', tenantLegalizationNo: '',
   });
-  const [payForm, setPayForm] = useState({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '', proof: null as File | null });
+  const [payForm, setPayForm] = useState({
+    amount: '',
+    operationType: 'especes',
+    payerName: '',
+    bank: '',
+    nature: '',
+    operationNo: '',
+    internalRef: '',
+    proof: null as File | null,
+  });
   const [paymentNatures, setPaymentNatures] = useState<{ value: string; label?: string }[]>([]);
 
   function load() {
@@ -138,10 +149,12 @@ export default function LocationDetailPage() {
       if (payForm.nature) fd.append('nature', payForm.nature);
       if (payForm.payerName) fd.append('payerName', payForm.payerName);
       if (payForm.bank) fd.append('bank', payForm.bank);
+      if (payForm.operationNo) fd.append('operationNo', payForm.operationNo);
+      if (payForm.internalRef) fd.append('internalRef', payForm.internalRef);
       if (payForm.proof) fd.append('proof', payForm.proof);
       await uploadForm('/transactions/payments', fd);
       setPayOpen(false);
-      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '', proof: null });
+      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: '', operationNo: '', internalRef: '', proof: null });
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
@@ -173,6 +186,7 @@ export default function LocationDetailPage() {
     if (!rental) return;
     await printReceipt({
       ...p,
+      payerName: displayPayerName(p.payerName) === '—' ? '' : displayPayerName(p.payerName),
       rental: {
         reference: rental.reference,
         client: rental.client,
@@ -472,6 +486,9 @@ export default function LocationDetailPage() {
                     <Th mac>{t('columns.date')}</Th>
                     <Th mac>{t('columns.amount')}</Th>
                     <Th mac>{t('columns.mode')}</Th>
+                    <Th mac>{t('columns.bank')}</Th>
+                    <Th mac>{t('fields.operationNo')}</Th>
+                    <Th mac>{t('fields.internalRef')}</Th>
                     <Th mac>{t('fields.payer')}</Th>
                     <Th mac>{t('columns.proof')}</Th>
                     <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
@@ -488,6 +505,8 @@ export default function LocationDetailPage() {
                     nature?: string | null;
                     bank?: string | null;
                     proofFile?: string | null;
+                    operationNo?: string | null;
+                    internalRef?: string | null;
                   }) => (
                     <tr key={p.id}>
                       <Td mac>
@@ -496,8 +515,11 @@ export default function LocationDetailPage() {
                       <Td mac className="mac-table-muted">{p.nature || '—'}</Td>
                       <Td mac className="mac-table-muted">{formatDate(p.date)}</Td>
                       <Td mac className="font-medium">{formatMad(p.amount)}</Td>
-                      <Td mac className="capitalize mac-table-muted">{p.operationType || '—'}</Td>
-                      <Td mac className="mac-table-muted">{p.payerName || '—'}</Td>
+                      <Td mac className="mac-table-muted">{paymentModeLabel(p.operationType)}</Td>
+                      <Td mac className="mac-table-muted">{isBankPaymentMode(p.operationType) ? (p.bank || '—') : '—'}</Td>
+                      <Td mac className="mac-table-muted">{p.operationNo || '—'}</Td>
+                      <Td mac className="mac-table-muted">{p.internalRef || '—'}</Td>
+                      <Td mac className="mac-table-muted">{displayPayerName(p.payerName)}</Td>
                       <Td mac>
                         {p.proofFile ? (
                           <a href={fileUrl(p.proofFile)} className="text-[#007aff] hover:opacity-70">{t('common.view')}</a>
@@ -613,12 +635,10 @@ export default function LocationDetailPage() {
       >
         <form id="pay-loc-form" onSubmit={addPayment} className="grid gap-3">
           <Input label={t('fields.amountMadRequired')} required type="number" min="0" step="0.01" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} />
-          <Select label={t('fields.mode')} value={payForm.operationType} onChange={(e) => setPayForm({ ...payForm, operationType: e.target.value })}>
-            <option value="especes">{t('fields.modeCash')}</option>
-            <option value="virement">{t('fields.modeTransfer')}</option>
-            <option value="cheque">{t('fields.modeCheck')}</option>
-            <option value="carte">{t('fields.modeCard')}</option>
-          </Select>
+          <PaymentModeFields
+            values={payForm}
+            onChange={(patch) => setPayForm({ ...payForm, ...patch })}
+          />
           {paymentNatures.length > 0 ? (
             <Select label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })}>
               <option value="">—</option>
@@ -632,8 +652,6 @@ export default function LocationDetailPage() {
           ) : (
             <Input label={t('fields.nature')} value={payForm.nature} onChange={(e) => setPayForm({ ...payForm, nature: e.target.value })} placeholder={t('fields.naturePlaceholder')} />
           )}
-          <Input label={t('fields.payerName')} value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} />
-          <Input label={t('fields.bankRef')} value={payForm.bank} onChange={(e) => setPayForm({ ...payForm, bank: e.target.value })} />
           <div>
             <label className="mb-1 block text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</label>
             <DocumentFileActions

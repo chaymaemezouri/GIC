@@ -300,8 +300,10 @@ export function SaleFormFields({
               >
                 <option value="especes">{t('fields.modeCash')}</option>
                 <option value="cheque">{t('fields.modeCheck')}</option>
-                <option value="virement">{t('fields.modeTransfer')}</option>
+                <option value="virement_national">{t('fields.modeTransferNational')}</option>
+                <option value="virement_international">{t('fields.modeTransferInternational')}</option>
                 <option value="carte">{t('fields.modeCard')}</option>
+                <option value="mandat">{t('fields.modeMandate')}</option>
               </Select>
               {isBankPaymentMode(form.advanceMode) && (
                 <Input

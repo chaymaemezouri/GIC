@@ -401,6 +401,32 @@ async function main() {
     },
   });
 
+  const omarHash = await bcrypt.hash('Omar@2026', 10);
+  await prisma.user.upsert({
+    where: { email: 'omar@gic.ma' },
+    update: {
+      firstName: 'Omar',
+      lastName: 'Alaoui',
+      role: 'ADMIN',
+      passwordHash: omarHash,
+      isActive: true,
+      photo: null,
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      sidebarPrefs: null,
+      workspaceId: 'omar',
+    },
+    create: {
+      email: 'omar@gic.ma',
+      username: 'omar',
+      passwordHash: omarHash,
+      firstName: 'Omar',
+      lastName: 'Alaoui',
+      role: 'ADMIN',
+      workspaceId: 'omar',
+    },
+  });
+
   for (const u of [
     { email: 'comptable@gic.ma', pwd: 'Comptable@2026', role: 'COMPTABLE', firstName: 'Fatima', lastName: 'El Amrani' },
     { email: 'commercial@gic.ma', pwd: 'Commercial@2026', role: 'COMMERCIAL', firstName: 'Sara', lastName: 'Bennani' },

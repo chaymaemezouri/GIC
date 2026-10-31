@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { api, fetchAgentList, formatMad, formatDate, uploadDocument, uploadForm } from '../lib/api';
 import {
-  Btn, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th,
+  Btn, KpiCard, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th,
   PageBackLink,
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
@@ -62,6 +62,7 @@ export default function ClientDetailPage() {
   const [payOpen, setPayOpen] = useState(false);
   const [payForm, setPayForm] = useState<PaymentFormData>(emptyPaymentForm());
   const [payError, setPayError] = useState('');
+  const [propertyFilter, setPropertyFilter] = useState('');
 
   function load() {
     if (!id) return;
@@ -74,6 +75,7 @@ export default function ClientDetailPage() {
   }
 
   useEffect(() => {
+    setPropertyFilter('');
     load();
     fetchAgentList({ active: 'true', limit: 500 }).then(setAgents);
     api<{ value: string }[]>('/dropdowns/identity_type').then((d) => setIdentityTypes(d.map((x) => x.value))).catch(() => {});
@@ -137,8 +139,10 @@ export default function ClientDetailPage() {
   }
 
   function openPayModal() {
-    const clientSales = (client?.sales || []) as { id: string; remaining: number }[];
-    const clientRentals = (client?.rentals || []) as { id: string; remaining: number }[];
+    const clientSales = ((client?.sales || []) as { id: string; remaining: number; propertyId?: string; property?: { id?: string } }[])
+      .filter((s) => !propertyFilter || s.propertyId === propertyFilter || s.property?.id === propertyFilter);
+    const clientRentals = ((client?.rentals || []) as { id: string; remaining: number; propertyId?: string; property?: { id?: string } }[])
+      .filter((r) => !propertyFilter || r.propertyId === propertyFilter || r.property?.id === propertyFilter);
     const payableSales = clientSales.filter((s) => Number(s.remaining) > 0);
     const payableRentals = clientRentals.filter((r) => Number(r.remaining) > 0);
     const preferLocation = payableSales.length === 0 && payableRentals.length > 0;
@@ -248,15 +252,20 @@ export default function ClientDetailPage() {
     return <p className="text-[12px] text-gic-muted p-6 text-center">{t('msg.loadingClient')}</p>;
   }
 
-  const sales = client.sales || [];
-  const rentals = client.rentals || [];
+  const salesAll = client.sales || [];
+  const rentalsAll = client.rentals || [];
   const docs = client.documents || [];
   const identityDocs = docs.filter((d: any) =>
     String(d.category || '').toLowerCase().includes('ident') ||
     String(d.name || '').toLowerCase().match(/cin|passeport|identité|identite/),
   );
-  const properties = client.properties || [];
-  const payments = client.allPayments || [];
+  const propertiesAll = client.properties || [];
+  const paymentsAll = client.allPayments || [];
+  const matchProperty = (propertyId?: string | null) => !propertyFilter || propertyId === propertyFilter;
+  const sales = salesAll.filter((s: any) => matchProperty(s.propertyId || s.property?.id));
+  const rentals = rentalsAll.filter((r: any) => matchProperty(r.propertyId || r.property?.id));
+  const properties = propertiesAll.filter((p: any) => !propertyFilter || p.id === propertyFilter);
+  const payments = paymentsAll.filter((p: any) => matchProperty(p.propertyId));
   const linkedMandants = (client.mandants || []).map((m: any) => m.mandant);
   const summary = client.summary || {};
   const source = client.source || null;
@@ -269,8 +278,8 @@ export default function ClientDetailPage() {
   );
   const recentPayments = payments.slice(0, 5);
   const canAddPayment =
-    sales.some((s: any) => Number(s.remaining) > 0) ||
-    rentals.some((r: any) => Number(r.remaining) > 0);
+    salesAll.some((s: any) => Number(s.remaining) > 0) ||
+    rentalsAll.some((r: any) => Number(r.remaining) > 0);
   const payProgress = summary.totalContracted > 0
     ? Math.min(100, Math.round((summary.totalPaid / summary.totalContracted) * 100))
     : 0;
@@ -371,10 +380,10 @@ export default function ClientDetailPage() {
                 id: 'transactions',
                 label: t('tabs.transactions'),
                 items: [
-                  { id: 'ventes', label: t('tabs.sales'), icon: Home, badge: sales.length },
-                  { id: 'locations', label: t('tabs.rentals'), icon: KeyRound, badge: rentals.length },
-                  { id: 'biens', label: t('tabs.properties'), icon: Building2, badge: properties.length },
-                  { id: 'paiements', label: t('tabs.payments'), icon: Wallet, badge: payments.length },
+                  { id: 'ventes', label: t('tabs.sales'), icon: Home, badge: salesAll.length },
+                  { id: 'locations', label: t('tabs.rentals'), icon: KeyRound, badge: rentalsAll.length },
+                  { id: 'biens', label: t('tabs.properties'), icon: Building2, badge: propertiesAll.length },
+                  { id: 'paiements', label: t('tabs.payments'), icon: Wallet, badge: paymentsAll.length },
                 ],
               },
               {
@@ -404,6 +413,26 @@ export default function ClientDetailPage() {
           />
         }
       >
+        {propertiesAll.length > 1 && ['vue', 'ventes', 'locations', 'biens', 'paiements'].includes(tab) && (
+          <div className="mb-3 max-w-md">
+            <Select
+              label={t('fields.property')}
+              value={propertyFilter}
+              onChange={(e) => {
+                setPropertyFilter(e.target.value);
+                setSaleIdx(0);
+                setRentalIdx(0);
+              }}
+            >
+              <option value="">{t('common.allProperties')}</option>
+              {propertiesAll.map((p: { id: string; reference?: string; name?: string }) => (
+                <option key={p.id} value={p.id}>
+                  {p.reference ? `${p.reference} — ${p.name || ''}` : (p.name || p.id)}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         {tab === 'vue' && (
           editing ? (
             <form id="edit-client-form" onSubmit={saveEdit}>
@@ -488,7 +517,7 @@ export default function ClientDetailPage() {
                       <span className="text-[#c7c7cc]"> · </span>
                       {rentals.length} location{rentals.length > 1 ? 's' : ''}
                       <span className="text-[#c7c7cc]"> · </span>
-                      {properties.length} bien{properties.length > 1 ? 's' : ''}
+                      {propertiesAll.length} bien{propertiesAll.length > 1 ? 's' : ''}
                     </p>
                   </div>
                 ) : (
@@ -1108,8 +1137,8 @@ export default function ClientDetailPage() {
           <PaymentFormFields
             form={payForm}
             setForm={setPayForm}
-            sales={sales}
-            rentals={rentals}
+            sales={propertyFilter ? sales : salesAll}
+            rentals={propertyFilter ? rentals : rentalsAll}
           />
         </form>
       </Modal>

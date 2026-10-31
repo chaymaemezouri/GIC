@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/I18nContext';
 import { fetchDropdownOptions } from '../lib/api';
 import { DocumentFileActions } from './DocumentScanner';
+import { PaymentModeFields } from './PaymentModeFields';
 import { Input, Select } from './ui';
 
 export type PaymentTxType = 'vente' | 'location';
@@ -192,12 +193,10 @@ export function PaymentFormFields({
       )}
       <Input label={`${t('fields.amountMad')} *`} required type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
       <Input label={t('fields.date')} type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-      <Select label={t('fields.mode')} value={form.operationType} onChange={(e) => setForm({ ...form, operationType: e.target.value })}>
-        <option value="especes">{t('fields.modeCash')}</option>
-        <option value="virement">{t('fields.modeTransfer')}</option>
-        <option value="cheque">{t('fields.modeCheck')}</option>
-        <option value="carte">{t('fields.modeCard')}</option>
-      </Select>
+      <PaymentModeFields
+        values={form}
+        onChange={(patch) => setForm({ ...form, ...patch })}
+      />
       {natures.length > 0 ? (
         <Select label={t('fields.nature')} value={form.nature} onChange={(e) => setForm({ ...form, nature: e.target.value })}>
           <option value="">—</option>
@@ -211,10 +210,6 @@ export function PaymentFormFields({
       ) : (
         <Input label={t('fields.nature')} value={form.nature} onChange={(e) => setForm({ ...form, nature: e.target.value })} placeholder={t('fields.naturePlaceholder')} />
       )}
-      <Input label={t('fields.payerName')} value={form.payerName} onChange={(e) => setForm({ ...form, payerName: e.target.value })} />
-      <Input label={t('fields.bankRef')} value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} />
-      <Input label={t('fields.internalRef')} value={form.internalRef} onChange={(e) => setForm({ ...form, internalRef: e.target.value })} />
-      <Input label={t('fields.operationNo')} value={form.operationNo} onChange={(e) => setForm({ ...form, operationNo: e.target.value })} />
       <div className="sm:col-span-2">
         <label className="block text-[11px] font-medium text-gic-muted mb-1">{t('fields.proofDocument')}</label>
         <DocumentFileActions

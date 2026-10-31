@@ -56,6 +56,37 @@ const accountHolderInclude = {
   holderUser: { select: { id: true, firstName: true, lastName: true, email: true } },
 } as const;
 
+let notationColumnReady = false;
+async function ensureNotationColumn() {
+  if (notationColumnReady) return;
+  try {
+    await prisma.$executeRawUnsafe('ALTER TABLE CashMovement ADD COLUMN notation TEXT');
+  } catch {
+    /* already exists */
+  }
+  notationColumnReady = true;
+}
+
+async function attachNotations<T extends { id: string }>(rows: T[]): Promise<(T & { notation?: string | null })[]> {
+  if (!rows.length) return rows as (T & { notation?: string | null })[];
+  await ensureNotationColumn();
+  const ids = rows.map((row) => row.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const notes = await prisma.$queryRawUnsafe<{ id: string; notation: string | null }[]>(
+    `SELECT id, notation FROM CashMovement WHERE id IN (${placeholders})`,
+    ...ids,
+  );
+  const byId = new Map(notes.map((row) => [row.id, row.notation]));
+  return rows.map((row) => ({ ...row, notation: byId.get(row.id) ?? null }));
+}
+
+async function saveNotation(id: string, value: unknown) {
+  await ensureNotationColumn();
+  const notation = String(value ?? '').trim() || null;
+  await prisma.$executeRawUnsafe('UPDATE CashMovement SET notation = ? WHERE id = ?', notation, id);
+  return notation;
+}
+
 function firstUploaded(files: Express.Multer.File[] | undefined) {
   const f = files?.[0];
   return f ? `/uploads/${f.filename}` : undefined;
@@ -69,6 +100,39 @@ function movementFiles(req: Express.Request) {
     deliveryNoteFile: firstUploaded(files?.deliveryNote),
     receptionPvFile: firstUploaded(files?.receptionPv),
   };
+}
+
+async function attachSourceProofs<T extends { proofFile?: string | null; sourceType?: string | null; sourceId?: string | null }>(
+  rows: T[],
+): Promise<T[]> {
+  const missingPay = rows.filter((r) => !r.proofFile && r.sourceType === 'encaissement' && r.sourceId);
+  const missingBuy = rows.filter((r) => !r.proofFile && r.sourceType === 'achat' && r.sourceId);
+  if (!missingPay.length && !missingBuy.length) return rows;
+  const [payments, purchases] = await Promise.all([
+    missingPay.length
+      ? prisma.payment.findMany({
+          where: { id: { in: missingPay.map((m) => m.sourceId!) } },
+          select: { id: true, proofFile: true },
+        })
+      : Promise.resolve([]),
+    missingBuy.length
+      ? prisma.purchase.findMany({
+          where: { id: { in: missingBuy.map((m) => m.sourceId!) } },
+          select: { id: true, proofFile: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const byPay = new Map(payments.map((p) => [p.id, p.proofFile]));
+  const byBuy = new Map(purchases.map((p) => [p.id, p.proofFile]));
+  return rows.map((r) => {
+    if (r.proofFile || !r.sourceId) return r;
+    const proof = r.sourceType === 'encaissement'
+      ? byPay.get(r.sourceId)
+      : r.sourceType === 'achat'
+        ? byBuy.get(r.sourceId)
+        : null;
+    return proof ? { ...r, proofFile: proof } : r;
+  });
 }
 
 function movementQueryFilters(req: { query: Record<string, unknown> }) {
@@ -157,15 +221,17 @@ router.get('/movements/export/csv', async (req, res) => {
   const { accountId, q, mode, type, holderUserId, dateFrom, dateTo } = movementQueryFilters(req);
   const where = buildMovementWhere(accountId, q, dateFrom, dateTo, mode, type, holderUserId);
 
-  const movements = await prisma.cashMovement.findMany({
-    where,
-    include: { account: true },
-    orderBy: { date: 'desc' },
-  });
-  const header = 'Date;Désignation;Compte;Mode;Débit;Crédit;Remarque;Pièce';
+  const movements = await attachNotations(
+    await prisma.cashMovement.findMany({
+      where,
+      include: { account: true },
+      orderBy: { date: 'desc' },
+    }),
+  );
+  const header = 'Date;Désignation;Compte;Mode;Débit;Crédit;Remarque;Notation;Pièce';
   const rows = movements.map(
     (m) =>
-      `${m.date.toISOString().slice(0, 10)};${m.designation};${m.account.name};${m.mode || ''};${m.debit};${m.credit};${(m.remark || '').replace(/;/g, ',')};${m.proofFile ? 'Oui' : 'Non'}`
+      `${m.date.toISOString().slice(0, 10)};${m.designation};${m.account.name};${m.mode || ''};${m.debit};${m.credit};${(m.remark || '').replace(/;/g, ',')};${(m.notation || '').replace(/;/g, ',')};${m.proofFile ? 'Oui' : 'Non'}`
   );
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename=caisse-gic.csv');
@@ -176,12 +242,14 @@ router.get('/movements/export/xlsx', async (req, res) => {
   const { accountId, q, mode, type, holderUserId, dateFrom, dateTo } = movementQueryFilters(req);
   const where = buildMovementWhere(accountId, q, dateFrom, dateTo, mode, type, holderUserId);
 
-  const movements = await prisma.cashMovement.findMany({
-    where,
-    include: { account: true },
-    orderBy: { date: 'desc' },
-    take: 5000,
-  });
+  const movements = await attachNotations(
+    await prisma.cashMovement.findMany({
+      where,
+      include: { account: true },
+      orderBy: { date: 'desc' },
+      take: 5000,
+    }),
+  );
   sendExcel(
     res,
     'caisse-gic.xlsx',
@@ -194,6 +262,7 @@ router.get('/movements/export/xlsx', async (req, res) => {
       Débit: m.debit,
       Crédit: m.credit,
       Remarque: m.remark || '',
+      Notation: m.notation || '',
       Pièce: m.proofFile ? 'Oui' : 'Non',
     })),
   );
@@ -231,8 +300,10 @@ router.get('/movements', async (req, res) => {
 
   const debit = agg._sum.debit || 0;
   const credit = agg._sum.credit || 0;
+  const withProof = await attachSourceProofs(items);
+  const withNotes = await attachNotations(withProof);
   res.json({
-    items,
+    items: withNotes,
     total,
     page,
     limit,
@@ -273,8 +344,10 @@ router.post('/movements', movementUpload, async (req, res) => {
     },
     include: { account: { include: accountHolderInclude } },
   });
+  await saveNotation(movement.id, req.body.notation);
   await audit(req, 'création', 'CashMovement', movement.id, designation);
-  res.status(201).json(movement);
+  const [created] = await attachNotations([movement]);
+  res.status(201).json(created);
 });
 
 router.get('/movements/:id/history', async (req, res) => {
@@ -299,6 +372,7 @@ router.get('/movements/:id', async (req, res) => {
     include: { account: { include: accountHolderInclude } },
   });
   if (!movement) return res.status(404).json({ message: 'Mouvement introuvable' });
+  const [withProof] = await attachSourceProofs([movement]);
 
   let sourceHref: string | null = null;
   if (movement.sourceType === 'encaissement' && movement.sourceId) {
@@ -333,7 +407,22 @@ router.get('/movements/:id', async (req, res) => {
     if (log) sourceHref = `/engins/${log.enginId}`;
   }
 
-  res.json({ ...movement, sourceHref });
+  const [withNotes] = await attachNotations([withProof]);
+  res.json({ ...withNotes, sourceHref });
+});
+
+router.put('/movements/:id/notation', async (req, res) => {
+  const id = String(req.params.id);
+  const existing = await prisma.cashMovement.findUnique({
+    where: { id },
+    include: { account: { include: accountHolderInclude } },
+  });
+  if (!existing) return res.status(404).json({ message: 'Mouvement introuvable' });
+  await saveNotation(id, req.body.notation);
+  await audit(req, 'modification', 'CashMovement', id, `Notation — ${existing.designation}`);
+  const [withProof] = await attachSourceProofs([existing]);
+  const [withNotes] = await attachNotations([withProof]);
+  res.json(withNotes);
 });
 
 router.put('/movements/:id', movementUpload, async (req, res) => {
@@ -370,8 +459,10 @@ router.put('/movements/:id', movementUpload, async (req, res) => {
     data,
     include: { account: { include: accountHolderInclude } },
   });
+  if (req.body.notation !== undefined) await saveNotation(id, req.body.notation);
   await audit(req, 'modification', 'CashMovement', id, movement.designation);
-  res.json(movement);
+  const [updated] = await attachNotations([movement]);
+  res.json(updated);
 });
 
 router.delete('/movements/:id', async (req, res) => {

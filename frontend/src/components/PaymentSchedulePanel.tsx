@@ -1,12 +1,12 @@
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Calendar, Check, Circle, Plus, Trash2, Wand2 } from 'lucide-react';
+import { Calendar, Check, Circle, Plus, Printer, Trash2, Wand2 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { api, formatDate, formatMad, uploadForm } from '../lib/api';
 import { fileUrl } from '../lib/photoUrl';
-import { DocumentFileActions } from './DocumentScanner';
+import { displayPayerName, paymentModeLabel } from '../lib/paymentMode';
 import { printPaymentReceipt } from '../lib/printPayment';
-import { isBankPaymentMode, paymentModeLabel, payerRelationLabel, parsePayerName } from '../lib/paymentMode';
+import { DocumentFileActions } from './DocumentScanner';
 import { PaymentModeFields } from './PaymentModeFields';
 import { Btn, Card, Input, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th } from './ui';
 
@@ -76,6 +76,10 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
   const [selected, setSelected] = useState<Schedule | null>(null);
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [payMode, setPayMode] = useState('especes');
+  const [payBank, setPayBank] = useState('');
+  const [payOperationNo, setPayOperationNo] = useState('');
+  const [payInternalRef, setPayInternalRef] = useState('');
+  const [payPayerName, setPayPayerName] = useState('');
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [form, setForm] = useState({ dueDate: '', amount: '', label: '', remark: '', kind: 'versement' });
   const [genForm, setGenForm] = useState({ count: '12', startDate: new Date().toISOString().slice(0, 10), kind: 'mensuel' });
@@ -187,15 +191,26 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
     setError('');
     setSelected(s);
     setPayMode('especes');
+    setPayBank('');
+    setPayOperationNo('');
+    setPayInternalRef('');
+    setPayPayerName('');
     setProofFile(null);
     setAdvanceAmount(resteOf(s) > 0 ? String(resteOf(s)) : '');
   }
 
   async function postSchedulePayment(scheduleId: string, amount: number) {
+    const extras = {
+      operationType: payMode,
+      payerName: payPayerName || undefined,
+      bank: payBank || undefined,
+      operationNo: payOperationNo || undefined,
+      internalRef: payInternalRef || undefined,
+    };
     if (proofFile) {
       const fd = new FormData();
       fd.append('amount', String(amount));
-      fd.append('operationType', payMode);
+      Object.entries(extras).forEach(([k, v]) => { if (v) fd.append(k, v); });
       fd.append('proof', proofFile);
       await uploadForm(`/transactions/schedules/${scheduleId}/advance`, fd);
       setProofFile(null);
@@ -203,7 +218,7 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
     }
     await api(`/transactions/schedules/${scheduleId}/advance`, {
       method: 'POST',
-      body: JSON.stringify({ amount, operationType: payMode }),
+      body: JSON.stringify({ amount, ...extras }),
     });
   }
 
@@ -526,7 +541,11 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
                       <li key={pay.id} className="flex items-center justify-between gap-2 border-b border-black/[0.04] pb-1.5 last:border-0">
                         <span className="text-gic-muted">
                           {formatDate(pay.date)}
-                          {pay.operationType ? ` · ${pay.operationType}` : ''}
+                          {pay.operationType ? ` · ${paymentModeLabel(pay.operationType)}` : ''}
+                          {pay.bank ? ` · ${pay.bank}` : ''}
+                          {pay.operationNo ? ` · ${pay.operationNo}` : ''}
+                          {pay.internalRef ? ` · ${pay.internalRef}` : ''}
+                          {pay.payerName ? ` · ${displayPayerName(pay.payerName)}` : ''}
                           {pay.receiptNo ? ` · ${pay.receiptNo}` : ''}
                           {pay.proofFile ? (
                             <>
@@ -537,6 +556,15 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
                         </span>
                         <span className="flex items-center gap-1">
                           <span className="font-medium">{formatMad(pay.amount)}</span>
+                          <MacActionBtn
+                            icon={Printer}
+                            tone="gray"
+                            title={t('actions.printInstallment')}
+                            onClick={() => printPaymentReceipt({
+                              ...pay,
+                              scheduleLabel: monthTitle(selectedLive.dueDate, selectedLive.label),
+                            })}
+                          />
                           {canEdit && canCancelSchedule(selectedLive) && (
                             <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => removePayment(pay.id)} />
                           )}
@@ -559,11 +587,24 @@ export default function PaymentSchedulePanel({ entityType, entityId, schedules, 
                     onChange={(e) => setAdvanceAmount(e.target.value)}
                     required
                   />
-                  <Select label={t('fields.mode')} value={payMode} onChange={(e) => setPayMode(e.target.value)}>
-                    <option value="especes">{t('fields.modeCash')}</option>
-                    <option value="virement">{t('fields.modeTransfer')}</option>
-                    <option value="cheque">{t('fields.modeCheck')}</option>
-                  </Select>
+                  <div className="sm:col-span-3 grid gap-2 sm:grid-cols-2">
+                    <PaymentModeFields
+                      values={{
+                        operationType: payMode,
+                        bank: payBank,
+                        operationNo: payOperationNo,
+                        internalRef: payInternalRef,
+                        payerName: payPayerName,
+                      }}
+                      onChange={(patch) => {
+                        if (patch.operationType != null) setPayMode(patch.operationType);
+                        if (patch.bank != null) setPayBank(patch.bank);
+                        if (patch.operationNo != null) setPayOperationNo(patch.operationNo);
+                        if (patch.internalRef != null) setPayInternalRef(patch.internalRef);
+                        if (patch.payerName != null) setPayPayerName(patch.payerName);
+                      }}
+                    />
+                  </div>
                   <div className="sm:col-span-3">
                     <p className="mb-1 text-[11px] font-medium text-gic-muted">{t('fields.proofDocument')}</p>
                     <DocumentFileActions
