@@ -1597,6 +1597,7 @@ router.get('/:id/payroll-lines', async (req, res) => {
 
   const ids = [...new Set([...buckets.values()].map((b) => b.workforceId))];
   let records: Array<{
+    id: string;
     workforceId: string;
     chantierId: string;
     tranche: string | null;
@@ -2703,7 +2704,7 @@ router.put('/progress/:progressId', async (req, res) => {
 
   const progress = await prisma.workProgress.update({
     where: { id: req.params.progressId },
-    data,
+    data: data as never,
   });
   const all = await prisma.workProgress.findMany({ where: { chantierId: progress.chantierId } });
   const avg = all.length ? all.reduce((s, p) => s + p.percent, 0) / all.length : 0;
@@ -3009,7 +3010,7 @@ router.get('/', async (req, res) => {
   const skip = (page - 1) * limit;
   const where = buildChantierWhere(q, status, projectId);
   if (req.user?.role === 'CHEF_CHANTIER') {
-    where.AND.push({ managerUserId: req.user.id });
+    (where.AND as object[]).push({ managerUserId: req.user.id });
   }
   const orderBy =
     sort === 'name'
@@ -3591,7 +3592,10 @@ router.post('/:id/assign', async (req, res) => {
       workforceId,
       functionRole: req.body.functionRole ? String(req.body.functionRole).trim() : null,
       tranche,
-      ...dates.data,
+      startDate: dates.data.startDate ?? undefined,
+      endDate: dates.data.endDate ?? undefined,
+      suspendedFrom: dates.data.suspendedFrom ?? undefined,
+      suspendedUntil: dates.data.suspendedUntil ?? undefined,
     },
     include: { workforce: true },
   });

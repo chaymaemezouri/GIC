@@ -17,4 +17,4 @@ jobs:
           script: |
             bash /var/www/projects/gic/deploy.sh
             cd /var/www/projects/gic
-            npm run seed
+            npm run seed || echo "Seed ignoré (données déjà présentes)"

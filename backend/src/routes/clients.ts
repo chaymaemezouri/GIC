@@ -247,8 +247,8 @@ router.get('/:id', async (req, res) => {
     extraDealsForClient('Sale', client.id),
     extraDealsForClient('Rental', client.id),
   ]);
-  const sales = [...client.sales, ...extraSales];
-  const rentals = [...client.rentals, ...extraRentals];
+  const sales = [...client.sales, ...extraSales] as typeof client.sales;
+  const rentals = [...client.rentals, ...extraRentals] as typeof client.rentals;
 
   const allPayments = [
     ...sales.flatMap((s) =>

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { PrismaClient } from '../generated/prisma/index.js';
+import type { PrismaClient } from '@prisma/client';
 
 export const DEMO_WORKSPACE = 'demo';
 export const OMAR_WORKSPACE = 'omar';
@@ -84,7 +84,7 @@ function withWorkspaceWhere(where: unknown, ws: string) {
   return { AND: [where, { workspaceId: ws }] };
 }
 
-export function extendWithWorkspace(client: PrismaClient) {
+export function extendWithWorkspace(client: PrismaClient): PrismaClient {
   return client.$extends({
     query: {
       $allModels: {

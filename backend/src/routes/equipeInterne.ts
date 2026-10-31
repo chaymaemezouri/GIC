@@ -249,7 +249,7 @@ router.get('/salaires/stats', requireRole(...STAFF_ROLES), async (req, res) => {
 
   const records = await prisma.internalStaffSalaryRecord.findMany({
     where: { periodYear, periodMonth, ...(periodWeek ? { periodWeek } : {}) },
-    select: { staffId: true, netSalary: true, advance: true, bonus: true, status: true },
+    select: { staffId: true, netSalary: true, advance: true, bonus: true, deduction: true, baseSalary: true, status: true },
   });
   const byStaff = new Map(records.map((r) => [r.staffId, r]));
 

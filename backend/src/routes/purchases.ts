@@ -174,9 +174,14 @@ async function createCatalogFromPurchase(purchase: {
           chantierId: purchase.chantierId,
           tranche: purchase.tranche,
           projectId: purchase.projectId,
-          startDate: purchase.date,
           mode: 'propriete',
-          ...cost,
+          costMethod: cost.costMethod,
+          dailyCost: cost.dailyCost,
+          hourlyCost: cost.hourlyCost,
+          flatAmount: cost.flatAmount,
+          extraCost: cost.extraCost,
+          plannedCost: cost.plannedCost,
+          startDate: cost.startDate,
         },
       });
       await ensureExploitationUsage(assignment);

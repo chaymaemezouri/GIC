@@ -495,7 +495,7 @@ router.post('/sales', async (req, res) => {
         operationType: req.body.advanceMode || req.body.paymentMode || 'especes',
         bank: req.body.advanceBank || null,
         payerName: client ? `${client.firstName} ${client.lastName}`.trim() : null,
-        date: sale.contractDate,
+        date: sale.contractDate ?? undefined,
       },
     });
     advancePaymentId = payment.id;

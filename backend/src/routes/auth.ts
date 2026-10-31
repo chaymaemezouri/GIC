@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { generateSecret, generateURI, verify } from 'otplib';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { audit } from '../lib/audit.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -408,7 +409,7 @@ router.put('/me/sidebar', requireAuth, async (req, res) => {
     if (req.body?.reset) {
       const updated = await prisma.user.update({
         where: { id: user.id },
-        data: { sidebarPrefs: null },
+        data: { sidebarPrefs: Prisma.DbNull },
       });
       await audit(req, 'modification', 'User', user.id, 'Barre latérale — défaut');
       return res.json({ sidebarPrefs: parseSidebarPrefs(updated.role, updated.sidebarPrefs) });

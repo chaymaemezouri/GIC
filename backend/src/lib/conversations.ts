@@ -5,7 +5,7 @@ export type EntityType = 'Client' | 'Agent' | 'Supplier' | 'User' | 'Mandant' | 
 export async function logConversation(opts: {
   entityType: EntityType;
   entityId: string;
-  channel: 'email' | 'sms' | 'whatsapp';
+  channel: 'email' | 'sms' | 'whatsapp' | 'note';
   direction?: 'outbound' | 'inbound';
   subject?: string;
   body: string;

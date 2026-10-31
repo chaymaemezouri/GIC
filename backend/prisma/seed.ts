@@ -1267,36 +1267,41 @@ const SOURCES = ['Recommandation', 'Site web', 'Salon immobilier', 'Agent commer
     const isMonthly = i % 5 === 0;
     const bankName = isMonthly ? MAROC_BANKS[i % MAROC_BANKS.length] : null;
     const rib = isMonthly ? `007${pad(780000000 + i * 1111, 21)}`.slice(0, 24) : null;
-    const w = await prisma.workforce.upsert({
-      where: { id },
-      update: {
-        salaryPeriod: isMonthly ? 'mois' : 'jour',
-        monthlySalary: isMonthly ? 4500 + (i % 5) * 400 : 0,
-        dailySalary: isMonthly ? 0 : 180 + (i % 8) * 25,
-        contractType: isMonthly ? 'Mensuel' : i % 4 === 0 ? 'Contrat' : 'Journalier',
-        bankName,
-        rib,
-      },
-      create: {
-        id,
-        firstName: randomItem(FIRST_NAMES, i + 15),
-        lastName: randomItem(LAST_NAMES, i + 12),
-        cin: `W${pad(100000 + i, 6)}`,
-        phone1: `06${pad(40000000 + i * 33333, 8)}`.slice(0, 10),
-        category: randomItem(WORKER_CATEGORIES, i),
-        groupe: `Équipe ${String.fromCharCode(65 + (i % 4))}`,
-        salaryPeriod: isMonthly ? 'mois' : 'jour',
-        dailySalary: isMonthly ? 0 : 180 + (i % 8) * 25,
-        monthlySalary: isMonthly ? 4500 + (i % 5) * 400 : 0,
-        contractType: isMonthly ? 'Mensuel' : i % 4 === 0 ? 'Contrat' : 'Journalier',
-        bankName,
-        rib,
-        declared: i % 3 !== 0,
-        cnssNumber: i % 3 !== 0 ? `CNSS-${pad(i, 4)}` : undefined,
-        hireDate: daysAgo(200 + i * 5),
-        isActive: i !== 27,
-      },
-    });
+    const cin = `W${pad(100000 + i, 6)}`;
+    const existingWorker = await prisma.workforce.findFirst({ where: { OR: [{ id }, { cin }] } });
+    const w = existingWorker
+      ? await prisma.workforce.update({
+          where: { id: existingWorker.id },
+          data: {
+            salaryPeriod: isMonthly ? 'mois' : 'jour',
+            monthlySalary: isMonthly ? 4500 + (i % 5) * 400 : 0,
+            dailySalary: isMonthly ? 0 : 180 + (i % 8) * 25,
+            contractType: isMonthly ? 'Mensuel' : i % 4 === 0 ? 'Contrat' : 'Journalier',
+            bankName,
+            rib,
+          },
+        })
+      : await prisma.workforce.create({
+          data: {
+            id,
+            firstName: randomItem(FIRST_NAMES, i + 15),
+            lastName: randomItem(LAST_NAMES, i + 12),
+            cin,
+            phone1: `06${pad(40000000 + i * 33333, 8)}`.slice(0, 10),
+            category: randomItem(WORKER_CATEGORIES, i),
+            groupe: `Équipe ${String.fromCharCode(65 + (i % 4))}`,
+            salaryPeriod: isMonthly ? 'mois' : 'jour',
+            dailySalary: isMonthly ? 0 : 180 + (i % 8) * 25,
+            monthlySalary: isMonthly ? 4500 + (i % 5) * 400 : 0,
+            contractType: isMonthly ? 'Mensuel' : i % 4 === 0 ? 'Contrat' : 'Journalier',
+            bankName,
+            rib,
+            declared: i % 3 !== 0,
+            cnssNumber: i % 3 !== 0 ? `CNSS-${pad(i, 4)}` : undefined,
+            hireDate: daysAgo(200 + i * 5),
+            isActive: i !== 27,
+          },
+        });
     workforceIds.push(w.id);
     if (isMonthly) monthlyWorkforceIds.push(w.id);
 
