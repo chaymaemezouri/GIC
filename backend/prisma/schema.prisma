@@ -39,7 +39,7 @@ model InternalStaff {
   lastName         String
   photo            String?
   email            String?
-  cin              String?  @unique
+  cin              String?
   birthDate        DateTime?
   address          String?
   phone1           String?
