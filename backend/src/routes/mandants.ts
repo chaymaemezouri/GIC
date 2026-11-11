@@ -169,10 +169,14 @@ router.post('/', async (req, res) => {
   }
 
   const data = { ...req.body };
+  delete data.photoFile;
+  delete data.photoUrl;
+  delete data.photo;
   applyBankField(data);
   const ribError = applyRibField(data);
   if (ribError) return res.status(400).json({ message: ribError });
-  if (data.birthDate) data.birthDate = new Date(data.birthDate);
+  data.birthDate = data.birthDate ? new Date(data.birthDate) : null;
+  if (Number.isNaN(data.birthDate?.getTime?.())) data.birthDate = null;
   data.reference = await nextReference('MAN');
 
   const mandant = await prisma.mandant.create({ data });

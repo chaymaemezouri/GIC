@@ -313,8 +313,12 @@ router.post('/workforce', async (req, res) => {
   const data = normalizeWorkforcePayFields({ ...req.body });
   if (data.ribError) return res.status(400).json({ message: data.ribError });
   delete data.ribError;
-  if (data.birthDate) data.birthDate = new Date(String(data.birthDate));
-  if (data.hireDate) data.hireDate = new Date(String(data.hireDate));
+  delete data.photoFile;
+  delete data.photoUrl;
+  data.birthDate = data.birthDate ? new Date(String(data.birthDate)) : null;
+  data.hireDate = data.hireDate ? new Date(String(data.hireDate)) : null;
+  if (Number.isNaN(data.birthDate?.getTime?.())) data.birthDate = null;
+  if (Number.isNaN(data.hireDate?.getTime?.())) data.hireDate = null;
   const contactError = requiredCinPhoneError({
     cin: { value: data.cin, required: true },
     phone1: { value: data.phone1, required: true },

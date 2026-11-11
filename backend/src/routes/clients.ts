@@ -430,7 +430,13 @@ router.put('/:id', async (req, res) => {
   delete data.summary;
   delete data.allPayments;
   delete data.properties;
-  if (data.birthDate) data.birthDate = new Date(data.birthDate);
+  delete data.photoFile;
+  delete data.photoUrl;
+  delete data.photo;
+  if ('birthDate' in data) {
+    const parsed = data.birthDate ? new Date(data.birthDate) : null;
+    data.birthDate = parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+  }
   if (data.agentId === '') data.agentId = null;
   applyBankField(data);
   const ribError = applyRibField(data);

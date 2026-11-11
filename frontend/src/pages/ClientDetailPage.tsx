@@ -14,6 +14,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 
 import { ClientFormFields, clientToForm, type ClientFormData } from '../components/ClientFormFields';
+import { omitPhotoFields } from '../components/FormPhotoField';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { DocumentFileActions } from '../components/DocumentScanner';
 import MacProfilePhoto from '../components/MacProfilePhoto';
@@ -92,7 +93,11 @@ export default function ClientDetailPage() {
     if (!form || !id) return;
     setSaveError('');
     try {
-      await api(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(form) });
+      const fields = omitPhotoFields(form);
+      await api(`/clients/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...fields, birthDate: fields.birthDate || null }),
+      });
       setEditing(false);
       load();
     } catch (err) {
