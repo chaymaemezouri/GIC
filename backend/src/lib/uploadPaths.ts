@@ -13,3 +13,6 @@ export function resolveUploadDir(envPath = process.env.UPLOAD_DIR || './uploads'
 }
 
 export const uploadDir = resolveUploadDir();
+
+/** Ancien dossier, quand le processus écrivait dans la racine du projet. */
+export const legacyUploadDir = path.resolve(backendRoot, '../uploads');

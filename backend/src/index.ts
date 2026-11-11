@@ -22,7 +22,7 @@ import equipeInterneRoutes from './routes/equipeInterne.js';
 import reconnusRoutes from './routes/reconnus.js';
 import entreprisesRoutes from './routes/entreprises.js';
 import officeCashRoutes from './routes/officeCash.js';
-import { uploadDir } from './lib/uploadPaths.js';
+import { legacyUploadDir, uploadDir } from './lib/uploadPaths.js';
 import { backfillPointageSessions, repairPointageSessionExclusions } from './lib/pointageSessions.js';
 import { migrateLegacyPurchases } from './lib/purchaseWorkflow.js';
 import { migrateEnginFleet } from './lib/enginCosts.js';
@@ -52,7 +52,7 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 // Le plugin PDF du navigateur laisse la page blanche. Une navigation vers un PDF
 // ouvre l’aperçu de l’application, qui dessine les pages lui-même.
-app.use('/uploads', (req, res, next) => {
+function redirectPdfNavigation(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
   const name = (req.path.split('/').pop() || '').toLowerCase();
   if (!name.endsWith('.pdf') || String(req.query.raw || '') === '1') return next();
@@ -63,19 +63,26 @@ app.use('/uploads', (req, res, next) => {
   try { filePath = decodeURIComponent(filePath); } catch { /* garder le chemin brut */ }
   res.setHeader('Cache-Control', 'no-store');
   res.redirect(302, `/apercu?src=${encodeURIComponent(filePath)}`);
-});
-app.use(
-  '/uploads',
-  express.static(uploadDir, {
-    fallthrough: true,
-    setHeaders(res, filePath) {
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      res.removeHeader('Cross-Origin-Opener-Policy');
-      res.removeHeader('Cross-Origin-Embedder-Policy');
-      res.setHeader('Cache-Control', filePath.toLowerCase().endsWith('.pdf') ? 'no-cache' : 'public, max-age=86400');
-    },
-  })
-);
+}
+
+const uploadStatic = {
+  fallthrough: true,
+  setHeaders(res: express.Response, filePath: string) {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.removeHeader('Cross-Origin-Opener-Policy');
+    res.removeHeader('Cross-Origin-Embedder-Policy');
+    res.setHeader('Cache-Control', filePath.toLowerCase().endsWith('.pdf') ? 'no-cache' : 'public, max-age=86400');
+  },
+};
+
+// /api/uploads passe par le même proxy que l’API. /uploads reste pour le dev local.
+for (const prefix of ['/uploads', '/api/uploads']) {
+  app.use(prefix, redirectPdfNavigation);
+  app.use(prefix, express.static(uploadDir, uploadStatic));
+  if (legacyUploadDir !== uploadDir) {
+    app.use(prefix, express.static(legacyUploadDir, uploadStatic));
+  }
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: 'GIC', version: '1.0.0' });
