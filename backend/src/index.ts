@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import './lib/asyncErrors.js';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';

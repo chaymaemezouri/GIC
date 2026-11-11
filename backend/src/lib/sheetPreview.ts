@@ -2,8 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import type { NextFunction, Request, Response } from 'express';
 import * as XLSX from 'xlsx';
+import mammoth from 'mammoth';
 
 const SHEET_EXT = new Set(['.xlsx', '.xls', '.csv']);
+const WORD_EXT = new Set(['.docx']);
 
 /** Fichier d’upload, sans sortie du dossier. */
 export function resolveSafeUpload(relPath: string, roots: string[]) {
@@ -22,14 +24,21 @@ export function resolveSafeUpload(relPath: string, roots: string[]) {
 
 /** Excel / CSV demandé avec ?view=1 → tableau JSON, affiché dans la page. */
 export function sheetPreview(roots: string[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     if (String(req.query.view || '') !== '1') return next();
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
     const ext = path.extname(req.path).toLowerCase();
-    if (!SHEET_EXT.has(ext)) return next();
+    if (!SHEET_EXT.has(ext) && !WORD_EXT.has(ext)) return next();
     const file = resolveSafeUpload(req.path, roots);
     if (!file) return res.status(404).json({ message: 'Fichier introuvable' });
     try {
+      if (WORD_EXT.has(ext)) {
+        const result = await mammoth.convertToHtml({ path: file });
+        const html = result.value
+          .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+          .replace(/\son\w+=(?:"[^"]*"|'[^']*')/gi, '');
+        return res.json({ html });
+      }
       const wb = XLSX.readFile(file, { cellDates: false });
       const sheets = wb.SheetNames.slice(0, 8).map((name) => {
         const grid = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(wb.Sheets[name], {

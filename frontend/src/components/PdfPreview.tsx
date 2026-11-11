@@ -11,6 +11,7 @@ const EVENT = 'gic-pdf-preview';
 
 const PREVIEW_EXT = /\.(pdf|png|jpe?g|gif|webp|bmp|svg)$/i;
 const SHEET_EXT = /\.(xlsx|xls|csv)$/i;
+const WORD_EXT = /\.docx$/i;
 const OFFICE_EXT = /\.(xlsx|xls|csv|docx|doc|pptx|ppt)$/i;
 
 export function uploadPathname(href: string) {
@@ -32,6 +33,10 @@ export function previewFilePath(href: string) {
 
 export function isSheetFile(src: string) {
   return SHEET_EXT.test(src.split('?')[0]);
+}
+
+export function isWordFile(src: string) {
+  return WORD_EXT.test(src.split('?')[0]);
 }
 
 function shownName(src: string, title?: string) {
@@ -147,10 +152,52 @@ export function SheetView({ url }: { url: string }) {
   );
 }
 
+/** Texte d’un document Word, converti par le serveur. */
+export function DocView({ url }: { url: string }) {
+  const { t } = useI18n();
+  const [html, setHtml] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    setHtml(null);
+    fetch(`${url.split('?')[0]}?view=1`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('preview'))))
+      .then((data: { html?: string }) => {
+        if (!cancelled) setHtml(data.html || '');
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  if (failed) return <p className="py-10 text-center text-[13px] text-gic-coral">{t('docs.noPreview')}</p>;
+  if (html == null) return <p className="py-10 text-center text-[13px] text-gic-muted">{t('common.loading')}</p>;
+  if (!html.trim()) return <p className="py-10 text-center text-[13px] text-gic-muted">{t('docs.noPreview')}</p>;
+  return (
+    <div
+      className="prose-doc mx-auto max-w-[900px] rounded-xl bg-white p-6 text-[13px] leading-6 text-gic-ink shadow-lg [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-black/10 [&_td]:px-2 [&_td]:py-1 [&_p]:mb-2"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+function OfficeOpen({ path }: { path: string }) {
+  const { t } = useI18n();
+  return (
+    <button type="button" className="text-[12px] text-[#007aff] hover:opacity-70" onClick={() => requestPdfPreview(path)}>
+      {t('common.view')}
+    </button>
+  );
+}
+
 /** Aperçu intégré : PDF rendu dans la page, image affichée telle quelle. */
 export function FileInlinePreview({ src }: { src: string }) {
-  const path = previewFilePath(src);
+  const path = previewFilePath(src) || (uploadPathname(src) && (isSheetFile(src) || isWordFile(src)) ? uploadPathname(src) : null);
   if (!path) return null;
+  if (isSheetFile(path) || isWordFile(path)) {
+    return <OfficeOpen path={path} />;
+  }
   if (isPdfFile(path)) {
     return (
       <div className="overflow-hidden rounded-xl bg-[#e8e8ed] p-3">
@@ -284,7 +331,8 @@ export function PdfPreviewHost() {
   const name = shownName(item.src, item.title);
   const downloadUrl = isPdfFile(item.src) ? rawPdfUrl(item.src) : item.src.split('?')[0];
   const sheet = isSheetFile(item.src);
-  const previewable = isPdfFile(item.src) || sheet || PREVIEW_EXT.test(item.src.split('?')[0]);
+  const word = isWordFile(item.src);
+  const previewable = isPdfFile(item.src) || sheet || word || PREVIEW_EXT.test(item.src.split('?')[0]);
 
   return createPortal(
     <div className="pdf-preview-root fixed inset-0 z-[1400] flex flex-col bg-[#1d1d1f]/88" onClick={() => setItem(null)}>
@@ -313,12 +361,15 @@ export function PdfPreviewHost() {
           />
         ) : sheet ? (
           <SheetView url={item.src} />
+        ) : word ? (
+          <DocView url={item.src} />
         ) : previewable ? (
           <img
             src={item.src}
             alt={name}
             className="mx-auto block max-h-[85vh] max-w-full bg-white shadow-lg"
             onLoad={item.print ? () => window.print() : undefined}
+            onError={(e) => { (e.currentTarget as HTMLImageElement).replaceWith(Object.assign(document.createElement('p'), { className: 'py-16 text-center text-[13px] text-white', textContent: t('docs.noPreview') })); }}
           />
         ) : (
           <p className="py-16 text-center text-[13px] text-white">{t('docs.noPreviewHint')}</p>
