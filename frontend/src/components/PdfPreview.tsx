@@ -39,10 +39,18 @@ export function isWordFile(src: string) {
   return WORD_EXT.test(src.split('?')[0]);
 }
 
+export function displayFileName(name?: string | null) {
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+  const base = raw.split(/[/\\]/).pop() || raw;
+  const scan = base.match(/(scan-[A-Za-z0-9._-]+\.[A-Za-z0-9]{2,5})$/i);
+  return scan ? scan[1] : base;
+}
+
 function shownName(src: string, title?: string) {
-  const file = decodeURIComponent(src.split('?')[0].split('/').pop() || 'document');
+  const file = displayFileName(decodeURIComponent(src.split('?')[0].split('/').pop() || 'document'));
   const ext = file.includes('.') ? file.slice(file.lastIndexOf('.')) : '';
-  const label = (title || '').replace(/[\\/:*?"<>|]/g, ' ').trim();
+  const label = displayFileName(title).replace(/[\\/:*?"<>|]/g, ' ').trim();
   if (!label) return file;
   if (/\.[a-z0-9]{2,5}$/i.test(label)) return label;
   return `${label}${ext}`;
@@ -235,7 +243,11 @@ export function PdfPages({
 
     (async () => {
       try {
-        task = getDocument({ url: rawPdfUrl(url) });
+        task = getDocument({
+          url: rawPdfUrl(url),
+          wasmUrl: `${import.meta.env.BASE_URL}pdfjs/`,
+          useSystemFonts: true,
+        });
         const pdf = await task.promise;
         if (cancelled) return;
         const width = Math.max(host.clientWidth - 24, 280);
@@ -262,6 +274,27 @@ export function PdfPages({
         setState('ready');
         onReadyRef.current?.();
       } catch {
+        if (cancelled || !host) return;
+        try {
+          const res = await fetch(rawPdfUrl(url));
+          if (!res.ok) throw new Error('missing');
+          const buffer = await res.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+          const png = bytes[0] === 0x89 && bytes[1] === 0x50;
+          if (jpeg || png) {
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(new Blob([buffer], { type: jpeg ? 'image/jpeg' : 'image/png' }));
+            img.alt = '';
+            img.style.display = 'block';
+            img.style.margin = '0 auto';
+            img.style.maxWidth = '920px';
+            img.style.background = '#fff';
+            host.replaceChildren(img);
+            setState('ready');
+            return;
+          }
+        } catch { /* le message d’échec suffit */ }
         if (!cancelled) setState('error');
       }
     })();

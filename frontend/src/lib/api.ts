@@ -262,13 +262,20 @@ export function openPrintUrl(path: string) {
     });
 }
 
+function uploadFileName(name: string) {
+  const base = name.split(/[/\\]/).pop() || name;
+  const scan = base.match(/(scan-[A-Za-z0-9._-]+\.[A-Za-z0-9]{2,5})$/i);
+  return scan ? scan[1] : base;
+}
+
 export async function uploadDocument(
   file: File,
   fields: Record<string, string>
 ) {
   const form = new FormData();
+  const named = fields.name ? { ...fields, name: uploadFileName(fields.name) } : fields;
   form.append('file', file);
-  Object.entries(fields).forEach(([k, v]) => form.append(k, v));
+  Object.entries(named).forEach(([k, v]) => form.append(k, v));
   const token = getToken();
   const res = await fetch('/api/documents/upload', {
     method: 'POST',

@@ -8,7 +8,7 @@ import { DocumentAddButton } from './DocumentAddButton';
 import { DocumentFileActions } from './DocumentScanner';
 import { Btn, Input, MacActionBtn, Modal } from './ui';
 import { useI18n } from '../i18n/I18nContext';
-import { requestPdfPreview } from './PdfPreview';
+import { displayFileName, requestPdfPreview } from './PdfPreview';
 
 type Doc = {
   id: string;
@@ -258,7 +258,7 @@ export function EntityDocChecklist({
                   </p>
                   {row.doc ? (
                     <button type="button" className="text-left text-[11px] text-gic-muted hover:text-gic-ink" onClick={() => openDoc(row.doc!.path, row.doc!.name)}>
-                      {row.doc.name}
+                      {displayFileName(row.doc.name)}
                       {row.doc.expiresAt ? ` · ${formatDate(row.doc.expiresAt)}` : ''}
                     </button>
                   ) : (
@@ -308,7 +308,7 @@ export function EntityDocChecklist({
             <div key={d.id} className="mac-row flex-col !items-stretch">
               <div className="flex w-full items-center justify-between gap-2">
                 <button type="button" className="min-w-0 text-left" onClick={() => openDoc(d.path, d.name)}>
-                  <p className="mac-row-title truncate">{d.name}</p>
+                  <p className="mac-row-title truncate">{displayFileName(d.name)}</p>
                   <p className="mac-row-subtitle">{d.category || '—'}{d.expiresAt ? ` · ${formatDate(d.expiresAt)}` : ''}</p>
                 </button>
                 <div className="mac-actions">
