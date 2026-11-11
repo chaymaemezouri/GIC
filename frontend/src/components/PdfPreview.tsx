@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentLoadingTask } from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { Download, Printer, X } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 
-GlobalWorkerOptions.workerSrc = workerUrl;
+GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdfjs/pdf.worker.min.js`;
 
 const EVENT = 'gic-pdf-preview';
 
@@ -77,10 +76,11 @@ export function isPdfFile(src: string) {
   return src.split('?')[0].toLowerCase().endsWith('.pdf');
 }
 
-/** Fetches the PDF bytes. `raw=1` skips the HTML viewer redirect. */
+/** Octets du PDF, via une URL sans « .pdf » pour passer le proxy de production. */
 export function rawPdfUrl(src: string) {
-  const path = pdfFilePath(src) || src.split('?')[0];
-  return `${path}${path.includes('?') ? '&' : '?'}raw=1`;
+  const filePath = pdfFilePath(src) || src.split('?')[0];
+  const rel = decodeURIComponent(filePath).replace(/^.*?\/uploads\//, '');
+  return `/api/files/content?f=${encodeURIComponent(rel)}`;
 }
 
 export function requestPdfPreview(src: string, print = false, title?: string) {
@@ -243,8 +243,26 @@ export function PdfPages({
 
     (async () => {
       try {
+        const res = await fetch(rawPdfUrl(url));
+        if (!res.ok) throw new Error('missing');
+        const data = await res.arrayBuffer();
+        const bytes = new Uint8Array(data);
+        const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+        const png = bytes[0] === 0x89 && bytes[1] === 0x50;
+        if (jpeg || png) {
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(new Blob([data], { type: jpeg ? 'image/jpeg' : 'image/png' }));
+          img.alt = '';
+          img.style.display = 'block';
+          img.style.margin = '0 auto';
+          img.style.maxWidth = '920px';
+          img.style.background = '#fff';
+          host.replaceChildren(img);
+          setState('ready');
+          return;
+        }
         task = getDocument({
-          url: rawPdfUrl(url),
+          data: data.slice(0),
           wasmUrl: `${import.meta.env.BASE_URL}pdfjs/`,
           useSystemFonts: true,
         });
