@@ -16,23 +16,17 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 30m
           script: |
-            cd /var/www/projects/gic
+            bash -ic 'cd /var/www/projects/gic || exit 1
             bash deploy.sh || echo "deploy.sh a retourné une erreur, compilation forcée ensuite"
-            git pull --ff-only origin main || echo "git pull ignoré"
-            echo "BUILD_START $(git rev-parse --short HEAD 2>/dev/null || echo inconnu)"
+            echo "NPM=$(command -v npm || echo MISSING)"
             npm install --prefix backend || exit 1
             npm install --prefix frontend || exit 1
             npm run db:push --prefix backend || exit 1
             npm run build --prefix backend || exit 1
             npm run build --prefix frontend || exit 1
-            if command -v pm2 >/dev/null 2>&1; then
-              pm2 restart all --update-env || echo "pm2 restart ignoré"
-            fi
+            if command -v pm2 >/dev/null 2>&1; then pm2 restart all --update-env || echo "pm2 restart ignoré"; fi
             mkdir -p tmp backend/tmp
             touch tmp/restart.txt backend/tmp/restart.txt
-            if [ ! -f frontend/dist/index.html ]; then
-              echo "frontend/dist manquant"
-              exit 1
-            fi
-            echo "DEPLOY_OK $(git rev-parse --short HEAD 2>/dev/null || echo inconnu)"
-            npm run seed || echo "Seed ignoré (données déjà présentes)"
+            test -f frontend/dist/index.html || exit 1
+            echo "DEPLOY_OK $(git rev-parse --short HEAD)"
+            npm run seed || echo "Seed ignoré (données déjà présentes)"'
