@@ -10,7 +10,7 @@ import { Btn, Card, KpiCard, MacActionBtn, Modal, Select, TableWrap, Td, Th, Pag
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentScanButton } from '../components/DocumentScanner';
-import { PdfPages, SheetView, requestPdfPreview } from '../components/PdfPreview';
+import { DocView, PdfPages, SheetView, requestPdfPreview } from '../components/PdfPreview';
 import { ZoomImage } from '../components/PhotoLightbox';
 import {
   daysUntilExpiry,
@@ -24,6 +24,7 @@ import {
   isPdfDoc,
   isPreviewable,
   isSheetDoc,
+  isWordDoc,
   isDocumentLate,
   normalizeDocStatus,
   printDocumentFiche,
@@ -244,6 +245,7 @@ export default function DocumentDetailPage() {
   const isImage = isImageDoc(d.mimeType, d.path);
   const isPdf = isPdfDoc(d.mimeType, d.path);
   const isSheet = isSheetDoc(d.mimeType, d.path);
+  const isWord = isWordDoc(d.mimeType, d.path);
   const ext = fileExtension(d.name, d.path);
   const late = isDocumentLate(d);
   const estimateDays = daysUntilExpiry(d.estimatedEndDate);
@@ -460,6 +462,10 @@ export default function DocumentDetailPage() {
             ) : isSheet ? (
               <div className="mac-section-card overflow-hidden bg-[#e8e8ed] p-3">
                 <SheetView url={url} />
+              </div>
+            ) : isWord ? (
+              <div className="mac-section-card overflow-hidden bg-[#e8e8ed] p-3">
+                <DocView url={url} />
               </div>
             ) : null}
           </div>

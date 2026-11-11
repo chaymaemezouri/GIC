@@ -38,31 +38,44 @@ export function normalizeDocStatus(status?: string | null): DocStatus {
   return 'pending';
 }
 
+function filePath(path?: string | null) {
+  return String(path || '').split('?')[0].toLowerCase();
+}
+
 export function isSheetDoc(mimeType?: string | null, path?: string | null) {
   const mime = String(mimeType || '').toLowerCase();
-  const p = String(path || '').toLowerCase();
-  if (mime.includes('spreadsheet') || mime.includes('excel') || mime === 'text/csv') return true;
-  return /\.(xlsx|xls|csv)$/i.test(p);
+  const p = filePath(path);
+  if (/\.(xlsx|xls|csv)$/i.test(p)) return true;
+  if (/\.(pdf|docx|png|jpe?g|gif|webp|bmp)$/i.test(p)) return false;
+  return mime.includes('spreadsheet') || mime.includes('excel') || mime === 'text/csv';
+}
+
+export function isWordDoc(mimeType?: string | null, path?: string | null) {
+  const mime = String(mimeType || '').toLowerCase();
+  const p = filePath(path);
+  if (/\.docx$/i.test(p)) return true;
+  if (/\.(pdf|xlsx|xls|csv|png|jpe?g|gif|webp|bmp)$/i.test(p)) return false;
+  return mime.includes('wordprocessingml') || mime === 'application/msword';
 }
 
 export function isPreviewable(mimeType?: string | null, path?: string | null) {
-  const mime = String(mimeType || '').toLowerCase();
-  const p = String(path || '').toLowerCase();
-  if (mime.startsWith('image/') || mime === 'application/pdf' || isSheetDoc(mime, p)) return true;
-  return /\.(png|jpe?g|gif|webp|bmp|pdf)$/i.test(p);
+  return isImageDoc(mimeType, path) || isPdfDoc(mimeType, path) || isSheetDoc(mimeType, path) || isWordDoc(mimeType, path);
 }
 
 export function isImageDoc(mimeType?: string | null, path?: string | null) {
   const mime = String(mimeType || '').toLowerCase();
-  const p = String(path || '').toLowerCase();
-  if (mime.startsWith('image/')) return true;
-  return /\.(png|jpe?g|gif|webp|bmp)$/i.test(p);
+  const p = filePath(path);
+  if (/\.(pdf|xlsx|xls|csv|docx|doc)$/i.test(p)) return false;
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)) return true;
+  return mime.startsWith('image/');
 }
 
 export function isPdfDoc(mimeType?: string | null, path?: string | null) {
   const mime = String(mimeType || '').toLowerCase();
-  const p = String(path || '').toLowerCase();
-  return mime === 'application/pdf' || p.endsWith('.pdf');
+  const p = filePath(path);
+  if (p.endsWith('.pdf')) return true;
+  if (/\.(png|jpe?g|gif|webp|bmp|docx|xlsx|xls|csv)$/i.test(p)) return false;
+  return mime === 'application/pdf';
 }
 
 export function daysUntilExpiry(date?: string | null): number | null {
