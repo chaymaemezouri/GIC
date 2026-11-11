@@ -259,7 +259,7 @@ export function ChantierTrancheView({
 
   useEffect(() => {
     load();
-    fetchSupplierList().then(setSuppliers).catch(() => {});
+    fetchSupplierList<{ id: string; reference: string; companyName: string }>().then(setSuppliers).catch(() => {});
     api('/achats/families').then(setFamilies).catch(() => {});
     api<string[]>('/chantiers/tasks/reference').then(setTaskRef).catch(() => {});
     api<{ name: string; phases: TaskPhaseInput[] }[]>('/chantiers/tasks/standard')

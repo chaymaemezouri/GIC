@@ -168,7 +168,6 @@ export async function attachSaleCreateFiles(
 export function SaleFormFields({
   form,
   setForm,
-  clients,
   properties,
   editMode,
   lockPropertyId,

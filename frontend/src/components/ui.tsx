@@ -73,7 +73,7 @@ export function KpiCard({
   title: string;
   value: string | number;
   icon: LucideIcon;
-  tone?: 'violet' | 'emerald' | 'coral' | 'amber' | 'teal' | 'orange' | 'purple';
+  tone?: 'violet' | 'emerald' | 'coral' | 'amber' | 'teal' | 'orange' | 'purple' | 'blue';
   delta?: string;
   deltaTone?: 'emerald' | 'coral' | 'muted';
   compact?: boolean;
@@ -87,6 +87,7 @@ export function KpiCard({
     teal: 'text-gic-violet',
     orange: 'text-gic-amber',
     purple: 'text-gic-violet',
+    blue: 'text-gic-violet',
   };
   const deltaTones = {
     emerald: 'mac-stat-meta-emerald',
@@ -223,11 +224,13 @@ export function Btn({
   children,
   variant = 'primary',
   icon: Icon,
+  size = 'md',
   className = '',
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   icon?: LucideIcon;
+  size?: 'sm' | 'md';
 }) {
   const styles = {
     primary: 'bg-gic-violet text-white hover:brightness-95 shadow-[0_0.5px_1px_rgba(0,0,0,0.1)]',
@@ -235,9 +238,10 @@ export function Btn({
     ghost: 'bg-transparent text-gic-muted hover:bg-black/[0.04] hover:text-gic-ink border border-transparent',
     danger: 'bg-gic-coral-soft text-gic-coral hover:bg-red-100 border border-transparent',
   };
+  const sizeCls = size === 'sm' ? 'px-2 py-1 text-[11px]' : 'px-3 py-1.5 text-[12px]';
   return (
     <button
-      className={`inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-all disabled:opacity-50 ${styles[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-all disabled:opacity-50 ${sizeCls} ${styles[variant]} ${className}`}
       {...props}
     >
       {Icon && <Icon size={14} strokeWidth={2} />}
@@ -314,15 +318,21 @@ export function MacSearch({
 export function Input({
   label,
   className = '',
+  icon: Icon,
   ...props
-}: React.InputHTMLAttributes<HTMLInputElement> & { label?: string }) {
+}: React.InputHTMLAttributes<HTMLInputElement> & { label?: string; icon?: LucideIcon }) {
   return (
     <label className="block">
       {label && <span className="block text-[11px] font-medium text-gic-muted mb-1">{label}</span>}
-      <input
-        className={`w-full rounded-md border border-black/[0.1] bg-black/[0.02] px-2.5 py-1.5 text-[12px] outline-none focus:border-gic-violet focus:bg-white focus:ring-[3px] focus:ring-gic-violet/12 ${className}`}
-        {...props}
-      />
+      <span className={Icon ? 'relative block' : 'block'}>
+        {Icon && (
+          <Icon size={14} strokeWidth={2} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gic-muted pointer-events-none" />
+        )}
+        <input
+          className={`w-full rounded-md border border-black/[0.1] bg-black/[0.02] py-1.5 text-[12px] outline-none focus:border-gic-violet focus:bg-white focus:ring-[3px] focus:ring-gic-violet/12 ${Icon ? 'pl-8 pr-2.5' : 'px-2.5'} ${className}`}
+          {...props}
+        />
+      </span>
     </label>
   );
 }
@@ -873,16 +883,16 @@ export function MacToolbarTabs({
   );
 }
 
-export function TableWrap({ children, mac = false }: { children: ReactNode; mac?: boolean }) {
+export function TableWrap({ children, mac = false, className = '' }: { children: ReactNode; mac?: boolean; className?: string }) {
   if (mac) {
     return (
-      <div className="overflow-x-auto mac-table-scroll">
+      <div className={`overflow-x-auto mac-table-scroll ${className}`}>
         <table className="mac-table">{children}</table>
       </div>
     );
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-gic-border/70">
+    <div className={`overflow-x-auto rounded-xl border border-gic-border/70 ${className}`}>
       <table className="w-full text-left text-[12px]">{children}</table>
     </div>
   );
@@ -909,7 +919,7 @@ export function Th({
   );
 }
 
-type TdProps = { children: ReactNode; className?: string; mac?: boolean } & TdHTMLAttributes<HTMLTableCellElement>;
+type TdProps = { children?: ReactNode; className?: string; mac?: boolean } & TdHTMLAttributes<HTMLTableCellElement>;
 
 export function Td({ children, className = '', mac = false, ...rest }: TdProps) {
   if (mac) {

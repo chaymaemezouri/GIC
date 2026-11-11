@@ -2,8 +2,8 @@ import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, Trash2, Printer, ClipboardList, Truck, MapPin, Upload, Paperclip, ExternalLink, Info, FileText, History, Eye } from 'lucide-react';
-import { api, formatDate, fetchChantierList, uploadForm } from '../lib/api';
+import { Pencil, Trash2, Printer, ClipboardList, Truck, MapPin, Paperclip, ExternalLink, Info, FileText, History, Eye } from 'lucide-react';
+import { api, formatDate, fetchChantierList } from '../lib/api';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th, Select, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
@@ -54,7 +54,6 @@ export default function MissionDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteMotif, setDeleteMotif] = useState('');
-  const [uploading, setUploading] = useState(false);
   const [editForm, setEditForm] = useState({
     enginId: '', date: '', mission: '', driverName: '', chantierId: '', usage: '', tranche: '', requestedBy: '', remark: '',
   });
@@ -143,24 +142,6 @@ export default function MissionDetailPage() {
     }
   }
 
-  async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !id) return;
-    setUploading(true);
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('name', file.name);
-    fd.append('category', 'mission');
-    try {
-      await uploadForm(`/engins/missions/${id}/documents`, fd);
-      load();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    } finally {
-      setUploading(false);
-      e.target.value = '';
-    }
-  }
 
   async function deleteDoc(docId: string) {
     if (!id || !await appConfirm(t('msg.confirmDeleteDocument'))) return;

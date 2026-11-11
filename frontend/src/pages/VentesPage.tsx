@@ -334,7 +334,7 @@ export default function VentesPage({ projectId, embedded, onChanged }: VentesPag
       if (payForm.proof) fd.append('proof', payForm.proof);
       await uploadForm('/transactions/payments', fd);
       setPayOpen(null);
-      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', proof: null });
+      setPayForm({ amount: '', operationType: 'especes', payerName: '', bank: '', nature: 'acompte', operationNo: '', internalRef: '', proof: null });
       load(page);
       onChanged?.();
     } catch (err) {

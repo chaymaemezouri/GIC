@@ -2,11 +2,7 @@ import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft, Plus, Building2, Pencil, Trash2, Printer, Home, Layers, History, Eye,
-  TrendingUp, KeyRound, FileText, ExternalLink, Upload, MapPin, Image, HardHat, Camera, Wallet,
-  Images, LayoutGrid, PanelTop, Info, MessageCircle, CheckCircle2, XCircle, CircleDashed,
-} from 'lucide-react';
+import { Plus, Building2, Pencil, Trash2, Printer, Home, Layers, History, Eye, TrendingUp, KeyRound, FileText, ExternalLink, Upload, MapPin, Image, HardHat, Camera, Wallet, Images, LayoutGrid, PanelTop, Info, MessageCircle, CheckCircle2, XCircle, CircleDashed } from 'lucide-react';
 import { api, formatDate, formatMad, uploadForm, uploadDocument } from '../lib/api';
 import { googleMapsSearchUrl, projectLocationQuery } from '../lib/googleMaps';
 import { Btn, PageBackLink, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th } from '../components/ui';
@@ -40,12 +36,8 @@ import {
 import { ChantierFormFields, emptyChantierForm, type ChantierFormData, type ChefOption } from '../components/ChantierFormFields';
 import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import ConversationsPanel from '../components/ConversationsPanel';
-import {
-  SaleFormFields, emptySaleForm, saleFormToCreateBody, saleFormToUpdateBody, saleToForm, attachSaleCreateFiles, type SaleFormData,
-} from '../components/SaleFormFields';
-import {
-  RentalFormFields, emptyRentalForm, rentalFormToBody, rentalToForm, type RentalFormData,
-} from '../components/RentalFormFields';
+import { SaleFormFields, emptySaleForm, saleFormToCreateBody, saleFormToUpdateBody, attachSaleCreateFiles, type SaleFormData } from '../components/SaleFormFields';
+import { RentalFormFields, emptyRentalForm, rentalFormToBody, type RentalFormData } from '../components/RentalFormFields';
 import VentesPage from './VentesPage';
 import LocationsPage from './LocationsPage';
 
@@ -111,10 +103,10 @@ export default function ProjectDetailPage() {
   const [chefs, setChefs] = useState<ChefOption[]>([]);
   const [saleModalOpen, setSaleModalOpen] = useState(false);
   const [saleDetail, setSaleDetail] = useState<any>(null);
-  const [saleDetailLoading, setSaleDetailLoading] = useState(false);
+  const [saleDetailLoading] = useState(false);
   const [rentalModalOpen, setRentalModalOpen] = useState(false);
   const [rentalDetail, setRentalDetail] = useState<any>(null);
-  const [rentalDetailLoading, setRentalDetailLoading] = useState(false);
+  const [rentalDetailLoading] = useState(false);
   const [saleFormOpen, setSaleFormOpen] = useState(false);
   const [saleForm, setSaleForm] = useState<SaleFormData>(emptySaleForm());
   const [saleFormError, setSaleFormError] = useState('');
@@ -229,22 +221,6 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function removeCustomChecklistItem(key: string) {
-    if (!await appConfirm(t('projectDocs.confirmRemoveChecklist'))) return;
-    const linked = documents.find((d) => d.category === key);
-    if (linked) {
-      try {
-        await api(`/documents/${linked.id}`, { method: 'DELETE' });
-      } catch {
-        /* continue removing checklist row */
-      }
-    }
-    await saveChecklistConfig({
-      ...checklistConfig,
-      custom: checklistConfig.custom.filter((item) => item.key !== key),
-    });
-    await reloadDocuments();
-  }
 
   async function onGalleryUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
@@ -582,63 +558,6 @@ export default function ProjectDetailPage() {
     }
   }
 
-  function propertyLabel(p: { reference?: string; name?: string }) {
-    return `${p.reference || ''} — ${p.name || ''}`.replace(/^ — /, '');
-  }
-
-  function openNewSale(p?: { id: string; reference?: string; name?: string; price?: number | null; paymentPlan?: string | null }) {
-    setEditSaleId(null);
-    setSaleForm({
-      ...emptySaleForm(),
-      propertyId: p?.id || '',
-      salePrice: p?.price != null ? String(p.price) : '',
-      paymentPlan: p?.paymentPlan === 'echeancier' ? 'echeancier' : 'avance',
-    });
-    setSaleLock(p ? { id: p.id, label: propertyLabel(p) } : null);
-    setSaleFormError('');
-    setSaleFormOpen(true);
-  }
-
-  function openNewRental(p?: { id: string; reference?: string; name?: string; price?: number | null }) {
-    setEditRentalId(null);
-    setRentalForm({
-      ...emptyRentalForm(),
-      propertyId: p?.id || '',
-      monthlyRent: '',
-    });
-    setRentalLock(p ? { id: p.id, label: propertyLabel(p) } : null);
-    setRentalFormError('');
-    setRentalFormOpen(true);
-  }
-
-  async function openEditSale(saleId: string) {
-    setSaleFormError('');
-    try {
-      const s = await api<Record<string, unknown>>(`/transactions/sales/${saleId}`);
-      const property = s.property as { id?: string; reference?: string; name?: string } | undefined;
-      setSaleForm(saleToForm(s));
-      setEditSaleId(saleId);
-      setSaleLock(property?.id ? { id: property.id, label: propertyLabel(property) } : null);
-      setSaleFormOpen(true);
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
-  async function openEditRental(rentalId: string) {
-    setRentalFormError('');
-    try {
-      const r = await api<Record<string, unknown>>(`/transactions/rentals/${rentalId}`);
-      const property = r.property as { id?: string; reference?: string; name?: string } | undefined;
-      setRentalForm(rentalToForm(r));
-      setEditRentalId(rentalId);
-      setRentalLock(property?.id ? { id: property.id, label: propertyLabel(property) } : null);
-      setRentalFormOpen(true);
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
   async function saveProjectSale(e: React.FormEvent) {
     e.preventDefault();
     setSaleFormError('');
@@ -690,35 +609,7 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function openSaleDetail(saleId: string) {
-    setSaleModalOpen(true);
-    setSaleDetailLoading(true);
-    setSaleDetail(null);
-    try {
-      const s = await api(`/transactions/sales/${saleId}`);
-      setSaleDetail(s);
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-      setSaleModalOpen(false);
-    } finally {
-      setSaleDetailLoading(false);
-    }
-  }
 
-  async function openRentalDetail(rentalId: string) {
-    setRentalModalOpen(true);
-    setRentalDetailLoading(true);
-    setRentalDetail(null);
-    try {
-      const r = await api(`/transactions/rentals/${rentalId}`);
-      setRentalDetail(r);
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-      setRentalModalOpen(false);
-    } finally {
-      setRentalDetailLoading(false);
-    }
-  }
 
   async function printStructure() {
 

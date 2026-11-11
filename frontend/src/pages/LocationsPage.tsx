@@ -7,10 +7,7 @@ import {
   SlidersHorizontal, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { api, downloadCsv, downloadExcel, downloadPdf, fetchClientList, fetchPropertyList, formatMad, type PaginatedResponse } from '../lib/api';
-import {
-  Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacSearch, MacSelect,
-  Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
-} from '../components/ui';
+import { Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacSearch, MacSelect, Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th } from '../components/ui';
 import { RentalFormFields, emptyRentalForm, rentalToForm, rentalFormToBody, type RentalFormData } from '../components/RentalFormFields';
 import { PartyNames, partyLabel, type PartyPerson } from '../components/PartyNames';
 import { PaymentModeFields } from '../components/PaymentModeFields';

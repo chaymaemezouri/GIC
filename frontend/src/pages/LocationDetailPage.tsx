@@ -1,12 +1,9 @@
 import { printPaymentReceipt as printReceipt, printPaymentsReceipt } from '../lib/printPayment';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft, Pencil, Ban, Printer, Wallet, ExternalLink, KeyRound, Home, User, FileText, Upload,
-  Info, Calendar, History,
-} from 'lucide-react';
-import { api, fetchDropdownOptions, fetchPropertyList, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
+import { Pencil, Ban, Printer, Wallet, ExternalLink, KeyRound, Home, User, FileText, Info, Calendar, History } from 'lucide-react';
+import { api, fetchDropdownOptions, fetchPropertyList, formatDate, formatMad, uploadForm } from '../lib/api';
 import { fileUrl } from '../lib/photoUrl';
 import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th,
@@ -45,8 +42,7 @@ export default function LocationDetailPage() {
   const [rental, setRental] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
-  const [docUploading, setDocUploading] = useState(false);
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [properties, setProperties] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
@@ -56,7 +52,8 @@ export default function LocationDetailPage() {
   const [terminateMotif, setTerminateMotif] = useState('');
   const [form, setForm] = useState<RentalFormData>({
     clientId: '', propertyId: '', monthlyRent: '', discount: '0',
-    contractType: 'bail_habitation', description: '', contractDate: '', status: 'active',
+    contractType: 'bail_habitation', description: '', contractDate: '', startDate: '', endDate: '', status: 'active',
+    propertyStatus: 'loué',
     coClientId2: '', coClientId3: '',
     landlordSignatureDate: '', landlordLegalizationNo: '', tenantSignatureDate: '', tenantLegalizationNo: '',
   });
@@ -99,28 +96,6 @@ export default function LocationDetailPage() {
     if (tab === 'documents') loadDocuments();
   }, [tab, id]);
 
-  async function onDocUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    setDocUploading(true);
-    try {
-      await uploadDocument(file, {
-        name: file.name,
-        category: 'location',
-        entityType: 'rental',
-        entityId: id,
-        rentalId: id,
-      });
-      setDocReload((n) => n + 1);
-      loadDocuments();
-      load();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    } finally {
-      setDocUploading(false);
-    }
-  }
 
   function openEdit() {
     if (!rental) return;

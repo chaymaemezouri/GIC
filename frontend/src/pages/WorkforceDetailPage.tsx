@@ -4,13 +4,11 @@ import { printStandardTable } from '../lib/standardPrint';
 import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, Trash2, Printer, Clock, Wallet, Camera, Mail, Phone, Calendar, MapPin, Hash, FileText, User, BadgeCheck, Upload, Info as InfoIcon, History, MessageCircle, Truck } from 'lucide-react';
-import { api, formatDate, formatMad, openPrintUrl, uploadDocument, uploadForm } from '../lib/api';
-import { Btn, Card, KpiCard, MacActionBtn, MacDateInput, MacSelect, Modal, StatusPill, TableWrap, Td, Th, PageBackLink } from '../components/ui';
+import { Pencil, Trash2, Printer, Clock, Wallet, Mail, Phone, Calendar, MapPin, Hash, FileText, User, BadgeCheck, Info as InfoIcon, History, MessageCircle, Truck } from 'lucide-react';
+import { api, formatDate, formatMad, openPrintUrl, uploadForm } from '../lib/api';
+import { Btn, Card, KpiCard, MacActionBtn, MacDateInput, Modal, StatusPill, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
-import { useI18n } from '../i18n/I18nContext';
-import { DocumentFileActions } from '../components/DocumentScanner';
-import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { useI18n } from '../i18n/I18nContext';import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
@@ -52,7 +50,7 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
   const [worker, setWorker] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [docBundle, setDocBundle] = useState<WorkforceDocBundle>({ uploaded: [], generated: [] });
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [salary, setSalary] = useState<any>(null);
   const [pointages, setPointages] = useState<any[]>([]);
   const [pointageFrom, setPointageFrom] = useState(() => {
@@ -203,23 +201,6 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
     }
   }
 
-  async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    try {
-      await uploadDocument(file, {
-        name: file.name,
-        category: 'admin',
-        entityType: 'workforce',
-        entityId: id,
-      });
-      setDocReload((n) => n + 1);
-      loadDocuments();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    }
-  }
 
   function openPrint() {
     if (!worker) return;

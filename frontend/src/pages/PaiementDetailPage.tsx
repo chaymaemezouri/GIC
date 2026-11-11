@@ -1,7 +1,7 @@
-import { appAlert, appConfirm } from '../lib/dialog';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer, ExternalLink, CreditCard, Wallet, FileText, User, Home, Pencil, Trash2, Info, History } from 'lucide-react';
+import { Printer, ExternalLink, CreditCard, Wallet, FileText, User, Home, Pencil, Trash2, Info, History } from 'lucide-react';
 import { api, formatDate, formatMad, uploadForm } from '../lib/api';
 import { Btn, Card, KpiCard, MacActionBtn, Modal, StatusPill, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';

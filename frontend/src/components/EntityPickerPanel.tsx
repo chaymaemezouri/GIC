@@ -278,7 +278,7 @@ export function workforceToPickerItem(w: {
   category?: string | null;
   phone1?: string | null;
   photo?: string | null;
-  assignments?: Array<{ chantier?: { name?: string } }>;
+  assignments?: Array<{ chantier?: { id?: string; name?: string } | null }>;
 }): EntityPickerItem {
   const ref = w.reference?.trim() || '';
   const avatarLabel = shortRefLabel(ref, `${w.firstName[0] || ''}${w.lastName[0] || ''}`);

@@ -103,7 +103,7 @@ export default function PointagePage() {
   const [trancheFilter, setTrancheFilter] = useState(searchParams.get('tranche') || '');
   const [chantiers, setChantiers] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [workforce, setWorkforce] = useState<any[]>([]);
-  const [pointages, setPointages] = useState<Pointage[]>([]);
+  const [, setPointages] = useState<Pointage[]>([]);
   const [dayStats, setDayStats] = useState<Stats>({ total: 0, validated: 0, pending: 0, totalDays: 0, advances: 0, bonuses: 0, estimatedCost: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

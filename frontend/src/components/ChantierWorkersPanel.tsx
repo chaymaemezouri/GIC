@@ -368,7 +368,9 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
                       {a.workforce.firstName} {a.workforce.lastName}
                     </Link>
                     {suspensionState(a) !== 'none' && (
-                      <PauseCircle size={15} className="text-[#ff9500] shrink-0" title={suspensionTitle(a)} aria-label={suspensionTitle(a)} />
+                      <span title={suspensionTitle(a)} className="inline-flex">
+                        <PauseCircle size={15} className="text-[#ff9500] shrink-0" aria-label={suspensionTitle(a)} />
+                      </span>
                     )}
                   </span>
                   {a.workforce.phone1 && <span className="block text-[10px] text-gic-muted">{a.workforce.phone1}</span>}

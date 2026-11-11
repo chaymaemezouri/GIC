@@ -1,6 +1,6 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer, Shield, ExternalLink, Users, Layers, Activity } from 'lucide-react';
+import { Printer, Shield, ExternalLink, Users, Layers, Activity } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { ActionBadge, auditEntityLabel, auditEntityLink, formatAuditDateTime } from '../lib/auditDisplay';

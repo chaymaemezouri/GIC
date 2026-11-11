@@ -1,21 +1,16 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft, Upload, Pencil, Trash2, Printer, History, Camera, ExternalLink,
-  Building2, Home, MapPin, FileText, TrendingUp, User, Info as InfoIcon, CreditCard,
-} from 'lucide-react';
-import { api, fetchProjectList, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
+import { Pencil, Trash2, Printer, History, ExternalLink, Building2, Home, MapPin, FileText, TrendingUp, User, Info as InfoIcon, CreditCard } from 'lucide-react';
+import { api, fetchProjectList, formatDate, formatMad, uploadForm } from '../lib/api';
 import {
   Btn, Card, KpiCard, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th,
   PageBackLink,
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import MacProfilePhoto from '../components/MacProfilePhoto';
-import { useI18n } from '../i18n/I18nContext';
-import { DocumentFileActions } from '../components/DocumentScanner';
-import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { useI18n } from '../i18n/I18nContext';import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { fileUrl } from '../lib/documentDisplay';
 import { occupancyForDeal, occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
@@ -52,7 +47,7 @@ export default function BienDetailPage() {
   const [loadingFloors, setLoadingFloors] = useState(false);
   const [tab, setTab] = useState<Tab>('info');
   const [error, setError] = useState('');
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteMotif, setDeleteMotif] = useState('');
@@ -100,14 +95,6 @@ export default function BienDetailPage() {
       .finally(() => setLoadingFloors(false));
   }, [form.projectId, t]);
 
-  async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    await uploadDocument(file, { name: file.name, category: 'bien', propertyId: id, entityType: 'property', entityId: id });
-    setDocReload((n) => n + 1);
-    load();
-  }
 
   async function onUploadPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];

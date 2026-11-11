@@ -3,21 +3,14 @@ import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlock
 import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft, Pencil, Trash2, Users, Printer, Mail, Phone, Camera,
-  Upload, FileText, Hash, Calendar, MapPin, TrendingUp, Home, Info as InfoIcon, MessageCircle, History,
-} from 'lucide-react';
-import {
-  api, formatDate, uploadDocument, uploadForm,
-} from '../lib/api';
+import { Pencil, Trash2, Users, Printer, Mail, Phone, FileText, Hash, Calendar, MapPin, TrendingUp, Home, Info as InfoIcon, MessageCircle, History } from 'lucide-react';
+import { api, formatDate, uploadForm } from '../lib/api';
 import {
   Btn, Card, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th,
   PageBackLink,
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
-import { useI18n } from '../i18n/I18nContext';
-import { DocumentFileActions } from '../components/DocumentScanner';
-import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { useI18n } from '../i18n/I18nContext';import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { AgentFormFields, emptyAgentForm, agentToForm, type AgentFormData } from '../components/AgentFormFields';
 import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
@@ -35,7 +28,7 @@ export default function AgentDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
   const [printOpen, setPrintOpen] = useState(false);
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [tab, setTab] = useState<Tab>('clients');
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
@@ -125,23 +118,6 @@ export default function AgentDetailPage() {
     }
   }
 
-  async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    try {
-      await uploadDocument(file, {
-        name: file.name,
-        category: 'admin',
-        entityType: 'agent',
-        entityId: id,
-      });
-      setDocReload((n) => n + 1);
-      loadDocuments();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    }
-  }
 
   async function assignClient(clientId: string) {
     if (!id) return;

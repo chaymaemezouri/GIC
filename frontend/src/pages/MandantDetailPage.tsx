@@ -3,21 +3,14 @@ import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlock
 import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft, Pencil, Trash2, Users, Printer, Mail, Phone, Camera,
-  Upload, FileText, Hash, Calendar, MapPin, Info as InfoIcon, MessageCircle, History,
-} from 'lucide-react';
-import {
-  api, formatDate, uploadDocument, uploadForm,
-} from '../lib/api';
+import { Pencil, Trash2, Users, Printer, Mail, Phone, FileText, Hash, Calendar, MapPin, Info as InfoIcon, MessageCircle, History } from 'lucide-react';
+import { api, formatDate, uploadForm } from '../lib/api';
 import {
   Btn, Card, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th,
   PageBackLink,
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
-import { useI18n } from '../i18n/I18nContext';
-import { DocumentFileActions } from '../components/DocumentScanner';
-import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { useI18n } from '../i18n/I18nContext';import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { MandantFormFields, emptyMandantForm, mandantToForm, type MandantFormData } from '../components/MandantFormFields';
 import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
@@ -35,7 +28,7 @@ export default function MandantDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
   const [printOpen, setPrintOpen] = useState(false);
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [identityTypes, setIdentityTypes] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
@@ -122,23 +115,6 @@ export default function MandantDetailPage() {
     }
   }
 
-  async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    try {
-      await uploadDocument(file, {
-        name: file.name,
-        category: 'cin',
-        entityType: 'mandant',
-        entityId: id,
-      });
-      setDocReload((n) => n + 1);
-      loadDocuments();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    }
-  }
 
   async function linkClient(clientId: string) {
     if (!clientId || !id) return;

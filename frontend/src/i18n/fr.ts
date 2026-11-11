@@ -1370,7 +1370,6 @@ const fr: Dict = {
     contributionBrut: 'Contribution brut',
     rentMonth: 'Loyer/mois',
     since: 'Depuis',
-    end: 'Fin',
     station: 'Station',
     docs: 'Docs',
     createdAtSort: 'Date création',

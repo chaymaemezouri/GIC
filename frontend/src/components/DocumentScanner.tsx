@@ -54,7 +54,8 @@ function pdfFromJpegs(pages: { bytes: Uint8Array; width: number; height: number 
   for (const off of offsets) xref += `${String(off).padStart(10, '0')} 00000 n \n`;
   pushStr(xref);
   pushStr(`trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`);
-  return new Blob(parts, { type: 'application/pdf' });
+  const blobParts: BlobPart[] = parts.map((part) => new Uint8Array(part));
+  return new Blob(blobParts, { type: 'application/pdf' });
 }
 
 async function blobToPage(blob: Blob, width: number, height: number): Promise<ScanPage> {

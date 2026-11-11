@@ -1370,7 +1370,6 @@ const ar: Dict = {
     contributionBrut: 'المساهمة الإجمالية',
     rentMonth: 'إيجار/شهر',
     since: 'منذ',
-    end: 'نهاية',
     station: 'محطة',
     docs: 'وثائق',
     createdAtSort: 'تاريخ الإنشاء',

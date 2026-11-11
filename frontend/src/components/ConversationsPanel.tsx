@@ -18,7 +18,7 @@ type Message = {
 type Channel = 'note' | 'email' | 'sms' | 'whatsapp';
 
 type Props = {
-  entityType: 'Client' | 'Agent' | 'Supplier' | 'User' | 'Mandant' | 'Project' | 'Workforce';
+  entityType: 'Client' | 'Agent' | 'Supplier' | 'User' | 'Mandant' | 'Project' | 'Workforce' | 'InternalStaff';
   entityId: string;
   defaultEmail?: string;
   defaultPhone?: string;

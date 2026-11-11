@@ -4,12 +4,9 @@ import { useEffect, useState } from 'react';
 
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 
-import {
+import { Pencil, Trash2, Printer, Wrench, Truck, Wallet, Paperclip, ExternalLink, Info, FileText, History, Eye } from 'lucide-react';
 
-  ArrowLeft, Pencil, Trash2, Printer, Wrench, Truck, Wallet, Upload, Paperclip, ExternalLink, Info, FileText, History, Eye
-} from 'lucide-react';
-
-import { api, formatDate, formatMad, uploadForm } from '../lib/api';
+import { api, formatDate, formatMad } from '../lib/api';
 
 import {
 
@@ -100,7 +97,6 @@ export default function MaintenanceDetailPage() {
 
   const [deleteMotif, setDeleteMotif] = useState('');
 
-  const [uploading, setUploading] = useState(false);
 
   const [editForm, setEditForm] = useState({
 
@@ -266,41 +262,6 @@ export default function MaintenanceDetailPage() {
 
 
 
-  async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
-
-    const file = e.target.files?.[0];
-
-    if (!file || !id) return;
-
-    setUploading(true);
-
-    const fd = new FormData();
-
-    fd.append('file', file);
-
-    fd.append('name', file.name);
-
-    fd.append('category', 'maintenance');
-
-    try {
-
-      await uploadForm(`/engins/maintenances/${id}/documents`, fd);
-
-      load();
-
-    } catch (err) {
-
-      await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-
-    } finally {
-
-      setUploading(false);
-
-      e.target.value = '';
-
-    }
-
-  }
 
 
 

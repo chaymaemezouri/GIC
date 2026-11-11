@@ -1,17 +1,15 @@
 import { PrintChoiceModal } from '../components/PrintChoiceModal';
 import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlocks';
-import { alertCinDuplicate, appAlert, appConfirm } from '../lib/dialog';
+import { alertCinDuplicate, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Pencil, Printer, Shield, Mail, Clock, Wallet, Upload, FileText, BadgeCheck, Phone, MapPin, Link2, Unlink, UserPlus, ExternalLink, Info, History, MessageCircle, User } from 'lucide-react';
+import { Pencil, Printer, Shield, Wallet, FileText, BadgeCheck, Phone, MapPin, Link2, Unlink, UserPlus, ExternalLink, Info, History, MessageCircle, User } from 'lucide-react';
 import { api, formatDate, formatMad, openPrintUrl, uploadForm } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { roleLabel, canManageUsers } from '../lib/permissions';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, Select, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
-import { useI18n } from '../i18n/I18nContext';
-import { DocumentFileActions } from '../components/DocumentScanner';
-import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { useI18n } from '../i18n/I18nContext';import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import ConversationsPanel from '../components/ConversationsPanel';
 import { InternalStaffFormFields, staffFormToBody, staffToForm } from '../components/InternalStaffFormFields';
@@ -46,6 +44,8 @@ type StaffDetail = {
   rib?: string | null;
   emergencyContact?: string | null;
   remark?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
   userId?: string | null;
   user?: {
     id: string;
@@ -95,7 +95,7 @@ export default function EquipeInterneDetailPage() {
   const [salaryRecords, setSalaryRecords] = useState<SalaryRecord[]>([]);
   const [docBundle, setDocBundle] = useState<{ uploaded: any[]; generated: any[] }>({ uploaded: [], generated: [] });
   const [printOpen, setPrintOpen] = useState(false);
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
@@ -237,17 +237,6 @@ export default function EquipeInterneDetailPage() {
     }
   }
 
-  async function uploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('category', 'RH');
-    await uploadForm(`/equipe-interne/${id}/documents`, fd);
-    setDocReload((n) => n + 1);
-    loadDocuments();
-  }
 
   async function linkExistingUser(e: React.FormEvent) {
     e.preventDefault();

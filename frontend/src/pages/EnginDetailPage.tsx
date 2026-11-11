@@ -3,18 +3,13 @@ import { printStandardTable } from '../lib/standardPrint';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import {
-  Pencil, Trash2, Printer, Wrench, AlertTriangle, ExternalLink, MapPin, Fuel, ClipboardList, FileText,
-  Upload, Info, History, Bell, UserRound, Landmark, CalendarRange, Gauge, Receipt, Calculator, Hammer, RotateCcw, Clock, Wallet, Package,
-} from 'lucide-react';
-import { api, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
+import { Pencil, Trash2, Printer, Wrench, AlertTriangle, ExternalLink, MapPin, Fuel, ClipboardList, FileText, Info, History, Bell, UserRound, Landmark, CalendarRange, Gauge, Receipt, Calculator, Hammer, RotateCcw, Clock, Wallet, Package } from 'lucide-react';
+import { api, formatDate, formatMad, uploadForm } from '../lib/api';
 import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, Modal, TableWrap, Td, Th, PageBackLink, SectionTitle,
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
-import { useI18n } from '../i18n/I18nContext';
-import { DocumentFileActions } from '../components/DocumentScanner';
-import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { useI18n } from '../i18n/I18nContext';import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, type EnginFormData } from '../components/EnginFormFields';
 import { uploadEntityPhoto } from '../components/FormPhotoField';
 import MacProfilePhoto from '../components/MacProfilePhoto';
@@ -71,7 +66,7 @@ export default function EnginDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [maintOpen, setMaintOpen] = useState<'entretien' | 'reparation' | null>(null);
@@ -144,18 +139,6 @@ export default function EnginDetailPage() {
     e.target.value = '';
   }
 
-  async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    try {
-      await uploadDocument(file, { name: file.name, category: 'engin', enginId: id, entityType: 'engin', entityId: id });
-      setDocReload((n) => n + 1);
-      load();
-    } catch (err) {
-      await appAlert(errorMessage(err, t('msg.uploadError')));
-    }
-  }
 
   function openEdit() {
     if (!engin) return;

@@ -4,12 +4,7 @@ import { printPaymentReceipt, printPaymentsReceipt } from '../lib/printPayment';
 import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft, Plus, Upload, Trash2, Pencil, Printer, Camera, Save, X, FileText, ExternalLink,
-  Mail, MessageCircle, CheckCircle2, TrendingUp, Wallet, Archive, ArchiveRestore,
-  User, Phone, MapPin, Calendar, Hash, Briefcase, Users, CreditCard, ChevronRight,
-  LayoutDashboard, Home, Building2, KeyRound, History,
-} from 'lucide-react';
+import { Plus, Trash2, Pencil, Printer, Save, X, FileText, ExternalLink, Mail, MessageCircle, CheckCircle2, TrendingUp, Wallet, Archive, ArchiveRestore, User, Phone, MapPin, Calendar, Hash, Briefcase, Users, CreditCard, ChevronRight, LayoutDashboard, Home, Building2, KeyRound, History } from 'lucide-react';
 import { api, fetchAgentList, formatMad, formatDate, uploadDocument, uploadForm } from '../lib/api';
 import {
   Btn, KpiCard, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th,

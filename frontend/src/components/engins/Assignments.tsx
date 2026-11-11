@@ -502,13 +502,14 @@ export function TransferAssignmentModal({
   }, [assignment]);
 
   if (!assignment) return null;
+  const current = assignment;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!chantierId) return;
     setSaving(true);
     try {
-      await api(`/engins/assignments/${assignment.id}/transfer`, {
+      await api(`/engins/assignments/${current.id}/transfer`, {
         method: 'POST',
         body: JSON.stringify({ chantierId, tranche: tranche || null, date: transferDate }),
       });

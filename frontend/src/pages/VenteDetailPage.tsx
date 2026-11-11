@@ -1,11 +1,8 @@
 import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import {
-  ArrowLeft, Pencil, Ban, Printer, Wallet, ExternalLink, FileText, Home, User, Building2,
-  Info, Calendar, History, Upload, Trash2,
-} from 'lucide-react';
-import { api, fetchClientList, fetchPropertyList, formatDate, formatMad, uploadDocument, uploadForm } from '../lib/api';
+import { Pencil, Ban, Printer, Wallet, ExternalLink, FileText, Home, User, Building2, Info, Calendar, History, Trash2 } from 'lucide-react';
+import { api, fetchClientList, fetchPropertyList, formatDate, formatMad, uploadForm } from '../lib/api';
 import {
   Btn, Card, Input, KpiCard, MacActionBtn, Modal, Select, StatusPill, TableWrap, Td, Th,
   PageBackLink,
@@ -46,8 +43,7 @@ export default function VenteDetailPage() {
   const [sale, setSale] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
-  const [docUploading, setDocUploading] = useState(false);
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [clients, setClients] = useState<any[]>([]);
   const [properties, setProperties] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
@@ -190,28 +186,6 @@ export default function VenteDetailPage() {
     if (plan === 'avance' && tab === 'echeancier') setTab('paiements');
   }, [sale?.id, sale?.paymentPlan, sale?.schedules?.length, tab]);
 
-  async function onDocUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    setDocUploading(true);
-    try {
-      await uploadDocument(file, {
-        name: file.name,
-        category: 'vente',
-        entityType: 'sale',
-        entityId: id,
-        saleId: id,
-      });
-      setDocReload((n) => n + 1);
-      loadDocuments();
-      load();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    } finally {
-      setDocUploading(false);
-    }
-  }
 
   useEffect(() => {
     const st = location.state as { edit?: boolean; tab?: Tab } | null;
@@ -394,8 +368,9 @@ export default function VenteDetailPage() {
     .sort((a: { date?: string }, b: { date?: string }) => String(a.date || '').localeCompare(String(b.date || '')))[0];
   const schedulePayments = (sale.payments || []).filter((p: { scheduleId?: string | null }) => p.scheduleId);
   const freeAdvancePayments = (sale.payments || []).filter((p: { scheduleId?: string | null }) => !p.scheduleId);
-  const scheduleById = new Map(
-    (sale.schedules || []).map((s: { id: string; label?: string | null; dueDate: string; amount: number; status: string; payments?: { amount: number }[] }) => [s.id, s]),
+  type SaleSchedule = { id: string; label?: string | null; dueDate: string; amount: number; status: string; payments?: { amount: number }[] };
+  const scheduleById = new Map<string, SaleSchedule>(
+    (sale.schedules || []).map((s: SaleSchedule) => [s.id, s] as [string, SaleSchedule]),
   );
 
   function scheduleKindText(kind?: string | null) {

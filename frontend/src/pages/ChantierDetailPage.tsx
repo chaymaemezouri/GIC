@@ -1,5 +1,4 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { printStandardTable, standardTableHtml } from '../lib/standardPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -176,7 +175,7 @@ export default function ChantierDetailPage() {
   useEffect(() => {
     if (tab === 'historique') loadHistory();
     if (tab === 'achats') {
-      fetchSupplierList().then(setSuppliers).catch(() => {});
+      fetchSupplierList<{ id: string; reference: string; companyName: string }>().then(setSuppliers).catch(() => {});
       api('/achats/families').then(setFamilies).catch(() => {});
     }
   }, [tab, id]);
@@ -432,45 +431,7 @@ export default function ChantierDetailPage() {
     </body></html>`, { grid: true }) });
   }
 
-  async function printSituation() {
-    if (!chantier || !id) return;
-    const syn = overview?.synthèse;
-    const spent = (syn?.depense || 0) + (syn?.costMO || 0);
-    const left = syn && syn.budgetAchats > 0 ? Math.max(0, syn.budgetTotal || syn.budgetAchats) - spent : 0;
-    const rows = (chantier.purchases || []).slice(0, 30).map((p: { reference?: string; status?: string; supplier?: { companyName?: string } }) => [
-      p.reference || '—',
-      p.supplier?.companyName || '—',
-      p.status || '—',
-    ]);
-    printStandardTable(
-      t('siteOps.situation'),
-      `${chantier.name} · ${Math.round(chantier.progressPct || 0)} % · ${t('siteOps.moneySpent')} ${formatMad(spent)} · ${t('siteOps.moneyLeft')} ${formatMad(left)}`,
-      [t('fields.reference'), t('fields.supplier'), t('fields.status')],
-      rows,
-    );
-  }
 
-  function printPointageSheet() {
-    if (!chantier || !id) return;
-    const chantierId = id;
-    const name = chantier.name;
-    printWithCompany({
-      title: t('siteOps.feuillePointage'),
-      bodyHtml: async () => {
-        const data = await api<{ items: Array<{ workforce: { firstName: string; lastName: string }; totalDays: number; validatedLines: number; remaining: number }> }>(`/chantiers/pointage/by-worker?chantierId=${chantierId}`);
-        return standardTableHtml(
-          name,
-          [t('tabs.personnel'), t('siteOps.attendance'), t('fields.status'), t('fields.remaining')],
-          (data.items || []).map((i) => [
-            `${i.workforce.firstName} ${i.workforce.lastName}`,
-            String(i.totalDays),
-            String(i.validatedLines),
-            formatMad(i.remaining),
-          ]),
-        );
-      },
-    }).catch((err) => appAlert(err instanceof Error ? err.message : t('common.error')));
-  }
 
   const siteAssignments = chantier?.assignments || [];
   const driverAssignments = siteAssignments.filter((a: { workforce?: { category?: string | null } }) => a.workforce?.category === CHAUFFEUR_CATEGORY);

@@ -1,9 +1,7 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import {
-  ArrowLeft, Printer, ExternalLink, Wallet, Clock, Users, TrendingUp, HardHat,
-} from 'lucide-react';
+import { Printer, ExternalLink, Wallet, Clock, Users, TrendingUp, HardHat } from 'lucide-react';
 import { api, formatDate, formatMad } from '../lib/api';
 import {
   Btn, Card, KpiCard, MacActionBtn, StatusPill, TableWrap, Td, Th,

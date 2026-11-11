@@ -3,13 +3,11 @@ import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlock
 import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, Trash2, History, Key, Printer, ShoppingCart, Truck, Plus, Mail, Phone, Upload, FileText, Hash, Calendar, MapPin, Building2, CreditCard, Info as InfoIcon, MessageCircle } from 'lucide-react';
-import { api, fetchChantierList, formatDate, formatMad, openPrintUrl, uploadDocument } from '../lib/api';
+import { Pencil, Trash2, History, Key, Printer, ShoppingCart, Truck, Plus, Mail, Phone, FileText, Hash, Calendar, MapPin, Building2, CreditCard, Info as InfoIcon, MessageCircle } from 'lucide-react';
+import { api, fetchChantierList, formatDate, formatMad, openPrintUrl } from '../lib/api';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, TableWrap, Td, Th, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
-import { useI18n } from '../i18n/I18nContext';
-import { DocumentFileActions } from '../components/DocumentScanner';
-import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { useI18n } from '../i18n/I18nContext';import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 
 import { SupplierFormFields, supplierToForm, type SupplierFormData } from '../components/SupplierFormFields';
@@ -48,7 +46,7 @@ export default function FournisseurDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [printOpen, setPrintOpen] = useState(false);
   const [docBundle, setDocBundle] = useState<SupplierDocBundle>({ uploaded: [], generated: [], purchaseFiles: [] });
-  const [docReload, setDocReload] = useState(0);
+  const [docReload] = useState(0);
   const [tab, setTab] = useState<Tab>('achats');
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
@@ -167,24 +165,6 @@ export default function FournisseurDetailPage() {
     }
   }
 
-  async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !id) return;
-    try {
-      await uploadDocument(file, {
-        name: file.name,
-        category: 'admin',
-        entityType: 'supplier',
-        entityId: id,
-        supplierId: id,
-      });
-      setDocReload((n) => n + 1);
-      loadDocuments();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    }
-  }
 
   function openPurchaseCreate() {
     if (!supplier) return;
