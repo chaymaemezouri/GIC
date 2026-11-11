@@ -11,6 +11,10 @@ import {
   parseCsvMandantRows,
   parseExcelMandantRows,
 } from '../lib/importMandants.js';
+import { assertUniqueCin, replyIfCinDuplicate } from '../lib/uniqueness.js';
+import { requiredCinPhoneError } from '../lib/requiredContact.js';
+import { applyBankField, applyRibField } from '../lib/rib.js';
+import { entityTypeVariants } from '../lib/documentEntity.js';
 
 function buildMandantWhere(q: string, identityType: string, linked = '') {
   const linkedFilter =
@@ -41,16 +45,7 @@ function buildMandantWhere(q: string, identityType: string, linked = '') {
 }
 
 async function ensureIdentityUnique(identityNumber: unknown, excludeId?: string) {
-  const num = String(identityNumber || '').trim();
-  if (!num) return null;
-  const exists = await prisma.mandant.findFirst({
-    where: {
-      identityNumber: num,
-      ...(excludeId ? { NOT: { id: excludeId } } : {}),
-    },
-  });
-  if (exists) return 'Ce numéro d\'identité existe déjà';
-  return null;
+  await assertUniqueCin('mandant', identityNumber == null ? null : String(identityNumber), excludeId);
 }
 
 async function backfillReferences() {
@@ -161,10 +156,22 @@ router.post('/', async (req, res) => {
   if (!firstName || !lastName) {
     return res.status(400).json({ message: 'Prénom et nom obligatoires' });
   }
-  const dup = await ensureIdentityUnique(req.body.identityNumber);
-  if (dup) return res.status(400).json({ message: dup });
+  const contactError = requiredCinPhoneError({
+    cin: { value: req.body.identityNumber, required: true },
+    phone1: { value: req.body.phone1, required: true },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  try {
+    await ensureIdentityUnique(req.body.identityNumber);
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
+  }
 
   const data = { ...req.body };
+  applyBankField(data);
+  const ribError = applyRibField(data);
+  if (ribError) return res.status(400).json({ message: ribError });
   if (data.birthDate) data.birthDate = new Date(data.birthDate);
   data.reference = await nextReference('MAN');
 
@@ -192,7 +199,7 @@ router.get('/:id/history', async (req, res) => {
 router.get('/:id/documents', async (req, res) => {
   const mandantId = String(req.params.id);
   const docs = await prisma.document.findMany({
-    where: { entityType: 'Mandant', entityId: mandantId },
+    where: { entityType: { in: entityTypeVariants('Mandant') }, entityId: mandantId },
     orderBy: { createdAt: 'desc' },
   });
   res.json(docs);
@@ -270,14 +277,26 @@ router.get('/:id', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const id = String(req.params.id);
-  const dup = await ensureIdentityUnique(req.body.identityNumber, id);
-  if (dup) return res.status(400).json({ message: dup });
+  const contactError = requiredCinPhoneError({
+    cin: { value: req.body.identityNumber, required: 'identityNumber' in (req.body || {}) },
+    phone1: { value: req.body.phone1, required: 'phone1' in (req.body || {}) },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  try {
+    await ensureIdentityUnique(req.body.identityNumber, id);
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
+  }
 
   const data = { ...req.body };
   delete data.id;
   delete data.reference;
   delete data._count;
   delete data.clients;
+  applyBankField(data);
+  const ribError = applyRibField(data);
+  if (ribError) return res.status(400).json({ message: ribError });
   if (data.birthDate !== undefined) data.birthDate = data.birthDate ? new Date(data.birthDate) : null;
 
   const mandant = await prisma.mandant.update({ where: { id }, data });

@@ -11,6 +11,7 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentScanButton } from '../components/DocumentScanner';
 import { PdfPages } from '../components/PdfPreview';
+import { ZoomImage } from '../components/PhotoLightbox';
 import {
   daysUntilExpiry,
   entityLink,
@@ -252,7 +253,7 @@ export default function DocumentDetailPage() {
         <div className="mac-detail-hero-main">
           <div className="mac-detail-photo">
             {isImage ? (
-              <img src={url} alt="" className="h-full w-full object-cover" />
+              <ZoomImage src={url} alt={d.name} className="h-full w-full object-cover" />
             ) : (
               <div className="mac-detail-photo-fallback">
                 <FileText size={22} strokeWidth={1.75} />
@@ -452,7 +453,7 @@ export default function DocumentDetailPage() {
               </div>
             ) : isImage ? (
               <div className="mac-section-card overflow-hidden p-2">
-                <img src={url} alt={d.name} className="max-h-[70vh] w-full object-contain rounded-lg bg-black/[0.03]" />
+                <ZoomImage src={url} alt={d.name} className="max-h-[70vh] w-full object-contain rounded-lg bg-black/[0.03]" />
               </div>
             ) : isPdf ? (
               <div className="mac-section-card overflow-hidden bg-[#e8e8ed] p-3">

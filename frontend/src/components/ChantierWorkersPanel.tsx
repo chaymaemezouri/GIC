@@ -1,4 +1,4 @@
-import { appAlert, appConfirm } from '../lib/dialog';
+import { alertCinDuplicate, appAlert, appConfirm } from '../lib/dialog';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PauseCircle, Plus, Trash2, UserPlus, Users } from 'lucide-react';
@@ -215,6 +215,7 @@ export function ChantierWorkersPanel({ chantierId, assignments, tranches, fixedT
       setCreateOpen(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : t('common.error'));
+      await alertCinDuplicate(err);
     } finally {
       setCreateSaving(false);
     }

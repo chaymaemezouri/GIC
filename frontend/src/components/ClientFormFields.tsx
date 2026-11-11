@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/I18nContext';
+import { MAROC_BANKS } from '../lib/marocBanks';
+import { clampRib } from '../lib/rib';
 import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 import { Input, Select } from './ui';
 
@@ -10,6 +12,8 @@ export type ClientFormData = {
   phone1: string;
   phone2: string;
   address: string;
+  bankName: string;
+  rib: string;
   identityType: string;
   identityNumber: string;
   birthDate: string;
@@ -31,6 +35,8 @@ export const emptyClientForm = (): ClientFormData => ({
   phone1: '',
   phone2: '',
   address: '',
+  bankName: '',
+  rib: '',
   identityType: 'CIN',
   identityNumber: '',
   birthDate: '',
@@ -52,6 +58,8 @@ export function clientToForm(c: Partial<ClientFormData> & Record<string, unknown
     phone1: String(c.phone1 || ''),
     phone2: String(c.phone2 || ''),
     address: String(c.address || ''),
+    bankName: String(c.bankName || ''),
+    rib: clampRib(String(c.rib || '')),
     identityType: String(c.identityType || 'CIN'),
     identityNumber: String(c.identityNumber || ''),
     birthDate: c.birthDate ? String(c.birthDate).slice(0, 10) : '',
@@ -114,7 +122,7 @@ export function ClientFormFields({
           <option key={type} value={type}>{type}</option>
         ))}
       </Select>
-      <Input label={t('fields.identityPieceNumber')} value={form.identityNumber} onChange={(e) => setForm({ ...form, identityNumber: e.target.value })} />
+      <Input label={`${t('fields.identityPieceNumber')} *`} required value={form.identityNumber} onChange={(e) => setForm({ ...form, identityNumber: e.target.value })} />
       <Input label={t('fields.birthDate')} type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
       <Input label={t('fields.nb')} value={form.nb} onChange={(e) => setForm({ ...form, nb: e.target.value })} placeholder={t('fields.nbPlaceholder')} />
 
@@ -123,6 +131,12 @@ export function ClientFormFields({
       <Input label={`${t('fields.phone1')} *`} required value={form.phone1} onChange={(e) => setForm({ ...form, phone1: e.target.value })} />
       <Input label={t('fields.phone2')} value={form.phone2} onChange={(e) => setForm({ ...form, phone2: e.target.value })} />
       <Input className="sm:col-span-2" label={t('fields.address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+      <Select label={t('fields.bank')} value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })}>
+        <option value="">{t('fields.chooseBank')}</option>
+        {MAROC_BANKS.map((bank) => <option key={bank} value={bank}>{bank}</option>)}
+        {form.bankName && !(MAROC_BANKS as readonly string[]).includes(form.bankName) && <option value={form.bankName}>{form.bankName}</option>}
+      </Select>
+      <Input label={t('fields.rib')} value={form.rib} inputMode="numeric" placeholder={t('fields.ribDigitsPlaceholder')} onChange={(e) => setForm({ ...form, rib: clampRib(e.target.value) })} />
 
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide mt-1">{t('fields.sectionClassification')}</p>
       <label className="flex items-center gap-2 text-[12px]">

@@ -39,7 +39,7 @@ model InternalStaff {
   lastName         String
   photo            String?
   email            String?
-  cin              String?
+  cin              String?  @unique
   birthDate        DateTime?
   address          String?
   phone1           String?
@@ -105,6 +105,7 @@ model InternalStaffSalaryRecord {
   advance      Float         @default(0)
   netSalary    Float         @default(0)
   status       String        @default("brouillon")
+  paymentMode  String?
   paidAt       DateTime?
   remark       String?
   createdAt    DateTime      @default(now())
@@ -150,6 +151,8 @@ model Agent {
   phone1      String?
   phone2      String?
   address     String?
+  bankName    String?
+  rib         String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -165,6 +168,8 @@ model Reconnu {
   phone1     String?
   phone2     String?
   address    String?
+  bankName   String?
+  rib        String?
   relation   String?  // ex: femme de ménage, fournisseur ponctuel
   remark     String?
   isActive   Boolean  @default(true)
@@ -183,6 +188,8 @@ model Entreprise {
   email       String?
   address     String?
   ice         String?
+  bankName    String?
+  rib         String?
   remark      String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -212,6 +219,10 @@ model OfficeCashMovement {
   remark       String?
   createdBy    String?
   createdAt    DateTime @default(now())
+  /// Lien vers le paiement qui a alimenté la caisse (espèces)
+  sourceType   String?
+  sourceId     String?
+  sourceParent String?
 }
 
 model Mandant {
@@ -229,6 +240,8 @@ model Mandant {
   phone1        String?
   phone2        String?
   address       String?
+  bankName      String?
+  rib           String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   clients       ClientMandant[]
@@ -248,6 +261,8 @@ model Client {
   phone1          String
   phone2          String?
   address         String?
+  bankName        String?
+  rib             String?
   isProspect      Boolean  @default(true)
   isBuyer         Boolean  @default(false)
   isTenant        Boolean  @default(false)
@@ -628,6 +643,7 @@ model Supplier {
   email         String?
   address       String?
   cin           String?  @unique
+  ice           String?
   source        String?
   bankName      String?
   rib           String?

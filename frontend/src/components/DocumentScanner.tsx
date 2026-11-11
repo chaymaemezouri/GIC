@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ScanLine, X } from 'lucide-react';
 import { Btn } from './ui';
@@ -289,8 +289,22 @@ export function DocumentFileActions({
   onChange: (e: ChangeEvent<HTMLInputElement>) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
+  const inputId = useId();
+  const lastFile = useRef<{ key: string; at: number } | null>(null);
+
+  function emit(e: ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const key = Array.from(files).map((file) => `${file.name}:${file.size}:${file.lastModified}`).join('|');
+    const now = Date.now();
+    if (lastFile.current && lastFile.current.key === key && now - lastFile.current.at < 1000) return;
+    lastFile.current = { key, at: now };
+    onChange(e);
+  }
+
   const input = (
     <input
+      id={labelClassName ? inputId : undefined}
       ref={ref}
       type="file"
       accept={accept}
@@ -298,18 +312,19 @@ export function DocumentFileActions({
       required={required}
       disabled={disabled}
       className={labelClassName ? 'hidden' : inputClassName}
-      onChange={onChange}
+      onChange={emit}
     />
   );
   return (
     <div className={labelClassName ? 'inline-flex flex-wrap items-center gap-2' : 'flex w-full flex-wrap items-center gap-2'}>
       {labelClassName ? (
-        <label className={labelClassName} title={labelTitle} aria-label={labelTitle}>{children}{input}</label>
-      ) : input}
+        <label htmlFor={inputId} className={labelClassName} title={labelTitle} aria-label={labelTitle}>{children}</label>
+      ) : null}
+      {input}
       <DocumentScanButton
         variant={scanVariant}
         disabled={disabled}
-        onFile={(file) => applyScannedFile(ref.current, file, onChange)}
+        onFile={(file) => applyScannedFile(ref.current, file, emit)}
       />
     </div>
   );

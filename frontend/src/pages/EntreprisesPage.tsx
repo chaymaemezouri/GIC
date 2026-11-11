@@ -5,7 +5,9 @@ import { api, type PaginatedResponse } from '../lib/api';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useCreateQuery } from '../hooks/useCreateQuery';
 import { useI18n } from '../i18n/I18nContext';
-import { Btn, EmptyState, Input, MacActionBtn, Modal, PageHeader, TableWrap, Td, Textarea, Th } from '../components/ui';
+import { clampRib } from '../lib/rib';
+import { Btn, EmptyState, Input, MacActionBtn, Modal, PageHeader, Select, TableWrap, Td, Textarea, Th } from '../components/ui';
+import { MAROC_BANKS } from '../lib/marocBanks';
 
 type Entreprise = {
   id: string;
@@ -15,11 +17,13 @@ type Entreprise = {
   email?: string | null;
   address?: string | null;
   ice?: string | null;
+  bankName?: string | null;
+  rib?: string | null;
   remark?: string | null;
   isActive?: boolean;
 };
 
-const emptyForm = () => ({ companyName: '', phone: '', email: '', address: '', ice: '', remark: '' });
+const emptyForm = () => ({ companyName: '', phone: '', email: '', address: '', ice: '', bankName: '', rib: '', remark: '' });
 
 export default function EntreprisesPage() {
   const { t } = useI18n();
@@ -117,6 +121,8 @@ export default function EntreprisesPage() {
                         email: item.email || '',
                         address: item.address || '',
                         ice: item.ice || '',
+                        bankName: item.bankName || '',
+                        rib: clampRib(item.rib || ''),
                         remark: item.remark || '',
                       });
                       setOpen(true);
@@ -137,10 +143,16 @@ export default function EntreprisesPage() {
       >
         <form id="entreprise-form" onSubmit={save} className="grid gap-3 sm:grid-cols-2">
           <Input className="sm:col-span-2" label={t('fields.companyRequired')} required value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
-          <Input label={t('fields.phone')} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <Input label={`${t('fields.phone')} *`} required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           <Input label={t('fields.email')} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           <Input className="sm:col-span-2" label={t('fields.address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           <Input label={t('fields.ice')} value={form.ice} onChange={(e) => setForm({ ...form, ice: e.target.value })} />
+          <Select label={t('fields.bank')} value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })}>
+            <option value="">{t('fields.chooseBank')}</option>
+            {MAROC_BANKS.map((bank) => <option key={bank} value={bank}>{bank}</option>)}
+            {form.bankName && !(MAROC_BANKS as readonly string[]).includes(form.bankName) && <option value={form.bankName}>{form.bankName}</option>}
+          </Select>
+          <Input label={t('fields.rib')} value={form.rib} inputMode="numeric" placeholder={t('fields.ribDigitsPlaceholder')} onChange={(e) => setForm({ ...form, rib: clampRib(e.target.value) })} />
           <Textarea className="sm:col-span-2" label={t('fields.remark')} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
         </form>
       </Modal>

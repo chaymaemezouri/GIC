@@ -1,5 +1,6 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { PrintChoiceModal } from '../components/PrintChoiceModal';
+import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlocks';
+import { alertCinDuplicate, appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Pencil, Printer, Shield, Mail, Clock, Wallet, Upload, FileText, BadgeCheck, Phone, MapPin, Link2, Unlink, UserPlus, ExternalLink, Info, History, MessageCircle, User } from 'lucide-react';
@@ -93,6 +94,8 @@ export default function EquipeInterneDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [salaryRecords, setSalaryRecords] = useState<SalaryRecord[]>([]);
   const [docBundle, setDocBundle] = useState<{ uploaded: any[]; generated: any[] }>({ uploaded: [], generated: [] });
+  const [printOpen, setPrintOpen] = useState(false);
+  const [docReload, setDocReload] = useState(0);
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
@@ -194,6 +197,7 @@ export default function EquipeInterneDetailPage() {
       load();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : t('common.error'));
+      await alertCinDuplicate(err);
     }
   }
 
@@ -235,13 +239,14 @@ export default function EquipeInterneDetailPage() {
 
   async function uploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
     const fd = new FormData();
     fd.append('file', file);
     fd.append('category', 'RH');
     await uploadForm(`/equipe-interne/${id}/documents`, fd);
+    setDocReload((n) => n + 1);
     loadDocuments();
-    e.target.value = '';
   }
 
   async function linkExistingUser(e: React.FormEvent) {
@@ -295,19 +300,12 @@ export default function EquipeInterneDetailPage() {
     }
   }
 
-  async function printFiche() {
+  function openPrint() {
     if (!item) return;
-
-    await printWithCompany({ title: `${item.firstName} ${item.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><body style="font-family:sans-serif;padding:24px;font-size:12px">
-      <h1>Fiche collaborateur — GIC</h1>
-      <h2>${item.firstName} ${item.lastName}</h2>
-      <p><b>Réf. :</b> ${item.reference || '—'}</p>
-      <p><b>Fonction :</b> ${item.jobTitle || '—'} · ${item.department || '—'}</p>
-      <p><b>Email :</b> ${item.email || item.user?.email || '—'}</p>
-      <p><b>Salaire :</b> ${formatMad(item.monthlySalary)} / mois</p>
-      <p><b>Contrat :</b> ${item.contractType || '—'}</p>
-      <p><b>CNSS :</b> ${item.declared ? 'Déclaré' : 'Non déclaré'}</p>
-    </body></html>`, { grid: true }) });
+    loadHistory();
+    loadSalary();
+    loadDocuments();
+    setPrintOpen(true);
   }
 
   if (!item && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
@@ -364,7 +362,7 @@ export default function EquipeInterneDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
-          <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
+          <Btn variant="secondary" icon={Printer} onClick={openPrint}>{t('common.print')}</Btn>
           <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
         </div>
       </div>
@@ -591,30 +589,14 @@ export default function EquipeInterneDetailPage() {
 
         {tab === 'documents' && (
           <div className="mt-1 space-y-4">
-            {id && <EntityDocChecklist entityType="staff" entityId={id} />}
-            <div className="flex flex-wrap gap-2">
-              <DocumentFileActions
-                labelClassName="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-black/[0.02]"
-                onChange={uploadDoc}
-              >
-                <Upload size={14} /> {t('actions.addDocument')}
-              </DocumentFileActions>
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold mb-2">{t('detail.importedDocs')}</h3>
-              {docBundle.uploaded.length === 0 ? (
-                <p className="text-[12px] text-gic-muted">{t('msg.emptyDocuments')}</p>
-              ) : (
-                <ul className="space-y-2">
-                  {docBundle.uploaded.map((d) => (
-                    <li key={d.id} className="rounded-xl border border-gic-border px-3 py-2 text-[11px] flex justify-between gap-2">
-                      <span>{d.name}</span>
-                      <a href={d.path} target="_blank" rel="noreferrer" className="text-[#007aff]">{t('actions.open')}</a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            {id && (
+              <EntityDocChecklist
+                entityType="staff"
+                entityId={id}
+                reloadToken={docReload}
+                onChanged={loadDocuments}
+              />
+            )}
             <div>
               <h3 className="text-sm font-semibold mb-2">{t('detail.generatedDocs')}</h3>
               {docBundle.generated.length === 0 ? (
@@ -667,6 +649,105 @@ export default function EquipeInterneDetailPage() {
           {formError && <p className="text-[11px] text-gic-coral mt-2">{formError}</p>}
         </form>
       </Modal>
+      <PrintChoiceModal
+        open={printOpen}
+        title={`${item!.firstName} ${item!.lastName}`}
+        sections={staffPrintSections()}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   );
+
+  function staffPrintSections(): PrintSection[] {
+    if (!item) return [];
+    const yesNo = (value: unknown) => (value ? t('common.yes') : t('common.no'));
+    const when = (value: unknown) => (value ? formatDate(value as string) : '—');
+    const lines = (count: number) => t('msg.printLines', { count });
+    const empty = t('msg.noData');
+    const docs = [...(docBundle.uploaded || []), ...(docBundle.generated || [])];
+    const period = SALARY_PERIOD_LABELS[(item.salaryPeriod || 'mensuel') as keyof typeof SALARY_PERIOD_LABELS] || item.salaryPeriod;
+    return [
+      {
+        id: 'infos',
+        label: t('tabs.informations'),
+        hint: t('msg.printAllFields'),
+        html: printFieldGrid([
+          [t('fields.reference'), item.reference],
+          [t('fields.firstName'), item.firstName],
+          [t('fields.lastName'), item.lastName],
+          [t('fields.cin'), item.cin],
+          [t('fields.birthDate'), when(item.birthDate)],
+          [t('fields.email'), item.email],
+          [t('fields.phone1'), item.phone1],
+          [t('fields.phone2'), item.phone2],
+          [t('fields.address'), item.address],
+          [t('fields.jobTitle'), item.jobTitle],
+          [t('fields.department'), item.department],
+          [t('fields.hireDate'), when(item.hireDate)],
+          [t('fields.contractType'), item.contractType],
+          [t('fields.payPeriod'), period],
+          [t('fields.monthlySalary'), formatMad(item.monthlySalary || 0)],
+          [t('fields.cnssNumber'), item.cnssNumber],
+          [t('fields.cnssDeclaration'), item.declared ? t('msg.declaredShort') : t('msg.notDeclaredShort')],
+          [t('fields.bank'), item.bankName],
+          [t('fields.rib'), item.rib || item.bankAccount],
+          [t('fields.emergencyContact'), item.emergencyContact],
+          [t('fields.remark'), item.remark],
+          [t('fields.status'), item.isActive ? t('status.active') : t('status.inactive')],
+          [t('status.active'), yesNo(item.isActive)],
+          [t('fields.createdAt'), when(item.createdAt)],
+          [t('fields.updatedAt'), when(item.updatedAt)],
+        ]),
+      },
+      {
+        id: 'compte',
+        label: t('tabs.account'),
+        html: printFieldGrid([
+          [t('fields.email'), item.user?.email],
+          [t('fields.role'), item.user ? roleLabel(item.user.role) : ''],
+          [t('fields.status'), item.user ? (item.user.isActive ? t('status.active') : t('status.inactive')) : ''],
+          [t('settings.twoFaTotp'), item.user ? yesNo(item.user.twoFactorEnabled) : ''],
+          [t('fields.lastLogin'), item.user?.lastLoginAt ? when(item.user.lastLoginAt) : ''],
+        ]),
+      },
+      {
+        id: 'salaire',
+        label: t('tabs.salary'),
+        hint: lines(salaryRecords.length),
+        html: printTable(
+          [t('columns.date'), t('columns.base'), t('columns.bonuses'), t('columns.deductions'), t('columns.advances'), t('columns.net'), t('columns.status')],
+          salaryRecords.map((r) => [
+            `${monthName(r.periodMonth)} ${r.periodYear}`,
+            formatMad(r.baseSalary),
+            formatMad(r.bonus),
+            formatMad(r.deduction),
+            formatMad(r.advance),
+            formatMad(r.netSalary),
+            r.status,
+          ]),
+          empty,
+        ),
+      },
+      {
+        id: 'documents',
+        label: t('tabs.documents'),
+        hint: lines(docs.length),
+        html: printTable(
+          [t('columns.name'), t('columns.category'), t('columns.date')],
+          docs.map((d: any) => [d.name || d.docType, d.category || d.reference, when(d.createdAt)]),
+          empty,
+        ),
+      },
+      {
+        id: 'historique',
+        label: t('tabs.history'),
+        hint: lines(history.length),
+        html: printTable(
+          [t('columns.date'), t('columns.action'), t('columns.entity'), t('columns.details')],
+          history.map((h) => [when(h.createdAt), h.action, h.entity, h.details]),
+          empty,
+        ),
+      },
+    ];
+  }
 }

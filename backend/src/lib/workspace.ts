@@ -84,6 +84,39 @@ function withWorkspaceWhere(where: unknown, ws: string) {
   return { AND: [where, { workspaceId: ws }] };
 }
 
+function isScalarUniqueValue(value: unknown) {
+  return value == null || value instanceof Date || ['string', 'number', 'boolean', 'bigint'].includes(typeof value);
+}
+
+/**
+ * findUnique accepte une clé composée (entityType_entityId).
+ * findFirst non : on l'aplatit en champs simples, puis on filtre l'espace.
+ */
+function whereForFindFirst(where: unknown, workspaceId: string): Record<string, unknown> {
+  const flat: Record<string, unknown> = {};
+  if (where && typeof where === 'object') {
+    for (const [key, value] of Object.entries(where as Record<string, unknown>)) {
+      if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && key.includes('_')) {
+        const inner = value as Record<string, unknown>;
+        const fields = Object.keys(inner);
+        const parts = key.split('_');
+        if (
+          fields.length > 1
+          && parts.length === fields.length
+          && fields.every((field) => isScalarUniqueValue(inner[field]))
+          && parts.every((part) => fields.includes(part))
+        ) {
+          Object.assign(flat, inner);
+          continue;
+        }
+      }
+      flat[key] = value;
+    }
+  }
+  flat.workspaceId = workspaceId;
+  return flat;
+}
+
 export function extendWithWorkspace(client: PrismaClient): PrismaClient {
   return client.$extends({
     query: {
@@ -108,7 +141,7 @@ export function extendWithWorkspace(client: PrismaClient): PrismaClient {
           const delegate = (client as unknown as Record<string, { findFirst: (a: unknown) => Promise<unknown> }>)[delegateName(model)];
           return delegate.findFirst({
             ...args,
-            where: { ...(args.where as object), workspaceId: getWorkspaceId() },
+            where: whereForFindFirst(args.where, getWorkspaceId()),
           });
         },
         async count({ model, args, query }) {

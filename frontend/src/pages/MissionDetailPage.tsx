@@ -2,12 +2,14 @@ import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, Trash2, Printer, ClipboardList, Truck, MapPin, Upload, Paperclip, ExternalLink, Info, FileText, History } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, Printer, ClipboardList, Truck, MapPin, Upload, Paperclip, ExternalLink, Info, FileText, History, Eye } from 'lucide-react';
 import { api, formatDate, fetchChantierList, uploadForm } from '../lib/api';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, TableWrap, Td, Th, Select, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentAddButton } from '../components/DocumentAddButton';
+import { requestPdfPreview } from '../components/PdfPreview';
+import { fileUrl } from '../lib/photoUrl';
 
 
 
@@ -321,14 +323,17 @@ export default function MissionDetailPage() {
                   {docs.map((d) => (
                     <tr key={d.id}>
                       <Td mac>
-                        <a href={d.path} target="_blank" rel="noreferrer" className="mac-table-ref inline-flex items-center gap-1">
-                          {d.name} <ExternalLink size={10} />
-                        </a>
+                        <button type="button" className="mac-table-ref inline-flex items-center gap-1" onClick={() => requestPdfPreview(fileUrl(d.path))}>
+                          {d.name}
+                        </button>
                       </Td>
                       <Td mac className="mac-table-muted">{d.category || '—'}</Td>
                       <Td mac className="text-[11px]">{formatDate(d.createdAt)}</Td>
                       <Td mac className="mac-td-actions">
-                        <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
+                        <div className="mac-actions">
+                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path))} />
+                          <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
+                        </div>
                       </Td>
                     </tr>
                   ))}

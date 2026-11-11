@@ -1,6 +1,7 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { PrintChoiceModal } from '../components/PrintChoiceModal';
+import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlocks';
 import { printStandardTable } from '../lib/standardPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Pencil, Trash2, Printer, Clock, Wallet, Camera, Mail, Phone, Calendar, MapPin, Hash, FileText, User, BadgeCheck, Upload, Info as InfoIcon, History, MessageCircle, Truck } from 'lucide-react';
@@ -51,6 +52,7 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
   const [worker, setWorker] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [docBundle, setDocBundle] = useState<WorkforceDocBundle>({ uploaded: [], generated: [] });
+  const [docReload, setDocReload] = useState(0);
   const [salary, setSalary] = useState<any>(null);
   const [pointages, setPointages] = useState<any[]>([]);
   const [pointageFrom, setPointageFrom] = useState(() => {
@@ -63,6 +65,7 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
   const [docPeriodFrom, setDocPeriodFrom] = useState(defaultPeriodFrom);
   const [docPeriodTo, setDocPeriodTo] = useState(new Date().toISOString().slice(0, 10));
   const [tab, setTab] = useState<Tab>('infos');
+  const [printOpen, setPrintOpen] = useState(false);
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -169,7 +172,9 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
       setEditOpen(false);
       load();
     } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
+      if (!(await alertCinDuplicate(err))) {
+        await appAlert(err instanceof Error ? err.message : t('common.error'));
+      }
     }
   }
 
@@ -200,41 +205,29 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
 
   async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
     try {
       await uploadDocument(file, {
         name: file.name,
         category: 'admin',
-        entityType: 'Workforce',
+        entityType: 'workforce',
         entityId: id,
       });
+      setDocReload((n) => n + 1);
       loadDocuments();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    } finally {
-      e.target.value = '';
     }
   }
 
-  async function deleteDoc(docId: string) {
-    if (!await appConfirm(t('msg.confirmDeleteDocument'))) return;
-    await api(`/documents/${docId}`, { method: 'DELETE' });
-    loadDocuments();
-  }
-
-  async function printFiche() {
+  function openPrint() {
     if (!worker) return;
-
-    await printWithCompany({ title: `${worker.firstName} ${worker.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>${worker.firstName} ${worker.lastName}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
-      <h1>Fiche ouvrier — GIC</h1>
-      <h2>${worker.firstName} ${worker.lastName}</h2>
-      <p><b>CIN :</b> ${worker.cin || '—'}</p>
-      <p><b>Catégorie :</b> ${worker.category || '—'}</p>
-      <p><b>Groupe :</b> ${worker.groupe || '—'}</p>
-      <p><b>Salaire/j :</b> ${worker.dailySalary} MAD</p>
-      <p><b>Contrat :</b> ${worker.contractType || '—'}</p>
-      <p><b>CNSS :</b> ${worker.declared ? 'Déclaré' : 'Non déclaré'}</p>
-    </body></html>`, { grid: true }) });
+    loadPointages();
+    loadHistory();
+    loadSalary();
+    loadDocuments();
+    setPrintOpen(true);
   }
 
   function printAffectation() {
@@ -362,7 +355,7 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
               <Btn variant="secondary" icon={Printer} onClick={printTransfert}>{t('siteOps.bonTransfert')}</Btn>
             </>
           )}
-          <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
+          <Btn variant="secondary" icon={Printer} onClick={openPrint}>{t('common.print')}</Btn>
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
             <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { setDeleteOpen(true); setDeleteMotif(''); }} />
@@ -464,12 +457,8 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
               label={worker.salaryPeriod === 'mois' ? t('fields.monthlySalary') : t('fields.dailySalaryMad')}
               value={formatMad(worker.salaryPeriod === 'mois' ? (worker.monthlySalary || 0) : worker.dailySalary)}
             />
-            {worker.salaryPeriod === 'mois' && (
-              <>
-                <Info icon={BadgeCheck} label={t('fields.bank')} value={worker.bankName || '—'} />
-                <Info icon={BadgeCheck} label={t('fields.rib')} value={worker.rib || '—'} />
-              </>
-            )}
+            <Info icon={BadgeCheck} label={t('fields.bank')} value={worker.bankName || '—'} />
+            <Info icon={BadgeCheck} label={t('fields.rib')} value={worker.rib || '—'} />
             <Info icon={BadgeCheck} label={t('fields.cnssNumber')} value={worker.cnssNumber || '—'} />
             <Info icon={BadgeCheck} label={t('fields.cnssDeclaration')} value={worker.declared ? t('msg.declaredShort') : t('msg.notDeclaredShort')} />
             <Info icon={User} label={t('fields.status')} value={<StatusPill status={worker.isActive ? 'actif' : 'inactif'} quiet />} />
@@ -611,17 +600,15 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
 
         {tab === 'documents' && (
           <div className="space-y-5 mt-1">
-            {id && <EntityDocChecklist entityType="workforce" entityId={id} />}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[12px] text-gic-muted">{t('msg.documentsInternalGenerated')}</p>
-              <DocumentFileActions
-                labelClassName="mac-upload-btn"
-                accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-                onChange={onUploadDoc}
-              >
-                <Upload size={14} /> {t('actions.addDocument')}
-              </DocumentFileActions>
-            </div>
+            {id && (
+              <EntityDocChecklist
+                entityType="workforce"
+                entityId={id}
+                reloadToken={docReload}
+                onChanged={loadDocuments}
+              />
+            )}
+            <p className="text-[12px] text-gic-muted">{t('msg.documentsInternalGenerated')}</p>
 
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-gic-muted mb-2">{t('actions.generateDocument')}</p>
@@ -636,17 +623,6 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
                 </Btn>
               </div>
             </div>
-
-            {docBundle.uploaded.length > 0 && (
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-gic-muted mb-2">{t('detail.importedDocs')}</p>
-                <div className="space-y-2">
-                  {docBundle.uploaded.map((d) => (
-                    <DocRow key={d.id} name={d.name} meta={d.category || t('tabs.documents')} date={d.createdAt} href={d.path} onDelete={() => deleteDoc(d.id)} />
-                  ))}
-                </div>
-              </div>
-            )}
 
             {docBundle.generated.length > 0 && (
               <div>
@@ -696,8 +672,121 @@ export default function WorkforceDetailPage({ mode = 'main_oeuvre' }: { mode?: W
         <p className="text-[12px] text-gic-muted mb-3">{t('msg.deletionBlockedWorker')}</p>
         <textarea className="w-full h-24 rounded-xl border border-gic-border p-3 text-[12px]" placeholder={t('msg.motifPlaceholder')} value={deleteMotif} onChange={(e) => setDeleteMotif(e.target.value)} />
       </Modal>
+      <PrintChoiceModal
+        open={printOpen}
+        title={`${worker.firstName} ${worker.lastName}`}
+        sections={workerPrintSections()}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   );
+
+  function workerPrintSections(): PrintSection[] {
+    const yesNo = (value: unknown) => (value ? t('common.yes') : t('common.no'));
+    const when = (value: unknown) => (value ? formatDate(value as string) : '—');
+    const lines = (count: number) => t('msg.printLines', { count });
+    const empty = t('msg.noData');
+    const assignments = worker.assignments || [];
+    const vehicles = worker.vehicleAssignments || [];
+    const rows = pointages.length ? pointages : (worker.pointages || []);
+    const docs = [...(docBundle.uploaded || []), ...(docBundle.generated || [])];
+    return [
+      {
+        id: 'infos',
+        label: t('tabs.informations'),
+        hint: t('msg.printAllFields'),
+        html: printFieldGrid([
+          [t('fields.reference'), worker.reference],
+          [t('fields.firstName'), worker.firstName],
+          [t('fields.lastName'), worker.lastName],
+          [t('fields.cin'), worker.cin],
+          [t('fields.birthDate'), when(worker.birthDate)],
+          [t('fields.hireDate'), when(worker.hireDate)],
+          [t('fields.phone1'), worker.phone1],
+          [t('fields.phone2'), worker.phone2],
+          [t('fields.email'), worker.email],
+          [t('fields.address'), worker.address],
+          [t('fields.category'), worker.category],
+          [t('fields.group'), worker.groupe],
+          [t('fields.workPassport'), worker.workPassport],
+          [t('fields.contractType'), worker.contractType],
+          [t('fields.payMode'), worker.salaryPeriod === 'mois' ? t('fields.payMonthly') : t('fields.payDaily')],
+          [t('fields.dailySalary'), formatMad(worker.dailySalary || 0)],
+          [t('fields.monthlySalary'), formatMad(worker.monthlySalary || 0)],
+          [t('fields.bank'), worker.bankName],
+          [t('fields.rib'), worker.rib],
+          [t('fields.cnssNumber'), worker.cnssNumber],
+          [t('fields.cnssDeclaration'), worker.declared ? t('msg.declaredShort') : t('msg.notDeclaredShort')],
+          [t('fields.status'), worker.isActive ? t('status.active') : t('status.inactive')],
+          [t('status.active'), yesNo(worker.isActive)],
+          [t('fields.createdAt'), when(worker.createdAt)],
+          [t('fields.updatedAt'), when(worker.updatedAt)],
+        ]),
+      },
+      {
+        id: 'affectations',
+        label: t('tabs.assignments'),
+        hint: lines(assignments.length),
+        html: printTable(
+          [t('fields.chantier'), t('fields.tranche'), t('fields.function'), t('fields.startDate'), t('fields.endDate')],
+          assignments.map((a: any) => [a.chantier?.name, a.tranche, a.functionRole, when(a.startDate), when(a.endDate)]),
+          empty,
+        ),
+      },
+      {
+        id: 'vehicules',
+        label: t('driverMgmt.vehiclesTab'),
+        hint: lines(vehicles.length),
+        html: printTable(
+          [t('columns.engin'), t('columns.brandGenre'), t('fields.startDate'), t('fields.endDate'), t('fields.remark')],
+          vehicles.map((a: any) => [a.engin?.matricule, `${a.engin?.brand || ''} ${a.engin?.genre || ''}`.trim(), when(a.startDate), when(a.endDate), a.remark]),
+          empty,
+        ),
+      },
+      {
+        id: 'pointages',
+        label: t('tabs.attendances'),
+        hint: lines(rows.length),
+        html: printTable(
+          [t('columns.date'), t('columns.chantier'), t('columns.days'), t('columns.hours'), t('columns.totalDays'), t('columns.validated')],
+          rows.map((p: any) => [when(p.date), p.chantier?.name, p.dayValue, p.hours, p.totalDay, p.validated ? t('common.yes') : t('common.no')]),
+          empty,
+        ),
+      },
+      {
+        id: 'salaire',
+        label: t('tabs.salary'),
+        html: printFieldGrid([
+          [t('msg.equivalentDays'), salary?.totalDays ?? ''],
+          [t('fields.dailySalary'), salary ? formatMad(salary.dailySalary) : ''],
+          [t('columns.brut'), salary ? formatMad(salary.brut) : ''],
+          [t('columns.bonuses'), salary ? formatMad(salary.bonuses) : ''],
+          [t('columns.advances'), salary ? formatMad(salary.advances) : ''],
+          [t('columns.net'), salary ? formatMad(salary.net) : ''],
+        ]),
+      },
+      {
+        id: 'documents',
+        label: t('tabs.documents'),
+        hint: lines(docs.length),
+        html: printTable(
+          [t('columns.name'), t('columns.category'), t('columns.date')],
+          docs.map((d: any) => [d.name || (DOC_TYPE_KEYS[d.docType] ? t(DOC_TYPE_KEYS[d.docType]) : d.docType), d.category || d.reference, when(d.createdAt)]),
+          empty,
+        ),
+      },
+      {
+        id: 'historique',
+        label: t('tabs.history'),
+        hint: lines(history.length),
+        html: printTable(
+          [t('columns.date'), t('columns.action'), t('columns.details'), t('columns.user')],
+          history.map((h) => [when(h.createdAt), h.action, h.details, h.user ? `${h.user.firstName} ${h.user.lastName}` : '']),
+          empty,
+        ),
+      },
+    ];
+  }
 }
 
 function DocRow({

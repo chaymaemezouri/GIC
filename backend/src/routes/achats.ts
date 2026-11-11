@@ -6,10 +6,13 @@ import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../lib/audit.js';
 import { sendExcel } from '../lib/exportExcel.js';
-import { assertUniqueCin } from '../lib/uniqueness.js';
+import { assertUniqueCin, replyIfCinDuplicate } from '../lib/uniqueness.js';
+import { requiredCinPhoneError } from '../lib/requiredContact.js';
+import { parseRib } from '../lib/rib.js';
 import { supplierDocHtml } from '../lib/supplierPrint.js';
 import { getOrCreateCompanySettings } from '../lib/companySettings.js';
 import purchasesRoutes from './purchases.js';
+import { entityTypeVariants } from '../lib/documentEntity.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -24,6 +27,7 @@ function buildSupplierWhere(q: string, source: string, active: string, withPorta
               { companyName: { contains: q } },
               { reference: { contains: q } },
               { cin: { contains: q } },
+              { ice: { contains: q } },
               { contactName: { contains: q } },
               { email: { contains: q } },
               { phone1: { contains: q } },
@@ -80,10 +84,10 @@ router.get('/suppliers/export/csv', async (req, res) => {
     orderBy: { companyName: 'asc' },
     include: { _count: { select: { purchases: true } } },
   });
-  const header = 'Référence;Raison sociale;Contact;Tél.1;Tél.2;Email;CIN;Source;Banque;RIB;Actif;Achats;Portail';
+  const header = 'Référence;Raison sociale;Contact;Tél.1;Tél.2;Email;CIN;ICE;Source;Banque;RIB;Actif;Achats;Portail';
   const rows = suppliers.map(
     (s) =>
-      `${s.reference};${s.companyName};${s.contactName || ''};${s.phone1 || ''};${s.phone2 || ''};${s.email || ''};${s.cin || ''};${s.source || ''};${s.bankName || ''};${s.rib || ''};${s.isActive ? 'Oui' : 'Non'};${s._count.purchases};${s.passwordHash ? 'Oui' : 'Non'}`
+      `${s.reference};${s.companyName};${s.contactName || ''};${s.phone1 || ''};${s.phone2 || ''};${s.email || ''};${s.cin || ''};${s.ice || ''};${s.source || ''};${s.bankName || ''};${s.rib || ''};${s.isActive ? 'Oui' : 'Non'};${s._count.purchases};${s.passwordHash ? 'Oui' : 'Non'}`
   );
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename=fournisseurs-gic.csv');
@@ -126,10 +130,18 @@ router.get('/suppliers', async (req, res) => {
 });
 
 router.post('/suppliers', async (req, res) => {
+  const contactError = requiredCinPhoneError({
+    cin: { value: req.body.cin, required: true },
+    phone1: { value: req.body.phone1, required: true },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  const rib = parseRib(req.body.rib);
+  if (rib.error) return res.status(400).json({ message: rib.error });
   try {
     await assertUniqueCin('supplier', req.body.cin);
-  } catch (e) {
-    return res.status(400).json({ message: e instanceof Error ? e.message : 'CIN en doublon' });
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
   }
   const reference = await nextReference('FRN');
   const supplier = await prisma.supplier.create({
@@ -142,9 +154,10 @@ router.post('/suppliers', async (req, res) => {
       email: req.body.email,
       address: req.body.address,
       cin: req.body.cin || null,
+      ice: req.body.ice || null,
       source: req.body.source || null,
       bankName: req.body.bankName,
-      rib: req.body.rib,
+      rib: rib.rib,
       remark: req.body.remark,
       portalRole: req.body.portalRole || 'ACHATS',
       isActive: req.body.isActive ?? true,
@@ -170,7 +183,7 @@ router.get('/suppliers/:id/documents', async (req, res) => {
       where: {
         OR: [
           { supplierId },
-          { entityType: 'Supplier', entityId: supplierId },
+          { entityType: { in: entityTypeVariants('Supplier') }, entityId: supplierId },
         ],
       },
       orderBy: { createdAt: 'desc' },
@@ -230,13 +243,25 @@ router.put('/suppliers/:id', async (req, res) => {
   delete data.passwordHash;
   delete data.id;
   delete data.hasPortal;
+  const contactError = requiredCinPhoneError({
+    cin: { value: data.cin, required: 'cin' in data },
+    phone1: { value: data.phone1, required: 'phone1' in data },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
   try {
     if (data.cin) await assertUniqueCin('supplier', data.cin, id);
-  } catch (e) {
-    return res.status(400).json({ message: e instanceof Error ? e.message : 'CIN en doublon' });
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
   }
   delete data._count;
   delete data.purchases;
+  if ('ice' in data) data.ice = data.ice ? String(data.ice).trim() : null;
+  if ('rib' in data) {
+    const rib = parseRib(data.rib);
+    if (rib.error) return res.status(400).json({ message: rib.error });
+    data.rib = rib.rib;
+  }
   const supplier = await prisma.supplier.update({ where: { id }, data });
   await audit(req, 'modification', 'Supplier', id, supplier.companyName);
   res.json(supplier);
@@ -347,6 +372,7 @@ router.get('/suppliers/export/xlsx', async (req, res) => {
       Raison_sociale: s.companyName,
       Contact: s.contactName || '',
       CIN: s.cin || '',
+      ICE: s.ice || '',
       Source: s.source || '',
       Tél1: s.phone1 || '',
       Tél2: s.phone2 || '',

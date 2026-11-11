@@ -14,6 +14,7 @@ import {
   parseOptionalDate,
   parseOptionalFee,
 } from '../lib/documentFees.js';
+import { entityForeignKey, entityTypeVariants } from '../lib/documentEntity.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -23,10 +24,15 @@ router.get('/checklist', async (req, res) => {
   const entityType = String(req.query.entityType || '').trim();
   const entityId = String(req.query.entityId || '').trim();
   if (!entityType || !entityId) return res.status(400).json({ message: 'Fiche requise' });
-  const row = await prisma.documentChecklist.findUnique({
-    where: { entityType_entityId: { entityType, entityId } },
-  });
-  res.json({ config: row?.config || null });
+  try {
+    const row = await prisma.documentChecklist.findFirst({
+      where: { entityType, entityId },
+    });
+    res.json({ config: row?.config || null });
+  } catch (err) {
+    console.error(err);
+    res.json({ config: null });
+  }
 });
 
 router.put('/checklist', async (req, res) => {
@@ -98,8 +104,18 @@ function buildDocumentWhere(
           }
         : {},
       category ? { category } : {},
-      entityType ? { entityType } : {},
-      entityId ? { entityId } : {},
+      entityType && entityId
+        ? {
+            OR: [
+              { entityType: { in: entityTypeVariants(entityType) }, entityId },
+              ...(entityForeignKey(entityType, entityId) ? [entityForeignKey(entityType, entityId)!] : []),
+            ],
+          }
+        : entityType
+          ? { entityType: { in: entityTypeVariants(entityType) } }
+          : entityId
+            ? { entityId }
+            : {},
       alertFilter,
     ],
   };

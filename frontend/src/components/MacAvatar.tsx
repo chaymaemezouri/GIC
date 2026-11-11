@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { photoSrc } from '../lib/photoUrl';
+import { PhotoLightbox } from './PhotoLightbox';
+import { useI18n } from '../i18n/I18nContext';
 
 type MacAvatarProps = {
   photo?: string | null;
@@ -23,7 +25,9 @@ export default function MacAvatar({
   bust,
   fallback,
 }: MacAvatarProps) {
+  const { t } = useI18n();
   const [failed, setFailed] = useState(false);
+  const [open, setOpen] = useState(false);
   const src = photo && !failed ? photoSrc(photo, bust) : undefined;
 
   const initials = (() => {
@@ -40,13 +44,23 @@ export default function MacAvatar({
   }, [photo, bust]);
 
   if (src) {
+    const label = [firstName, lastName].filter(Boolean).join(' ') || name || t('fields.photo');
     return (
-      <img
-        src={src}
-        alt=""
-        className={className}
-        onError={() => setFailed(true)}
-      />
+      <>
+        <button
+          type="button"
+          className={className}
+          title={t('common.view')}
+          aria-label={t('common.view')}
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen(true);
+          }}
+        >
+          <img src={src} alt={label} onError={() => setFailed(true)} />
+        </button>
+        {open && <PhotoLightbox src={src} title={label} onClose={() => setOpen(false)} />}
+      </>
     );
   }
 

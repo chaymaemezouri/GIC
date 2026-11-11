@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 
 import {
 
-  ArrowLeft, Pencil, Trash2, Printer, Wrench, Truck, Wallet, Upload, Paperclip, ExternalLink, Info, FileText, History
+  ArrowLeft, Pencil, Trash2, Printer, Wrench, Truck, Wallet, Upload, Paperclip, ExternalLink, Info, FileText, History, Eye
 } from 'lucide-react';
 
 import { api, formatDate, formatMad, uploadForm } from '../lib/api';
@@ -18,6 +18,8 @@ import {
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentAddButton } from '../components/DocumentAddButton';
+import { requestPdfPreview } from '../components/PdfPreview';
+import { fileUrl } from '../lib/photoUrl';
 
 
 
@@ -579,11 +581,11 @@ export default function MaintenanceDetailPage() {
 
                       <Td mac>
 
-                        <a href={d.path} target="_blank" rel="noreferrer" className="mac-table-ref inline-flex items-center gap-1">
+                        <button type="button" className="mac-table-ref inline-flex items-center gap-1" onClick={() => requestPdfPreview(fileUrl(d.path))}>
 
-                          {d.name} <ExternalLink size={10} />
+                          {d.name}
 
-                        </a>
+                        </button>
 
                       </Td>
 
@@ -593,7 +595,13 @@ export default function MaintenanceDetailPage() {
 
                       <Td mac className="mac-td-actions">
 
-                        <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
+                        <div className="mac-actions">
+
+                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path))} />
+
+                          <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
+
+                        </div>
 
                       </Td>
 

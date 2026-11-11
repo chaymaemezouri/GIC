@@ -1,6 +1,13 @@
 import * as XLSX from 'xlsx';
 import { prisma } from './prisma.js';
 import { nextReference } from './references.js';
+import { requiredCinPhoneError } from './requiredContact.js';
+import {
+  agentSeenKeys,
+  findAgentDuplicate,
+  type ImportDuplicate,
+  type SeenPerson,
+} from './importDuplicates.js';
 
 export type AgentImportRow = {
   firstName: string;
@@ -15,16 +22,58 @@ export async function importAgentRows(rows: AgentImportRow[]) {
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const duplicates: ImportDuplicate[] = [];
+  const seen = new Map<string, SeenPerson>();
 
-  for (const row of rows) {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const line = index + 2;
     const { firstName, lastName, email, phone1, phone2, address } = row;
     if (!firstName || !lastName) {
       skipped++;
       continue;
     }
+    const contactError = requiredCinPhoneError({
+      phone1: { value: phone1, required: true },
+    });
+    if (contactError) {
+      skipped++;
+      errors.push(`${firstName} ${lastName}: ${contactError}`);
+      continue;
+    }
+    const incomingName = `${firstName} ${lastName}`.trim();
+    const replay = {
+      path: '/agents',
+      body: {
+        firstName,
+        lastName,
+        email: email || null,
+        phone1: phone1 || null,
+        phone2: phone2 || null,
+        address: address || null,
+        isActive: true,
+      },
+    };
+    const keys = agentSeenKeys(row);
+    const seenHit = keys.map((key) => ({ key, person: seen.get(key) })).find((hit) => hit.person);
+    const found = seenHit?.person
+      ? { person: seenHit.person, kind: (seenHit.key.startsWith('em:') ? 'email' : 'namePhone') as 'email' | 'namePhone' }
+      : await findAgentDuplicate(row);
+    if (found) {
+      skipped++;
+      duplicates.push({
+        line,
+        incomingName,
+        matchKind: found.kind,
+        matchValue: found.kind === 'email' ? String(email || '').trim() : incomingName,
+        existing: found.person,
+        replay,
+      });
+      continue;
+    }
     try {
       const reference = await nextReference('AGT');
-      await prisma.agent.create({
+      const agent = await prisma.agent.create({
         data: {
           reference,
           firstName,
@@ -36,13 +85,22 @@ export async function importAgentRows(rows: AgentImportRow[]) {
           isActive: true,
         },
       });
+      const person: SeenPerson = {
+        id: agent.id,
+        label: 'Agent',
+        name: incomingName,
+        ref: agent.reference,
+        deletePath: `/agents/${agent.id}`,
+      };
+      for (const key of keys) seen.set(key, person);
       created++;
     } catch (e) {
-      errors.push(`${firstName} ${lastName}: ${e instanceof Error ? e.message : 'erreur'}`);
+      skipped++;
+      errors.push(`${incomingName}: ${e instanceof Error ? e.message : 'erreur'}`);
     }
   }
 
-  return { created, skipped, errors };
+  return { created, skipped, errors, duplicates };
 }
 
 export function parseCsvAgentRows(csv: string): AgentImportRow[] {

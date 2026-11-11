@@ -4,6 +4,8 @@ import { nextReference } from '../lib/references.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../lib/audit.js';
+import { requiredCinPhoneError } from '../lib/requiredContact.js';
+import { applyBankField, applyRibField } from '../lib/rib.js';
 
 function buildWhere(q: string, active = '') {
   const activeFilter =
@@ -103,11 +105,18 @@ router.post('/', async (req, res) => {
   if (!firstName || !lastName) {
     return res.status(400).json({ message: 'Prénom et nom obligatoires' });
   }
+  const contactError = requiredCinPhoneError({
+    phone1: { value: req.body.phone1, required: true },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
   const data = { ...req.body };
   delete data.id;
   delete data.reference;
   delete data._count;
   delete data.movements;
+  applyBankField(data);
+  const ribError = applyRibField(data);
+  if (ribError) return res.status(400).json({ message: ribError });
   data.reference = await nextReference('REC');
   if (data.isActive === undefined) data.isActive = true;
 
@@ -160,6 +169,13 @@ router.put('/:id', async (req, res) => {
   delete data._count;
   delete data.movements;
   delete data.stats;
+  applyBankField(data);
+  const ribError = applyRibField(data);
+  if (ribError) return res.status(400).json({ message: ribError });
+  const contactError = requiredCinPhoneError({
+    phone1: { value: data.phone1, required: 'phone1' in data },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
 
   const reconnu = await prisma.reconnu.update({ where: { id }, data });
   await audit(req, 'modification', 'Reconnu', reconnu.id, `${reconnu.reference || ''} ${reconnu.firstName} ${reconnu.lastName}`);

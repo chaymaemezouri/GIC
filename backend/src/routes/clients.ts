@@ -12,6 +12,9 @@ import { recordClientAgentChange } from '../lib/clientAgentHistory.js';
 import { sendEmail } from '../lib/email.js';
 import { sendSms, sendWhatsApp } from '../lib/messaging.js';
 import { extraDealsForClient, idsWherePartyContains } from '../lib/dealParties.js';
+import { assertUniqueCin, replyIfCinDuplicate } from '../lib/uniqueness.js';
+import { requiredCinPhoneError } from '../lib/requiredContact.js';
+import { applyBankField, applyRibField, parseRib } from '../lib/rib.js';
 
 function buildClientWhere(q: string, type: string, archived = '') {
   const archiveFilter =
@@ -31,6 +34,8 @@ function buildClientWhere(q: string, type: string, archived = '') {
               { reference: { contains: q } },
               { phone1: { contains: q } },
               { identityNumber: { contains: q } },
+              { rib: { contains: q } },
+              { bankName: { contains: q } },
               { source: { contains: q } },
             ],
           }
@@ -368,12 +373,21 @@ router.post('/', async (req, res) => {
     identityType, identityNumber, birthDate, isProspect, isBuyer, isTenant,
     agentId, remark, source, nb,
   } = req.body;
-  if (!firstName || !lastName || !email || !phone1) {
-    return res.status(400).json({ message: 'Nom, prénom, email et téléphone obligatoires' });
+  if (!firstName || !lastName || !email) {
+    return res.status(400).json({ message: 'Nom, prénom et email obligatoires' });
   }
-  if (identityNumber) {
-    const exists = await prisma.client.findFirst({ where: { identityNumber } });
-    if (exists) return res.status(400).json({ message: 'Ce numéro d\'identité existe déjà' });
+  const contactError = requiredCinPhoneError({
+    cin: { value: identityNumber, required: true },
+    phone1: { value: phone1, required: true },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  const rib = parseRib(req.body.rib);
+  if (rib.error) return res.status(400).json({ message: rib.error });
+  try {
+    await assertUniqueCin('client', identityNumber);
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
   }
   const reference = await nextReference('CLI');
   const client = await prisma.client.create({
@@ -385,6 +399,8 @@ router.post('/', async (req, res) => {
       phone1,
       phone2,
       address,
+      bankName: req.body.bankName ? String(req.body.bankName).trim() : null,
+      rib: rib.rib,
       identityType,
       identityNumber,
       birthDate: birthDate ? new Date(birthDate) : null,
@@ -416,11 +432,19 @@ router.put('/:id', async (req, res) => {
   delete data.properties;
   if (data.birthDate) data.birthDate = new Date(data.birthDate);
   if (data.agentId === '') data.agentId = null;
-  if (data.identityNumber) {
-    const exists = await prisma.client.findFirst({
-      where: { identityNumber: data.identityNumber, NOT: { id: clientId } },
-    });
-    if (exists) return res.status(400).json({ message: 'Ce numéro d\'identité existe déjà' });
+  applyBankField(data);
+  const ribError = applyRibField(data);
+  if (ribError) return res.status(400).json({ message: ribError });
+  const contactError = requiredCinPhoneError({
+    cin: { value: data.identityNumber, required: 'identityNumber' in data },
+    phone1: { value: data.phone1, required: 'phone1' in data },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  try {
+    await assertUniqueCin('client', data.identityNumber, clientId);
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
   }
   const existing = await prisma.client.findUnique({ where: { id: clientId } });
   if (!existing) return res.status(404).json({ message: 'Client introuvable' });

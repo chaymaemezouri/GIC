@@ -16,6 +16,7 @@ import { chantierEnginCosts } from '../lib/enginCosts.js';
 import { listChantierTranches, getChantierTrancheDetail } from '../lib/chantierTranches.js';
 import { validateWorkProgressPhases } from '../lib/workProgressPhases.js';
 import { nextReference } from '../lib/references.js';
+import { parseRib } from '../lib/rib.js';
 import { sendExcel } from '../lib/exportExcel.js';
 import {
   importWorkforceRows,
@@ -23,9 +24,13 @@ import {
   parseExcelWorkforceRows,
 } from '../lib/importWorkforce.js';
 import { workforceDocHtml } from '../lib/workforcePrint.js';
+import { entityTypeVariants } from '../lib/documentEntity.js';
 import { getOrCreateCompanySettings } from '../lib/companySettings.js';
 import { syncWorkforcePayrollMovement } from '../lib/cashSync.js';
+import { removeOfficeCash, syncOfficeCash } from '../lib/officeCashSync.js';
 import { workforceScopeFilters } from '../lib/workforceScope.js';
+import { assertUniqueCin, replyIfCinDuplicate } from '../lib/uniqueness.js';
+import { requiredCinPhoneError } from '../lib/requiredContact.js';
 import {
   findSessionConflict,
   normalizeTranche,
@@ -306,8 +311,21 @@ router.get('/workforce', async (req, res) => {
 
 router.post('/workforce', async (req, res) => {
   const data = normalizeWorkforcePayFields({ ...req.body });
+  if (data.ribError) return res.status(400).json({ message: data.ribError });
+  delete data.ribError;
   if (data.birthDate) data.birthDate = new Date(String(data.birthDate));
   if (data.hireDate) data.hireDate = new Date(String(data.hireDate));
+  const contactError = requiredCinPhoneError({
+    cin: { value: data.cin, required: true },
+    phone1: { value: data.phone1, required: true },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  try {
+    await assertUniqueCin('workforce', data.cin == null ? null : String(data.cin));
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
+  }
   data.reference = await nextReference('MO');
   const worker = await prisma.workforce.create({ data: data as any });
   await audit(req, 'création', 'Workforce', worker.id, `${worker.reference} — ${worker.firstName} ${worker.lastName}`);
@@ -336,7 +354,7 @@ router.get('/workforce/:id/documents', async (req, res) => {
   if (!worker) return res.status(404).json({ message: 'Ouvrier introuvable' });
   const [uploaded, generated] = await Promise.all([
     prisma.document.findMany({
-      where: { entityType: 'Workforce', entityId: workforceId },
+      where: { entityType: { in: entityTypeVariants('Workforce') }, entityId: workforceId },
       orderBy: { createdAt: 'desc' },
     }),
     prisma.workforceDocument.findMany({
@@ -529,6 +547,8 @@ router.put('/workforce/:id', async (req, res) => {
   });
   if (!previous) return res.status(404).json({ message: 'Ouvrier introuvable' });
   const data = normalizeWorkforcePayFields({ ...req.body });
+  if (data.ribError) return res.status(400).json({ message: data.ribError });
+  delete data.ribError;
   delete data.id;
   delete data.reference;
   delete data._count;
@@ -539,6 +559,17 @@ router.put('/workforce/:id', async (req, res) => {
   if (data.hireDate != null) data.hireDate = data.hireDate ? new Date(String(data.hireDate)) : null;
   if (data.declared != null) data.declared = !!data.declared;
   if (data.isActive != null) data.isActive = !!data.isActive;
+  const contactError = requiredCinPhoneError({
+    cin: { value: data.cin, required: 'cin' in data },
+    phone1: { value: data.phone1, required: 'phone1' in data },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  try {
+    if (data.cin !== undefined) await assertUniqueCin('workforce', data.cin == null ? null : String(data.cin), id);
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
+  }
   const worker = await prisma.workforce.update({ where: { id }, data: data as any });
   if (Math.abs(Number(previous.dailySalary) - Number(worker.dailySalary)) >= 0.001) {
     await syncPointageRatesFromWorkforce(id, worker.dailySalary);
@@ -603,16 +634,6 @@ function parsePointageDate(dateStr: string) {
   if (Number.isNaN(d.getTime())) throw new Error('Date invalide');
   d.setHours(0, 0, 0, 0);
   return d;
-}
-
-function startOfToday() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function isFuturePointageDate(date: Date) {
-  return date.getTime() > startOfToday().getTime();
 }
 
 function parseExcludedWorkforceIds(raw: unknown): string[] {
@@ -842,12 +863,9 @@ function normalizeWorkforcePayFields(data: Record<string, unknown>) {
   data.monthlySalary = Number(data.monthlySalary || 0);
   data.bankName =
     data.bankName != null && String(data.bankName).trim() !== '' ? String(data.bankName).trim() : null;
-  data.rib = data.rib != null && String(data.rib).trim() !== '' ? String(data.rib).trim() : null;
-  if (!isMois) {
-    // Banque / RIB seulement pour les mensuels
-    data.bankName = null;
-    data.rib = null;
-  }
+  const parsedRib = parseRib(data.rib);
+  data.rib = parsedRib.rib;
+  if (parsedRib.error) data.ribError = parsedRib.error;
   return data;
 }
 
@@ -1194,6 +1212,7 @@ router.post('/salaries/:workforceId/pay', async (req, res) => {
         remark,
       },
     });
+    await syncWorkforcePayrollMovement(record, req);
   } catch (err) {
     console.error('WorkforcePayrollPayment', err);
   }
@@ -2001,9 +2020,6 @@ router.post('/pointage/sessions/ensure', async (req, res) => {
   } catch {
     return res.status(400).json({ message: 'Date invalide' });
   }
-  if (isFuturePointageDate(date)) {
-    return res.status(400).json({ message: 'On ne peut pointer que jusqu’à aujourd’hui.' });
-  }
   const category = String(req.body.category || '').trim();
   const excludeCategory = String(req.body.excludeCategory || '').trim();
   const trancheSpecified = Object.prototype.hasOwnProperty.call(req.body, 'tranche');
@@ -2113,9 +2129,6 @@ router.post('/pointage/sessions', async (req, res) => {
     date = parsePointageDate(String(req.body.date));
   } catch {
     return res.status(400).json({ message: 'Date invalide' });
-  }
-  if (isFuturePointageDate(date)) {
-    return res.status(400).json({ message: 'On ne peut pointer que jusqu’à aujourd’hui.' });
   }
   const conflict = await findSessionConflict(chantierId, tranche, date);
   if (conflict) return res.status(409).json(conflict);
@@ -2531,9 +2544,6 @@ router.post('/pointage', async (req, res) => {
     });
   }
   const pointageDate = parsePointageDate(String(date));
-  if (isFuturePointageDate(pointageDate)) {
-    return res.status(400).json({ message: 'On ne peut pointer que jusqu’à aujourd’hui.' });
-  }
   const dv = parseDayValue(dayValue);
   const hours = dv * 8;
   const totalDay = dv;
@@ -4042,7 +4052,7 @@ router.post('/:id/subcontractors/:subId/payments', async (req, res) => {
   if (cap > 0 && already + amount > cap + 0.01) {
     return res.status(400).json({ message: `Le paiement dépasse le montant de sous-traitance (reste ${(cap - already).toLocaleString('fr-MA')} MAD)` });
   }
-  await prisma.subcontractorPayment.create({
+  const created = await prisma.subcontractorPayment.create({
     data: {
       subcontractorId: sub.id,
       amount,
@@ -4051,6 +4061,20 @@ router.post('/:id/subcontractors/:subId/payments', async (req, res) => {
       date: req.body.date ? new Date(String(req.body.date)) : new Date(),
       remark: phaseRemark(req.body),
     },
+  });
+  await syncOfficeCash({
+    sourceType: 'sous_traitance',
+    sourceId: created.id,
+    workspaceId: created.workspaceId,
+    mode: created.paymentMode,
+    direction: 'sortie',
+    amount: created.amount,
+    date: created.date,
+    designation: `Sous-traitance ${sub.companyName}`,
+    purpose: 'chantier',
+    chantierId: sub.chantierId,
+    remark: created.remark,
+    createdBy: req.user?.email || null,
   });
   res.status(201).json(await refreshSubcontract(sub.id));
 });
@@ -4070,7 +4094,7 @@ router.put('/:id/subcontractors/:subId/payments/:payId', async (req, res) => {
   if (cap > 0 && others + amount > cap + 0.01) {
     return res.status(400).json({ message: `Le paiement dépasse le montant de sous-traitance (reste ${(cap - others).toLocaleString('fr-MA')} MAD)` });
   }
-  await prisma.subcontractorPayment.update({
+  const updated = await prisma.subcontractorPayment.update({
     where: { id: pay.id },
     data: {
       amount,
@@ -4084,6 +4108,20 @@ router.put('/:id/subcontractors/:subId/payments/:payId', async (req, res) => {
       remark: phaseRemark(req.body, pay.remark),
     },
   });
+  await syncOfficeCash({
+    sourceType: 'sous_traitance',
+    sourceId: updated.id,
+    workspaceId: updated.workspaceId,
+    mode: updated.paymentMode,
+    direction: 'sortie',
+    amount: updated.amount,
+    date: updated.date,
+    designation: `Sous-traitance ${sub.companyName}`,
+    purpose: 'chantier',
+    chantierId: sub.chantierId,
+    remark: updated.remark,
+    createdBy: req.user?.email || null,
+  });
   res.json(await refreshSubcontract(sub.id));
 });
 
@@ -4096,6 +4134,7 @@ router.delete('/:id/subcontractors/:subId/payments/:payId', async (req, res) => 
   const pay = sub.payments.find((row) => row.id === String(req.params.payId));
   if (!pay) return res.status(404).json({ message: 'Avance introuvable' });
   await prisma.subcontractorPayment.delete({ where: { id: pay.id } });
+  await removeOfficeCash('sous_traitance', pay.id);
   res.json(await refreshSubcontract(sub.id));
 });
 

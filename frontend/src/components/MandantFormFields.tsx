@@ -1,4 +1,6 @@
 import { useI18n } from '../i18n/I18nContext';
+import { MAROC_BANKS } from '../lib/marocBanks';
+import { clampRib } from '../lib/rib';
 import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 import { Input, Select, Textarea } from './ui';
 
@@ -12,6 +14,8 @@ export type MandantFormData = {
   phone1: string;
   phone2: string;
   address: string;
+  bankName: string;
+  rib: string;
   remark: string;
   photoFile: File | null;
   photoUrl: string;
@@ -28,6 +32,8 @@ export function emptyMandantForm(): MandantFormData {
     phone1: '',
     phone2: '',
     address: '',
+    bankName: '',
+    rib: '',
     remark: '',
     ...emptyPhotoFields(),
   };
@@ -44,6 +50,8 @@ export function mandantToForm(m: Record<string, unknown>): MandantFormData {
     phone1: String(m.phone1 || ''),
     phone2: String(m.phone2 || ''),
     address: String(m.address || ''),
+    bankName: String(m.bankName || ''),
+    rib: clampRib(String(m.rib || '')),
     remark: String(m.remark || ''),
     ...photoFieldsFrom(m as { photo?: string | null }),
   };
@@ -72,14 +80,20 @@ export function MandantFormFields({
           <option key={type} value={type}>{type}</option>
         ))}
       </Select>
-      <Input label={t('fields.identityPieceNumber')} value={form.identityNumber} onChange={(e) => setForm({ ...form, identityNumber: e.target.value })} />
+      <Input label={`${t('fields.identityPieceNumber')} *`} required value={form.identityNumber} onChange={(e) => setForm({ ...form, identityNumber: e.target.value })} />
       <Input label={t('fields.birthDate')} type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
 
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide pt-1">{t('fields.sectionContact')}</p>
       <Input label={t('fields.email')} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-      <Input label={t('fields.phonePrimary')} value={form.phone1} onChange={(e) => setForm({ ...form, phone1: e.target.value })} />
+      <Input label={`${t('fields.phonePrimary')} *`} required value={form.phone1} onChange={(e) => setForm({ ...form, phone1: e.target.value })} />
       <Input label={t('fields.phoneSecondary')} value={form.phone2} onChange={(e) => setForm({ ...form, phone2: e.target.value })} />
       <Input className="sm:col-span-2" label={t('fields.address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+      <Select label={t('fields.bank')} value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })}>
+        <option value="">{t('fields.chooseBank')}</option>
+        {MAROC_BANKS.map((bank) => <option key={bank} value={bank}>{bank}</option>)}
+        {form.bankName && !(MAROC_BANKS as readonly string[]).includes(form.bankName) && <option value={form.bankName}>{form.bankName}</option>}
+      </Select>
+      <Input label={t('fields.rib')} value={form.rib} inputMode="numeric" placeholder={t('fields.ribDigitsPlaceholder')} onChange={(e) => setForm({ ...form, rib: clampRib(e.target.value) })} />
       <Textarea
         className="sm:col-span-2"
         label={t('fields.remark')}

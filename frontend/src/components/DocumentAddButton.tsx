@@ -1,5 +1,5 @@
 import { appAlert } from '../lib/dialog';
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { uploadDocument, uploadForm } from '../lib/api';
 import { DocumentFileActions } from './DocumentScanner';
@@ -43,10 +43,12 @@ export function DocumentAddButton({
   categories?: string[];
   /** Autre route d'upload (mission, maintenance). Sinon /documents/upload */
   uploadPath?: string;
-  onUploaded?: () => void;
+  onUploaded?: (created?: { id?: string; name?: string; category?: string | null; path?: string; status?: string | null; expiresAt?: string | null }) => void;
   labelKey?: string;
 }) {
   const { t } = useI18n();
+  const formId = `doc-add-${useId().replace(/:/g, '')}`;
+  const lock = useRef(false);
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [form, setForm] = useState<DocumentAddValues>(emptyValues(defaultCategory));
@@ -61,7 +63,8 @@ export function DocumentAddButton({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!file || saving) return;
+    if (!file || lock.current) return;
+    lock.current = true;
     setSaving(true);
     const fields: Record<string, string> = {
       name: form.name || file.name,
@@ -75,33 +78,34 @@ export function DocumentAddButton({
     if (form.estimatedStartDate) fields.estimatedStartDate = form.estimatedStartDate;
     if (form.estimatedEndDate) fields.estimatedEndDate = form.estimatedEndDate;
     try {
-      if (uploadPath) {
-        const body = new FormData();
-        body.append('file', file);
-        Object.entries(fields).forEach(([k, v]) => body.append(k, v));
-        await uploadForm(uploadPath, body);
-      } else {
-        await uploadDocument(file, fields);
-      }
-      onUploaded?.();
+      const created = uploadPath
+        ? await (async () => {
+            const body = new FormData();
+            body.append('file', file);
+            Object.entries(fields).forEach(([k, v]) => body.append(k, v));
+            return uploadForm(uploadPath, body);
+          })()
+        : await uploadDocument(file, fields);
+      onUploaded?.(created);
       close();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     } finally {
+      lock.current = false;
       setSaving(false);
     }
   }
 
   return (
     <>
-      <Btn icon={Plus} onClick={() => { setForm(emptyValues(defaultCategory)); setOpen(true); }}>{t(labelKey)}</Btn>
+      <Btn type="button" icon={Plus} onClick={() => { setForm(emptyValues(defaultCategory)); setOpen(true); }}>{t(labelKey)}</Btn>
       <Modal
         open={open}
         title={t('actions.uploadDocument')}
         onClose={close}
-        footer={<Btn form="doc-add-form" type="submit" disabled={!file || saving}>{saving ? t('auth.sending') : t('actions.send')}</Btn>}
+        footer={<Btn form={formId} type="submit" disabled={!file || saving}>{saving ? t('auth.sending') : t('actions.send')}</Btn>}
       >
-        <form id="doc-add-form" onSubmit={submit} className="grid gap-3">
+        <form id={formId} onSubmit={submit} className="grid gap-3">
           <div>
             <span className="text-[11px] font-medium text-gic-muted">{t('fields.fileRequired')}</span>
             <div className="mt-1">
@@ -120,7 +124,7 @@ export function DocumentAddButton({
           <Select label={t('fields.category')} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
             {options.map((c) => <option key={c} value={c}>{c}</option>)}
           </Select>
-          <Input label={t('fields.deadlineOptional')} type="date" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
+          <Input label={t('fields.expirationDate')} type="date" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
           <Input
             label={t('docs.feeOptional')}
             type="number"

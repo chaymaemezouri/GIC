@@ -1,5 +1,5 @@
 import { fetchAllRows, printRows, type PrintColumn } from '../lib/listPrint';
-import { appAlert } from '../lib/dialog';
+import { alertCinDuplicate, alertCinDuplicateLines, appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -11,7 +11,9 @@ import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Tabs, Td, Th,
 } from '../components/ui';
+import MacAvatar from '../components/MacAvatar';
 import { WorkforceFormFields, emptyWorkforceForm, workforceToForm, type WorkforceFormData } from '../components/WorkforceFormFields';
+import { ImportDuplicatesModal, type ImportDuplicateItem } from '../components/ImportDuplicatesModal';
 import { uploadEntityPhoto } from '../components/FormPhotoField';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -27,6 +29,7 @@ import { useI18n } from '../i18n/I18nContext';
 type Worker = {
   id: string;
   reference?: string;
+  photo?: string | null;
   firstName: string;
   lastName: string;
   cin?: string;
@@ -103,6 +106,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
   const [importCsv, setImportCsv] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [duplicates, setDuplicates] = useState<ImportDuplicateItem[]>([]);
   const selection = useRowSelection<Worker>();
   const clearSelection = selection.clear;
 
@@ -263,6 +267,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
       load(page);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+      await alertCinDuplicate(err);
     }
   }
 
@@ -280,7 +285,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
 
   async function doImport(e: React.FormEvent) {
     e.preventDefault();
-    let res: { created: number; skipped: number; errors: string[] };
+    let res: { created: number; skipped: number; errors: string[]; duplicates?: ImportDuplicateItem[] };
     if (importMode === 'xlsx') {
       if (!importFile) return;
       const fd = new FormData();
@@ -292,6 +297,8 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
       setImportCsv('');
     }
     setImportResult(t('msg.createdSkipped', { created: res.created, skipped: res.skipped }));
+    setDuplicates(res.duplicates || []);
+    if (res.errors?.length) await alertCinDuplicateLines(res.errors);
     load(1);
     setPage(1);
   }
@@ -600,6 +607,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
             <thead>
               <tr>
                 <SelectAllTh selection={selection} rows={items} />
+                <Th mac>{t('columns.photo')}</Th>
                 <Th mac>{t('columns.ref')}</Th>
                 <Th mac>{t('columns.name')}</Th>
                 <Th mac>{t('columns.cin')}</Th>
@@ -620,6 +628,9 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
                 return (
                 <tr key={w.id} className="cursor-pointer" onClick={() => navigate(workforceDetailPath(mode, w.id))}>
                   <SelectTd selection={selection} row={w} />
+                  <Td mac>
+                    <MacAvatar photo={w.photo} firstName={w.firstName} lastName={w.lastName} />
+                  </Td>
                   <Td mac className="mac-table-muted text-[11px]">{w.reference || '—'}</Td>
                   <Td mac>
                     <span className="mac-table-ref">
@@ -724,7 +735,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
           {importMode === 'csv' ? (
             <>
               <p className="text-[11px] text-gic-muted">{t('msg.importFormatWorkforce')}</p>
-              <textarea className="w-full h-32 rounded-xl border border-gic-border p-3 text-[12px]" value={importCsv} onChange={(e) => setImportCsv(e.target.value)} placeholder="Ahmed;Alami;AB123456;0612345678;Maçon;Équipe A;250;Oui;Journalier;" />
+              <textarea data-keep-case className="w-full h-32 rounded-xl border border-gic-border p-3 text-[12px]" value={importCsv} onChange={(e) => setImportCsv(e.target.value)} placeholder="Ahmed;Alami;AB123456;0612345678;Maçon;Équipe A;250;Oui;Journalier;" />
             </>
           ) : (
             <>
@@ -735,6 +746,7 @@ export default function WorkforcePage({ mode = 'main_oeuvre' }: { mode?: Workfor
           {importResult && <p className="text-[12px] text-gic-emerald">{importResult}</p>}
         </form>
       </Modal>
+      <ImportDuplicatesModal items={duplicates} onClose={() => setDuplicates([])} onChanged={() => load(1)} />
     </div>
   );
 }

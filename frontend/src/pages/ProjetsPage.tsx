@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ProjectFormFields, emptyProjectForm, projectToForm, projectFormToBody, projectOwnershipLabel, type ProjectFormData } from '../components/ProjectFormFields';
+import { ImportDuplicatesModal, type ImportDuplicateItem } from '../components/ImportDuplicatesModal';
 import { uploadEntityPhoto } from '../components/FormPhotoField';
 import MacAvatar from '../components/MacAvatar';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
@@ -60,6 +61,7 @@ export default function ProjetsPage() {
   const [importCsv, setImportCsv] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [duplicates, setDuplicates] = useState<ImportDuplicateItem[]>([]);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [locationFilter, setLocationFilter] = useState('');
@@ -190,7 +192,7 @@ export default function ProjetsPage() {
     e.preventDefault();
     setImportResult(null);
     try {
-      let res: { created: number; skipped: number; errors?: string[] };
+      let res: { created: number; skipped: number; errors?: string[]; duplicates?: ImportDuplicateItem[] };
       if (importMode === 'xlsx') {
         if (!importFile) return;
         const fd = new FormData();
@@ -199,7 +201,8 @@ export default function ProjetsPage() {
       } else {
         res = await api('/immobilier/projects/import/csv', { method: 'POST', body: JSON.stringify({ csv: importCsv }) });
       }
-      setImportResult(`${res.created} projet(s) créé(s), ${res.skipped} ignoré(s)${res.errors?.length ? ` — ${res.errors.length} erreur(s)` : ''}`);
+      setImportResult(t('msg.createdSkipped', { created: res.created, skipped: res.skipped }));
+      setDuplicates(res.duplicates || []);
       load(page);
     } catch (err) {
       setImportResult(err instanceof Error ? err.message : t('msg.importError'));
@@ -545,7 +548,7 @@ export default function ProjetsPage() {
           {importMode === 'csv' ? (
             <>
               <p className="text-[11px] text-gic-muted">{t('msg.importFormatProject')}</p>
-              <textarea className="w-full h-32 rounded-xl border border-gic-border p-3 text-[12px]" value={importCsv} onChange={(e) => setImportCsv(e.target.value)} placeholder="Résidence Atlas;personnel;Marrakech;Av. Mohammed VI…" />
+              <textarea data-keep-case className="w-full h-32 rounded-xl border border-gic-border p-3 text-[12px]" value={importCsv} onChange={(e) => setImportCsv(e.target.value)} placeholder="Résidence Atlas;personnel;Marrakech;Av. Mohammed VI…" />
             </>
           ) : (
             <input type="file" accept=".xlsx,.xls" onChange={(e) => setImportFile(e.target.files?.[0] || null)} className="text-[12px]" />
@@ -575,6 +578,7 @@ export default function ProjetsPage() {
           onChange={(e) => setDeleteMotif(e.target.value)}
         />
       </Modal>
+      <ImportDuplicatesModal items={duplicates} onClose={() => setDuplicates([])} onChanged={() => load(page)} />
     </div>
   );
 }

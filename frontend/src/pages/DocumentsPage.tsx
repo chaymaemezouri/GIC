@@ -18,6 +18,7 @@ import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection'
 import { useRowSelection } from '../hooks/useRowSelection';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentFileActions } from '../components/DocumentScanner';
+import { requestPdfPreview } from '../components/PdfPreview';
 
 type Doc = DocEntity;
 
@@ -95,6 +96,7 @@ export default function DocumentsPage() {
   const [error, setError] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const uploadLock = useRef(false);
   const [uploadMeta, setUploadMeta] = useState({
     name: '',
     category: 'general',
@@ -261,7 +263,8 @@ export default function DocumentsPage() {
 
   async function submitUpload(e: React.FormEvent) {
     e.preventDefault();
-    if (!uploadFile) return;
+    if (!uploadFile || uploadLock.current) return;
+    uploadLock.current = true;
     try {
       await uploadDocument(uploadFile, {
         name: uploadMeta.name || uploadFile.name,
@@ -280,6 +283,8 @@ export default function DocumentsPage() {
       load(page);
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
+    } finally {
+      uploadLock.current = false;
     }
   }
 
@@ -706,7 +711,7 @@ export default function DocumentsPage() {
                     <tr
                       key={d.id}
                       className="cursor-pointer"
-                      onClick={() => navigate(`/documents/${d.id}`)}
+                      onClick={() => requestPdfPreview(fileUrl(d.path))}
                     >
                       <SelectTd selection={docSelection} row={d} />
                       <Td mac className="font-medium max-w-[220px]">
@@ -743,10 +748,7 @@ export default function DocumentsPage() {
                       <Td mac className="mac-table-muted">{formatDate(d.createdAt)}</Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
-                          <MacActionBtn icon={Eye} tone="blue" title={t('actions.viewSheet')} onClick={() => navigate(`/documents/${d.id}`)} />
-                          <a href={fileUrl(d.path)} target="_blank" rel="noreferrer" className="mac-action-btn mac-action-btn-gray" title={t('actions.open')}>
-                            <FileText size={14} strokeWidth={2.15} />
-                          </a>
+                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path))} />
                           <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
                         </div>
                       </Td>
@@ -815,7 +817,7 @@ export default function DocumentsPage() {
         footer={<Btn form="upload-form" type="submit" disabled={!uploadFile}>{t('actions.send')}</Btn>}
       >
         <form id="upload-form" onSubmit={submitUpload} className="grid gap-3">
-          <label className="block">
+          <div className="block">
             <span className="text-[11px] font-medium text-gic-muted">{t('fields.fileRequired')}</span>
             <div className="mt-1">
               <DocumentFileActions
@@ -828,7 +830,7 @@ export default function DocumentsPage() {
                 }}
               />
             </div>
-          </label>
+          </div>
           <Input label={t('fields.displayName')} value={uploadMeta.name} onChange={(e) => setUploadMeta({ ...uploadMeta, name: e.target.value })} />
           <Select label={t('fields.category')} value={uploadMeta.category} onChange={(e) => setUploadMeta({ ...uploadMeta, category: e.target.value })}>
             {DOC_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}

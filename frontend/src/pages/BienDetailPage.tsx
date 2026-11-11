@@ -52,6 +52,7 @@ export default function BienDetailPage() {
   const [loadingFloors, setLoadingFloors] = useState(false);
   const [tab, setTab] = useState<Tab>('info');
   const [error, setError] = useState('');
+  const [docReload, setDocReload] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteMotif, setDeleteMotif] = useState('');
@@ -101,10 +102,11 @@ export default function BienDetailPage() {
 
   async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
     await uploadDocument(file, { name: file.name, category: 'bien', propertyId: id, entityType: 'property', entityId: id });
+    setDocReload((n) => n + 1);
     load();
-    e.target.value = '';
   }
 
   async function onUploadPhoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -588,43 +590,16 @@ export default function BienDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-4 mt-1">
-            {id && <EntityDocChecklist entityType="property" entityId={id} extra={{ propertyId: id }} />}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[12px] text-gic-muted">Titres fonciers, plans, photos, contrats…</p>
-              <DocumentFileActions
-                labelClassName="inline-flex items-center gap-2 rounded-lg border border-gic-border px-3 py-2 text-[12px] font-medium hover:bg-black/[0.03] cursor-pointer"
-                accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-                onChange={onUploadDoc}
-              >
-                <Upload size={14} /> {t('actions.addFile')}
-              </DocumentFileActions>
-            </div>
-            {docs.length === 0 ? (
-              <p className="text-[12px] text-gic-muted">{t('msg.emptyDocuments')}</p>
-            ) : (
-              <TableWrap mac>
-                <thead>
-                  <tr>
-                    <Th mac>{t('fields.file')}</Th>
-                    <Th mac>{t('columns.date')}</Th>
-                    <Th mac className="mac-th-actions" aria-label={t('common.actions')} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {docs.map((d: any) => (
-                    <tr key={d.id}>
-                      <Td mac className="font-medium">{d.name}</Td>
-                      <Td mac className="mac-table-muted">{formatDate(d.createdAt)}</Td>
-                      <Td mac className="mac-td-actions">
-                        <a href={d.path} target="_blank" rel="noreferrer" className="mac-action-btn mac-action-btn-blue" title={t('common.view')}>
-                          <ExternalLink size={14} strokeWidth={2.15} />
-                        </a>
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </TableWrap>
+            {id && (
+              <EntityDocChecklist
+                entityType="property"
+                entityId={id}
+                extra={{ propertyId: id }}
+                reloadToken={docReload}
+                onChanged={load}
+              />
             )}
+            <p className="text-[12px] text-gic-muted">Titres fonciers, plans, photos, contrats…</p>
           </div>
         )}
 

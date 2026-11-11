@@ -1,6 +1,9 @@
 import * as XLSX from 'xlsx';
 import { prisma } from './prisma.js';
 import { nextReference } from './references.js';
+import { cinOwnerLabel } from './uniqueness.js';
+import { rememberCin, takeCinDuplicate, type ImportDuplicate, type SeenPerson } from './importDuplicates.js';
+import { requiredCinPhoneError } from './requiredContact.js';
 
 export type ClientImportRow = {
   firstName: string;
@@ -14,23 +17,48 @@ export async function importClientRows(rows: ClientImportRow[]) {
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const duplicates: ImportDuplicate[] = [];
+  const seen = new Map<string, SeenPerson>();
 
-  for (const row of rows) {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const line = index + 2;
     const { firstName, lastName, email, phone1, identityNumber } = row;
-    if (!firstName || !lastName || !email || !phone1) {
+    if (!firstName || !lastName || !email) {
       skipped++;
       continue;
     }
+    const contactError = requiredCinPhoneError({
+      cin: { value: identityNumber, required: true },
+      phone1: { value: phone1, required: true },
+    });
+    if (contactError) {
+      skipped++;
+      errors.push(`${firstName} ${lastName}: ${contactError}`);
+      continue;
+    }
+    const incomingName = `${firstName} ${lastName}`.trim();
+    const replay = {
+      path: '/clients',
+      body: {
+        firstName,
+        lastName,
+        email,
+        phone1,
+        identityNumber: identityNumber || null,
+        identityType: identityNumber ? 'CIN' : null,
+        isProspect: true,
+      },
+    };
+    const duplicate = await takeCinDuplicate({ cin: identityNumber, incomingName, line, seen, replay });
+    if (duplicate) {
+      skipped++;
+      duplicates.push(duplicate);
+      continue;
+    }
     try {
-      if (identityNumber) {
-        const exists = await prisma.client.findFirst({ where: { identityNumber } });
-        if (exists) {
-          skipped++;
-          continue;
-        }
-      }
       const reference = await nextReference('CLI');
-      await prisma.client.create({
+      const client = await prisma.client.create({
         data: {
           reference,
           firstName,
@@ -42,13 +70,21 @@ export async function importClientRows(rows: ClientImportRow[]) {
           isProspect: true,
         },
       });
+      rememberCin(seen, identityNumber, {
+        id: client.id,
+        label: cinOwnerLabel('client', null),
+        name: incomingName,
+        ref: client.reference,
+        deletePath: `/clients/${client.id}`,
+      });
       created++;
     } catch (e) {
-      errors.push(`${firstName} ${lastName}: ${e instanceof Error ? e.message : 'erreur'}`);
+      skipped++;
+      errors.push(`${incomingName}: ${e instanceof Error ? e.message : 'erreur'}`);
     }
   }
 
-  return { created, skipped, errors };
+  return { created, skipped, errors, duplicates };
 }
 
 export function parseCsvClientRows(csv: string): ClientImportRow[] {

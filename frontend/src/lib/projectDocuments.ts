@@ -34,6 +34,7 @@ export type ProjectDocumentRow = {
   status?: string | null;
   path: string;
   createdAt: string;
+  expiresAt?: string | null;
   entityType?: string | null;
   propertyId?: string | null;
 };

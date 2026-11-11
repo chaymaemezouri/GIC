@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../lib/audit.js';
+import { parseRib } from '../lib/rib.js';
 import {
   backfillEntreprisesFromSubcontracts,
   createEntreprise,
@@ -27,13 +28,19 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const companyName = String(req.body.companyName || '').trim();
+  const phone = String(req.body.phone || '').trim();
   if (!companyName) return res.status(400).json({ message: 'Entreprise requise' });
+  if (!phone) return res.status(400).json({ message: 'Le téléphone est obligatoire' });
+  const rib = parseRib(req.body.rib);
+  if (rib.error) return res.status(400).json({ message: rib.error });
   const created = await createEntreprise({
     companyName,
-    phone: req.body.phone ? String(req.body.phone).trim() : null,
+    phone,
     email: req.body.email ? String(req.body.email).trim() : null,
     address: req.body.address ? String(req.body.address).trim() : null,
     ice: req.body.ice ? String(req.body.ice).trim() : null,
+    bankName: req.body.bankName ? String(req.body.bankName).trim() : null,
+    rib: rib.rib,
     remark: req.body.remark ? String(req.body.remark).trim() : null,
   });
   await audit(req, 'création', 'Entreprise', created.id, created.companyName);
@@ -70,12 +77,22 @@ router.get('/:id', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
+  if (req.body.companyName !== undefined && !String(req.body.companyName || '').trim()) {
+    return res.status(400).json({ message: 'Entreprise requise' });
+  }
+  if (req.body.phone !== undefined && !String(req.body.phone || '').trim()) {
+    return res.status(400).json({ message: 'Le téléphone est obligatoire' });
+  }
+  const rib = req.body.rib !== undefined ? parseRib(req.body.rib) : null;
+  if (rib?.error) return res.status(400).json({ message: rib.error });
   const item = await updateEntreprise(String(req.params.id), {
     companyName: req.body.companyName != null ? String(req.body.companyName).trim() : undefined,
-    phone: req.body.phone !== undefined ? (req.body.phone ? String(req.body.phone).trim() : null) : undefined,
+    phone: req.body.phone !== undefined ? String(req.body.phone).trim() : undefined,
     email: req.body.email !== undefined ? (req.body.email ? String(req.body.email).trim() : null) : undefined,
     address: req.body.address !== undefined ? (req.body.address ? String(req.body.address).trim() : null) : undefined,
     ice: req.body.ice !== undefined ? (req.body.ice ? String(req.body.ice).trim() : null) : undefined,
+    bankName: req.body.bankName !== undefined ? (req.body.bankName ? String(req.body.bankName).trim() : null) : undefined,
+    rib: rib ? rib.rib : undefined,
     remark: req.body.remark !== undefined ? (req.body.remark ? String(req.body.remark).trim() : null) : undefined,
     isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : undefined,
   });

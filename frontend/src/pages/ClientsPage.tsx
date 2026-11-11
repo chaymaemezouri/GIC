@@ -1,5 +1,5 @@
 import { fetchAllRows, printRows } from '../lib/listPrint';
-import { appAlert } from '../lib/dialog';
+import { alertCinDuplicate, alertCinDuplicateLines, appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -12,6 +12,7 @@ import {
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
 import { ClientFormFields, emptyClientForm, type ClientFormData } from '../components/ClientFormFields';
+import { ImportDuplicatesModal, type ImportDuplicateItem } from '../components/ImportDuplicatesModal';
 import { omitPhotoFields, uploadEntityPhoto } from '../components/FormPhotoField';
 import MacAvatar from '../components/MacAvatar';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
@@ -68,6 +69,7 @@ export default function ClientsPage() {
   const [importCsv, setImportCsv] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [duplicates, setDuplicates] = useState<ImportDuplicateItem[]>([]);
   const [form, setForm] = useState<ClientFormData>(emptyClientForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -184,12 +186,13 @@ export default function ClientsPage() {
       load(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+      await alertCinDuplicate(err);
     }
   }
 
   async function doImport(e: React.FormEvent) {
     e.preventDefault();
-    let res: { created: number; skipped: number; errors: string[] };
+    let res: { created: number; skipped: number; errors: string[]; duplicates?: ImportDuplicateItem[] };
     if (importMode === 'xlsx') {
       if (!importFile) return;
       const fd = new FormData();
@@ -201,6 +204,8 @@ export default function ClientsPage() {
       setImportCsv('');
     }
     setImportResult(t('msg.createdSkipped', { created: res.created, skipped: res.skipped }));
+    setDuplicates(res.duplicates || []);
+    if (res.errors?.length) await alertCinDuplicateLines(res.errors);
     load(1);
     setPage(1);
   }
@@ -523,7 +528,7 @@ export default function ClientsPage() {
           {importMode === 'csv' ? (
             <>
               <p className="text-[11px] text-gic-muted">{t('msg.importFormatClient')}</p>
-              <textarea className="w-full h-32 rounded-xl border border-gic-border p-3 text-[12px]" value={importCsv} onChange={(e) => setImportCsv(e.target.value)} placeholder="Karim;Benali;karim@email.ma;0612345678;AB123456" />
+              <textarea data-keep-case className="w-full h-32 rounded-xl border border-gic-border p-3 text-[12px]" value={importCsv} onChange={(e) => setImportCsv(e.target.value)} placeholder="Karim;Benali;karim@email.ma;0612345678;AB123456" />
             </>
           ) : (
             <>
@@ -534,6 +539,7 @@ export default function ClientsPage() {
           {importResult && <p className="text-[11px] text-gic-emerald">{importResult}</p>}
         </form>
       </Modal>
+      <ImportDuplicatesModal items={duplicates} onClose={() => setDuplicates([])} onChanged={() => load(1)} />
     </div>
   );
 }

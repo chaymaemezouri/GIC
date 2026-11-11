@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Camera } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { photoSrc } from '../lib/photoUrl';
+import { PhotoLightbox } from './PhotoLightbox';
 
 type MacProfilePhotoProps = {
   photo?: string | null;
@@ -24,8 +25,10 @@ export default function MacProfilePhoto({
 }: MacProfilePhotoProps) {
   const { t } = useI18n();
   const [imgError, setImgError] = useState(false);
+  const [open, setOpen] = useState(false);
   const initials = `${firstName?.[0] || ''}${lastName?.[0] || ''}`;
   const src = photo && !imgError ? photoSrc(photo, bust) : undefined;
+  const label = [firstName, lastName].filter(Boolean).join(' ') || t('fields.photo');
 
   useEffect(() => {
     setImgError(false);
@@ -34,16 +37,15 @@ export default function MacProfilePhoto({
   return (
     <div className={`mac-detail-photo${className ? ` ${className}` : ''}`}>
       {src ? (
-        <img
-          src={src}
-          alt=""
-          onError={() => setImgError(true)}
-        />
+        <button type="button" className="mac-photo-zoom" title={t('common.view')} aria-label={t('common.view')} onClick={() => setOpen(true)}>
+          <img src={src} alt={label} onError={() => setImgError(true)} />
+        </button>
       ) : (
         <div className="mac-detail-photo-fallback text-lg font-bold">
           {initials || '?'}
         </div>
       )}
+      {open && src && <PhotoLightbox src={src} title={label} onClose={() => setOpen(false)} />}
       {editable && onFileChange && (
         <label className="mac-detail-photo-cam" title={t('actions.changePhoto')}>
           <Camera size={12} strokeWidth={2} />

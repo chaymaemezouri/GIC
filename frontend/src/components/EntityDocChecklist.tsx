@@ -1,15 +1,14 @@
 import { appAlert, appConfirm } from '../lib/dialog';
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Check, ExternalLink, Eye, FileX, Pencil, Plus, Star, Trash2, Upload, X } from 'lucide-react';
-import { api, formatDate, uploadDocument, uploadForm } from '../lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, Eye, Pencil, Plus, Trash2, Upload } from 'lucide-react';
+import { api, formatDate, uploadDocument } from '../lib/api';
 import { fileUrl } from '../lib/photoUrl';
 import { ENTITY_CHECKLISTS, parseChecklistConfig, type ChecklistConfig } from '../lib/entityChecklists';
 import { DocumentAddButton } from './DocumentAddButton';
 import { DocumentFileActions } from './DocumentScanner';
 import { Btn, Input, MacActionBtn, Modal } from './ui';
 import { useI18n } from '../i18n/I18nContext';
-import { FileInlinePreview } from './PdfPreview';
+import { requestPdfPreview } from './PdfPreview';
 
 type Doc = {
   id: string;
@@ -33,32 +32,57 @@ export function EntityDocChecklist({
   entityType,
   entityId,
   extra = {},
+  reloadToken = 0,
+  onChanged,
 }: {
   entityType: string;
   entityId: string;
   extra?: Record<string, string>;
+  reloadToken?: number;
+  onChanged?: () => void;
 }) {
   const { t } = useI18n();
   const standards = ENTITY_CHECKLISTS[entityType] || [];
+  const requestId = useRef(0);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [config, setConfig] = useState<ChecklistConfig>(EMPTY);
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [newLabel, setNewLabel] = useState('');
-  const [renameKey, setRenameKey] = useState<string | null>(null);
-  const [renameLabel, setRenameLabel] = useState('');
+  const [deposit, setDeposit] = useState<{ key: string; label: string; file: File } | null>(null);
+  const [depositExpiry, setDepositExpiry] = useState('');
+  const [editDoc, setEditDoc] = useState<Doc | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editExpiry, setEditExpiry] = useState('');
 
-  async function load() {
-    const [docRes, checkRes] = await Promise.all([
-      api<{ items?: Doc[] } | Doc[]>(`/documents?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}&limit=100`),
-      api<{ config: string | null }>(`/documents/checklist?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`),
-    ]);
-    setDocs(Array.isArray(docRes) ? docRes : docRes.items || []);
-    setConfig(parseChecklistConfig(checkRes.config));
+  function remember(doc: Doc) {
+    setDocs((prev) => [doc, ...prev.filter((item) => item.id !== doc.id)]);
   }
 
-  useEffect(() => { load().catch(() => {}); }, [entityType, entityId]);
+  async function load() {
+    const current = ++requestId.current;
+    const docsPromise = api<{ items?: Doc[] } | Doc[]>(`/documents?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}&limit=100`)
+      .then((value) => {
+        if (current !== requestId.current) return;
+        setDocs(Array.isArray(value) ? value : value.items || []);
+      })
+      .catch(() => {});
+    const checkPromise = api<{ config: string | null }>(`/documents/checklist?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`)
+      .then((value) => {
+        if (current !== requestId.current) return;
+        setConfig(parseChecklistConfig(value.config));
+      })
+      .catch(() => {});
+    await Promise.allSettled([docsPromise, checkPromise]);
+  }
+
+  async function refresh() {
+    await load();
+    onChanged?.();
+  }
+
+  useEffect(() => { load().catch(() => {}); }, [entityType, entityId, reloadToken]);
 
   async function save(next: ChecklistConfig) {
     setConfig(next);
@@ -93,7 +117,7 @@ export function EntityDocChecklist({
     return [...standard, ...custom];
   }, [standards, config, docs, t]);
 
-  const extras = docs.filter((d) => !rows.some((r) => r.doc?.id === d.id) && !rows.some((r) => r.key === d.category));
+  const extras = docs.filter((d) => !rows.some((r) => r.doc?.id === d.id));
   const visible = rows.filter((row) => {
     const q = query.trim().toLowerCase();
     if (q && !`${row.label} ${row.doc?.name || ''}`.toLowerCase().includes(q)) return false;
@@ -109,17 +133,49 @@ export function EntityDocChecklist({
   const requiredValid = requiredRows.filter((r) => r.doc?.status === 'valid' && !isExpired(r.doc.expiresAt)).length;
   const done = rows.filter((r) => r.doc).length;
 
-  async function onUpload(key: string, label: string, file: File, existingId?: string) {
+  function stageUpload(key: string, label: string, file: File) {
+    setDeposit({ key, label, file });
+    setDepositExpiry('');
+  }
+
+  async function saveDeposit() {
+    if (!deposit) return;
     try {
-      if (existingId) {
-        const form = new FormData();
-        form.append('file', file);
-        form.append('keepName', '1');
-        await uploadForm(`/documents/${existingId}/file`, form, 'PUT');
-      } else {
-        await uploadDocument(file, { name: file.name || label, category: key, entityType, entityId, ...extra });
-      }
-      await load();
+      const saved = await uploadDocument(deposit.file, {
+        name: deposit.file.name || deposit.label,
+        category: deposit.key,
+        entityType,
+        entityId,
+        ...extra,
+        ...(depositExpiry ? { expiresAt: depositExpiry } : {}),
+      }) as Doc;
+      if (saved?.id) remember(saved);
+      setDeposit(null);
+      setDepositExpiry('');
+      await refresh();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  function openEdit(doc: Doc) {
+    setEditDoc(doc);
+    setEditName(doc.name);
+    setEditExpiry(doc.expiresAt ? doc.expiresAt.slice(0, 10) : '');
+  }
+
+  async function saveEdit() {
+    if (!editDoc) return;
+    const name = editName.trim();
+    if (!name) return;
+    try {
+      const saved = await api<Doc>(`/documents/${editDoc.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name, expiresAt: editExpiry || null }),
+      });
+      if (saved?.id) remember(saved);
+      setEditDoc(null);
+      await refresh();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
@@ -128,46 +184,24 @@ export function EntityDocChecklist({
   async function setStatus(id: string, status: string) {
     try {
       await api(`/documents/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
-      await load();
+      await refresh();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
-  async function setExpiry(id: string, expiresAt: string) {
-    try {
-      await api(`/documents/${id}`, { method: 'PUT', body: JSON.stringify({ expiresAt: expiresAt || null }) });
-      await load();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
-    }
+  function openDoc(path: string) {
+    requestPdfPreview(fileUrl(path));
   }
 
   async function detach(id: string) {
-    if (!await appConfirm(t('checklists.detach'))) return;
+    if (!await appConfirm(t('msg.confirmDeleteDocument'))) return;
     try {
       await api(`/documents/${id}`, { method: 'DELETE' });
-      await load();
+      await refresh();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
-  }
-
-  async function removeRow(key: string) {
-    if (!await appConfirm(t('projectDocs.confirmRemoveChecklist'))) return;
-    const doc = docs.find((d) => d.category === key);
-    if (doc) await api(`/documents/${doc.id}`, { method: 'DELETE' }).catch(() => {});
-    const next = {
-      ...config,
-      custom: config.custom.filter((c) => c.key !== key),
-      hidden: config.custom.some((c) => c.key === key) ? config.hidden : [...config.hidden, key],
-    };
-    await save(next);
-    await load();
-  }
-
-  function toggleRequired(key: string, required: boolean) {
-    save({ ...config, required: { ...config.required, [key]: !required } });
   }
 
   const filters: { id: Filter; label: string }[] = [
@@ -193,7 +227,7 @@ export function EntityDocChecklist({
             entityId={entityId}
             extra={extra}
             categories={[...standards.map((s) => s.key), ...config.custom.map((c) => c.key)]}
-            onUploaded={() => { load().catch(() => {}); }}
+            onUploaded={(doc) => { if (doc?.id && doc.path) remember(doc as Doc); refresh().catch(() => {}); }}
           />
           <MacActionBtn icon={Plus} tone="blue" title={t('projectDocs.addChecklistItem')} onClick={() => { setNewLabel(''); setAddOpen(true); }} />
         </div>
@@ -222,10 +256,14 @@ export function EntityDocChecklist({
                   <p className="text-[12px] font-medium text-gic-ink">
                     {row.label}{row.required ? ' *' : ''}
                   </p>
-                  <p className="text-[11px] text-gic-muted">
-                    {row.doc ? row.doc.name : t('checklists.missing')}
-                    {row.doc?.expiresAt ? ` · ${formatDate(row.doc.expiresAt)}` : ''}
-                  </p>
+                  {row.doc ? (
+                    <button type="button" className="text-left text-[11px] text-gic-muted hover:text-gic-ink" onClick={() => openDoc(row.doc!.path)}>
+                      {row.doc.name}
+                      {row.doc.expiresAt ? ` · ${formatDate(row.doc.expiresAt)}` : ''}
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-gic-muted">{t('checklists.missing')}</p>
+                  )}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {!row.doc && <span className="mac-chip">{t('checklists.missing')}</span>}
                     {status === 'pending' && <span className="mac-chip mac-chip-orange">{t('checklists.toValidate')}</span>}
@@ -237,39 +275,26 @@ export function EntityDocChecklist({
                 <div className="mac-actions">
                   {row.doc && (
                     <>
-                      <a href={fileUrl(row.doc.path)} target="_blank" rel="noreferrer" className="mac-action-btn mac-action-btn-blue" title={t('common.view')} aria-label={t('common.view')}>
-                        <Eye size={14} strokeWidth={2.15} />
-                      </a>
-                      <Link to={`/documents/${row.doc.id}`} className="mac-action-btn mac-action-btn-gray" title={t('checklists.openSheet')} aria-label={t('checklists.openSheet')}>
-                        <ExternalLink size={14} strokeWidth={2.15} />
-                      </Link>
-                      <MacActionBtn icon={Check} tone="green" title={t('projectDocs.stateValid')} onClick={() => setStatus(row.doc!.id, 'valid')} />
-                      <MacActionBtn icon={X} tone="orange" title={t('checklists.refused')} onClick={() => setStatus(row.doc!.id, 'invalid')} />
-                      <MacActionBtn icon={FileX} tone="gray" title={t('checklists.detach')} onClick={() => detach(row.doc!.id)} />
-                      <input
-                        type="date"
-                        className="w-[7.5rem] rounded-md border border-black/[0.1] bg-black/[0.02] px-1.5 py-1 text-[11px]"
-                        title={t('fields.expiry')}
-                        aria-label={t('fields.expiry')}
-                        value={row.doc.expiresAt ? row.doc.expiresAt.slice(0, 10) : ''}
-                        onChange={(e) => setExpiry(row.doc!.id, e.target.value)}
-                      />
+                      <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => openDoc(row.doc!.path)} />
+                      <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEdit(row.doc!)} />
+                      <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => detach(row.doc!.id)} />
+                      {status !== 'valid' && (
+                        <MacActionBtn icon={Check} tone="green" title={t('projectDocs.stateValid')} onClick={() => setStatus(row.doc!.id, 'valid')} />
+                      )}
                     </>
                   )}
-                  <DocumentFileActions
-                    labelClassName="mac-action-btn mac-action-btn-blue cursor-pointer"
-                    labelTitle={row.doc ? t('checklists.replace') : t('actions.addDocument')}
-                    scanVariant="icon"
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(row.key, row.label, f, row.doc?.id); e.target.value = ''; }}
-                  >
-                    <Upload size={14} strokeWidth={2.15} />
-                  </DocumentFileActions>
-                  <MacActionBtn icon={Star} tone={row.required ? 'orange' : 'gray'} title={row.required ? t('checklists.markOptional') : t('checklists.markRequired')} onClick={() => toggleRequired(row.key, row.required)} />
-                  <MacActionBtn icon={Pencil} tone="orange" title={t('projectDocs.renameChecklist')} onClick={() => { setRenameKey(row.key); setRenameLabel(row.label); }} />
-                  <MacActionBtn icon={Trash2} tone="red" title={t('projectDocs.removeChecklist')} onClick={() => removeRow(row.key)} />
+                  {!row.doc && (
+                    <DocumentFileActions
+                      labelClassName="mac-action-btn mac-action-btn-blue cursor-pointer"
+                      labelTitle={t('actions.addDocument')}
+                      scanVariant="icon"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) stageUpload(row.key, row.label, f); e.target.value = ''; }}
+                    >
+                      <Upload size={14} strokeWidth={2.15} />
+                    </DocumentFileActions>
+                  )}
                 </div>
               </div>
-              {row.doc && <div className="mt-2"><FileInlinePreview src={fileUrl(row.doc.path)} /></div>}
             </div>
           );
         })}
@@ -282,20 +307,19 @@ export function EntityDocChecklist({
           {extras.map((d) => (
             <div key={d.id} className="mac-row flex-col !items-stretch">
               <div className="flex w-full items-center justify-between gap-2">
-                <div className="min-w-0">
+                <button type="button" className="min-w-0 text-left" onClick={() => openDoc(d.path)}>
                   <p className="mac-row-title truncate">{d.name}</p>
-                  <p className="mac-row-subtitle">{d.category || '—'}</p>
-                </div>
+                  <p className="mac-row-subtitle">{d.category || '—'}{d.expiresAt ? ` · ${formatDate(d.expiresAt)}` : ''}</p>
+                </button>
                 <div className="mac-actions">
-                  <a href={fileUrl(d.path)} target="_blank" rel="noreferrer" className="mac-action-btn mac-action-btn-blue" title={t('common.view')} aria-label={t('common.view')}>
-                    <Eye size={14} strokeWidth={2.15} />
-                  </a>
-                  <Link to={`/documents/${d.id}`} className="mac-action-btn mac-action-btn-gray" title={t('checklists.openSheet')} aria-label={t('checklists.openSheet')}>
-                    <ExternalLink size={14} strokeWidth={2.15} />
-                  </Link>
+                  <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => openDoc(d.path)} />
+                  <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEdit(d)} />
+                  <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => detach(d.id)} />
+                  {d.status !== 'valid' && (
+                    <MacActionBtn icon={Check} tone="green" title={t('projectDocs.stateValid')} onClick={() => setStatus(d.id, 'valid')} />
+                  )}
                 </div>
               </div>
-              <FileInlinePreview src={fileUrl(d.path)} />
             </div>
           ))}
         </div>
@@ -320,22 +344,34 @@ export function EntityDocChecklist({
         <Input label={t('fields.designation')} value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
       </Modal>
       <Modal
-        open={!!renameKey}
-        title={t('projectDocs.renameChecklist')}
-        onClose={() => setRenameKey(null)}
+        open={!!deposit}
+        title={t('actions.addDocument')}
+        onClose={() => setDeposit(null)}
         footer={(
           <>
-            <Btn variant="secondary" onClick={() => setRenameKey(null)}>{t('common.cancel')}</Btn>
-            <Btn onClick={() => {
-              if (!renameKey || !renameLabel.trim()) return;
-              const custom = config.custom.map((c) => (c.key === renameKey ? { ...c, label: renameLabel.trim() } : c));
-              save({ ...config, custom, labels: { ...config.labels, [renameKey]: renameLabel.trim() } });
-              setRenameKey(null);
-            }}>{t('common.save')}</Btn>
+            <Btn variant="secondary" onClick={() => setDeposit(null)}>{t('common.cancel')}</Btn>
+            <Btn onClick={() => { saveDeposit().catch(() => {}); }}>{t('common.save')}</Btn>
           </>
         )}
       >
-        <Input label={t('fields.designation')} value={renameLabel} onChange={(e) => setRenameLabel(e.target.value)} />
+        <p className="mb-3 text-[12px] text-gic-ink">{deposit?.file.name}</p>
+        <Input label={t('fields.expirationDate')} type="date" value={depositExpiry} onChange={(e) => setDepositExpiry(e.target.value)} />
+      </Modal>
+      <Modal
+        open={!!editDoc}
+        title={t('common.edit')}
+        onClose={() => setEditDoc(null)}
+        footer={(
+          <>
+            <Btn variant="secondary" onClick={() => setEditDoc(null)}>{t('common.cancel')}</Btn>
+            <Btn onClick={() => { saveEdit().catch(() => {}); }}>{t('common.save')}</Btn>
+          </>
+        )}
+      >
+        <div className="grid gap-3">
+          <Input label={t('fields.displayName')} value={editName} onChange={(e) => setEditName(e.target.value)} />
+          <Input label={t('fields.expirationDate')} type="date" value={editExpiry} onChange={(e) => setEditExpiry(e.target.value)} />
+        </div>
       </Modal>
     </div>
   );

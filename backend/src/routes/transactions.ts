@@ -14,6 +14,7 @@ import { sendExcel } from '../lib/exportExcel.js';
 import { sendPdfTable } from '../lib/exportPdf.js';
 import { removeAutomaticMovement, syncEncaissementMovement } from '../lib/cashSync.js';
 import { upload } from '../lib/upload.js';
+import { entityTypeVariants } from '../lib/documentEntity.js';
 import { addMonths, monthKey, monthLabelFr, startOfMonth } from '../lib/rentMonths.js';
 import {
   attachCoClients,
@@ -516,7 +517,7 @@ router.get('/sales/:id/documents', async (req, res) => {
     where: {
       OR: [
         { saleId },
-        { entityType: 'Sale', entityId: saleId },
+        { entityType: { in: entityTypeVariants('Sale') }, entityId: saleId },
       ],
     },
     orderBy: { createdAt: 'desc' },
@@ -1088,7 +1089,7 @@ router.get('/rentals/:id/documents', async (req, res) => {
     where: {
       OR: [
         { rentalId },
-        { entityType: 'Rental', entityId: rentalId },
+        { entityType: { in: entityTypeVariants('Rental') }, entityId: rentalId },
       ],
     },
     orderBy: { createdAt: 'desc' },

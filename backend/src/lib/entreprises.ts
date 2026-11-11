@@ -9,6 +9,8 @@ export type EntrepriseRow = {
   email: string | null;
   address: string | null;
   ice: string | null;
+  bankName: string | null;
+  rib: string | null;
   remark: string | null;
   isActive: boolean;
   createdAt: Date;
@@ -24,6 +26,8 @@ function mapRow(row: Record<string, unknown>): EntrepriseRow {
     email: row.email != null ? String(row.email) : null,
     address: row.address != null ? String(row.address) : null,
     ice: row.ice != null ? String(row.ice) : null,
+    bankName: row.bankName != null ? String(row.bankName) : null,
+    rib: row.rib != null ? String(row.rib) : null,
     remark: row.remark != null ? String(row.remark) : null,
     isActive: Boolean(row.isActive),
     createdAt: new Date(String(row.createdAt)),
@@ -56,6 +60,8 @@ export async function createEntreprise(data: {
   email?: string | null;
   address?: string | null;
   ice?: string | null;
+  bankName?: string | null;
+  rib?: string | null;
   remark?: string | null;
 }) {
   const existing = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
@@ -67,8 +73,8 @@ export async function createEntreprise(data: {
   const reference = await nextReference('ENT');
   const now = new Date().toISOString();
   await prisma.$executeRawUnsafe(
-    `INSERT INTO Entreprise (id, reference, companyName, phone, email, address, ice, remark, isActive, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    `INSERT INTO Entreprise (id, reference, companyName, phone, email, address, ice, bankName, rib, remark, isActive, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     id,
     reference,
     data.companyName,
@@ -76,6 +82,8 @@ export async function createEntreprise(data: {
     data.email || null,
     data.address || null,
     data.ice || null,
+    data.bankName || null,
+    data.rib || null,
     data.remark || null,
     now,
     now,
@@ -89,19 +97,24 @@ export async function updateEntreprise(id: string, data: Partial<{
   email: string | null;
   address: string | null;
   ice: string | null;
+  bankName: string | null;
+  rib: string | null;
   remark: string | null;
   isActive: boolean;
 }>) {
   const current = await getEntreprise(id);
   if (!current) return null;
-  const next = { ...current, ...data, updatedAt: new Date() };
+  const patch = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+  const next = { ...current, ...patch, updatedAt: new Date() };
   await prisma.$executeRawUnsafe(
-    `UPDATE Entreprise SET companyName = ?, phone = ?, email = ?, address = ?, ice = ?, remark = ?, isActive = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE Entreprise SET companyName = ?, phone = ?, email = ?, address = ?, ice = ?, bankName = ?, rib = ?, remark = ?, isActive = ?, updatedAt = ? WHERE id = ?`,
     next.companyName,
     next.phone,
     next.email,
     next.address,
     next.ice,
+    next.bankName,
+    next.rib,
     next.remark,
     next.isActive ? 1 : 0,
     next.updatedAt.toISOString(),

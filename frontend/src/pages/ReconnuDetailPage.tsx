@@ -1,4 +1,5 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { PrintChoiceModal } from '../components/PrintChoiceModal';
+import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlocks';
 import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -42,6 +43,7 @@ export default function ReconnuDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteMotif, setDeleteMotif] = useState('');
   const [form, setForm] = useState<ReconnuFormData>(emptyReconnuForm());
+  const [printOpen, setPrintOpen] = useState(false);
 
   function load() {
     if (!id) return;
@@ -90,21 +92,9 @@ export default function ReconnuDetailPage() {
     }
   }
 
-  async function printFiche() {
+  function openPrint() {
     if (!reconnu) return;
-
-    const movements: Movement[] = reconnu.movements || [];
-    await printWithCompany({ title: `${reconnu.firstName} ${reconnu.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Reconnu ${reconnu.firstName} ${reconnu.lastName}</title></head><body style="font-family:sans-serif;padding:24px">
-      <h1>Fiche reconnu — GIC</h1>
-      <h2>${reconnu.reference || ''} — ${reconnu.firstName} ${reconnu.lastName}</h2>
-      <p><b>Relation :</b> ${reconnu.relation || '—'}</p>
-      <p><b>Téléphone :</b> ${reconnu.phone1 || '—'} ${reconnu.phone2 ? '/ ' + reconnu.phone2 : ''}</p>
-      <p><b>Adresse :</b> ${reconnu.address || '—'}</p>
-      <p><b>Remarque :</b> ${reconnu.remark || '—'}</p>
-      <p><b>Statut :</b> ${reconnu.isActive ? 'Actif' : 'Inactif'}</p>
-      <h3>Mouvements récents (${movements.length})</h3>
-      <ul>${movements.map((m) => `<li>${formatDate(m.date)} — ${m.designation} — ${m.direction === 'sortie' ? '−' : '+'}${formatMad(m.amount)}</li>`).join('')}</ul>
-    </body></html>`, { grid: true }) });
+    setPrintOpen(true);
   }
 
   if (!reconnu && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
@@ -154,7 +144,7 @@ export default function ReconnuDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
-          <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
+          <Btn variant="secondary" icon={Printer} onClick={openPrint}>{t('common.print')}</Btn>
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
             <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { setDeleteOpen(true); setDeleteMotif(''); }} />
@@ -203,6 +193,14 @@ export default function ReconnuDetailPage() {
             <div>
               <p className="mac-info-label">{t('fields.phones')}</p>
               <p className="mac-info-value">{[reconnu.phone1, reconnu.phone2].filter(Boolean).join(' / ') || '—'}</p>
+            </div>
+            <div>
+              <p className="mac-info-label">{t('fields.bank')}</p>
+              <p className="mac-info-value">{reconnu.bankName || '—'}</p>
+            </div>
+            <div>
+              <p className="mac-info-label">{t('fields.rib')}</p>
+              <p className="mac-info-value">{reconnu.rib || '—'}</p>
             </div>
             <div className="sm:col-span-2">
               <p className="mac-info-label">{t('fields.address')}</p>
@@ -306,6 +304,59 @@ export default function ReconnuDetailPage() {
           onChange={(e) => setDeleteMotif(e.target.value)}
         />
       </Modal>
+      <PrintChoiceModal
+        open={printOpen}
+        title={`${reconnu.firstName} ${reconnu.lastName}`}
+        sections={reconnuPrintSections()}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   );
+
+  function reconnuPrintSections(): PrintSection[] {
+    const yesNo = (value: unknown) => (value ? t('common.yes') : t('common.no'));
+    const when = (value: unknown) => (value ? formatDate(value as string) : '—');
+    const lines = (count: number) => t('msg.printLines', { count });
+    const empty = t('msg.noData');
+    const movements: Movement[] = reconnu.movements || [];
+    return [
+      {
+        id: 'infos',
+        label: t('tabs.informations'),
+        hint: t('msg.printAllFields'),
+        html: printFieldGrid([
+          [t('fields.reference'), reconnu.reference],
+          [t('fields.firstName'), reconnu.firstName],
+          [t('fields.lastName'), reconnu.lastName],
+          [t('fields.relation'), reconnu.relation],
+          [t('fields.phone1'), reconnu.phone1],
+          [t('fields.phone2'), reconnu.phone2],
+          [t('fields.address'), reconnu.address],
+          [t('fields.bank'), reconnu.bankName],
+          [t('fields.rib'), reconnu.rib],
+          [t('fields.remark'), reconnu.remark],
+          [t('fields.status'), reconnu.isActive ? t('status.active') : t('status.inactive')],
+          [t('status.active'), yesNo(reconnu.isActive)],
+          [t('fields.createdAt'), when(reconnu.createdAt)],
+          [t('fields.updatedAt'), when(reconnu.updatedAt)],
+        ]),
+      },
+      {
+        id: 'mouvements',
+        label: t('tabs.movements'),
+        hint: lines(movements.length),
+        html: printTable(
+          [t('columns.date'), t('columns.direction'), t('columns.label'), t('columns.amount'), t('fields.remark')],
+          movements.map((m) => [
+            when(m.date),
+            m.direction,
+            m.designation,
+            formatMad(m.amount),
+            m.remark,
+          ]),
+          empty,
+        ),
+      },
+    ];
+  }
 }

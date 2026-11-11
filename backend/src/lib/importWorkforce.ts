@@ -1,6 +1,9 @@
 import * as XLSX from 'xlsx';
 import { prisma } from './prisma.js';
 import { nextReference } from './references.js';
+import { cinOwnerLabel } from './uniqueness.js';
+import { rememberCin, takeCinDuplicate, type ImportDuplicate, type SeenPerson } from './importDuplicates.js';
+import { requiredCinPhoneError } from './requiredContact.js';
 
 export type WorkforceImportRow = {
   firstName: string;
@@ -19,23 +22,52 @@ export async function importWorkforceRows(rows: WorkforceImportRow[]) {
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const duplicates: ImportDuplicate[] = [];
+  const seen = new Map<string, SeenPerson>();
 
-  for (const row of rows) {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const line = index + 2;
     const { firstName, lastName, cin, phone1, category, groupe, dailySalary, declared, contractType, cnssNumber } = row;
     if (!firstName || !lastName) {
       skipped++;
       continue;
     }
+    const contactError = requiredCinPhoneError({
+      cin: { value: cin, required: true },
+      phone1: { value: phone1, required: true },
+    });
+    if (contactError) {
+      skipped++;
+      errors.push(`${firstName} ${lastName}: ${contactError}`);
+      continue;
+    }
+    const incomingName = `${firstName} ${lastName}`.trim();
+    const replay = {
+      path: '/chantiers/workforce',
+      body: {
+        firstName,
+        lastName,
+        cin: cin || null,
+        phone1: phone1 || null,
+        category: category || null,
+        groupe: groupe || null,
+        dailySalary: dailySalary ?? 0,
+        declared: declared ?? false,
+        contractType: contractType || 'Journalier',
+        cnssNumber: cnssNumber || null,
+        isActive: true,
+      },
+    };
+    const duplicate = await takeCinDuplicate({ cin, incomingName, line, seen, replay });
+    if (duplicate) {
+      skipped++;
+      duplicates.push(duplicate);
+      continue;
+    }
     try {
-      if (cin) {
-        const exists = await prisma.workforce.findFirst({ where: { cin } });
-        if (exists) {
-          skipped++;
-          continue;
-        }
-      }
       const reference = await nextReference('MO');
-      await prisma.workforce.create({
+      const worker = await prisma.workforce.create({
         data: {
           reference,
           firstName,
@@ -51,13 +83,21 @@ export async function importWorkforceRows(rows: WorkforceImportRow[]) {
           isActive: true,
         },
       });
+      rememberCin(seen, cin, {
+        id: worker.id,
+        label: cinOwnerLabel('workforce', category || null),
+        name: incomingName,
+        ref: worker.reference,
+        deletePath: `/chantiers/workforce/${worker.id}`,
+      });
       created++;
     } catch (e) {
-      errors.push(`${firstName} ${lastName}: ${e instanceof Error ? e.message : 'erreur'}`);
+      skipped++;
+      errors.push(`${incomingName}: ${e instanceof Error ? e.message : 'erreur'}`);
     }
   }
 
-  return { created, skipped, errors };
+  return { created, skipped, errors, duplicates };
 }
 
 function parseDeclared(v: string | undefined): boolean {

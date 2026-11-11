@@ -21,6 +21,7 @@ import {
 import { FilePieceLinks } from '../lib/documentDisplay';
 import { appAlert, appConfirm } from '../lib/dialog';
 import { useI18n } from '../i18n/I18nContext';
+import { clampRib } from '../lib/rib';
 
 type Movement = {
   id: string;
@@ -307,7 +308,7 @@ export default function FinancePage() {
       name: a.name,
       type: a.type || 'caisse',
       holderUserId: a.holderUser?.id || '',
-      rib: a.rib || '',
+      rib: clampRib(a.rib || ''),
       bankName: a.bankName || '',
     });
     setAccountError('');
@@ -901,7 +902,7 @@ export default function FinancePage() {
               <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.email})</option>
             ))}
           </Select>
-          <Input label={t('fields.rib')} value={accountForm.rib} onChange={(e) => setAccountForm({ ...accountForm, rib: e.target.value })} />
+          <Input label={t('fields.rib')} value={accountForm.rib} inputMode="numeric" placeholder={t('fields.ribDigitsPlaceholder')} onChange={(e) => setAccountForm({ ...accountForm, rib: clampRib(e.target.value) })} />
           <Input label={t('fields.bankName')} value={accountForm.bankName} onChange={(e) => setAccountForm({ ...accountForm, bankName: e.target.value })} />
           {accountError && <p className="sm:col-span-2 text-[11px] text-gic-coral">{accountError}</p>}
         </form>

@@ -10,6 +10,7 @@ import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
+import MacAvatar from '../components/MacAvatar';
 import { useAuth } from '../context/AuthContext';
 import { SelectAllTh, SelectTd, SelectionBar } from '../components/RowSelection';
 import { useCreateQuery } from '../hooks/useCreateQuery';
@@ -20,6 +21,7 @@ import type { TranslateFn } from '../i18n/types';
 type UserRow = {
   id: string;
   email: string;
+  photo?: string | null;
   firstName: string;
   lastName: string;
   role: string;
@@ -383,6 +385,7 @@ export default function UsersPage() {
             <thead>
               <tr>
                 <SelectAllTh selection={selection} rows={items} />
+                <Th mac>{t('columns.photo')}</Th>
                 <Th mac>{t('columns.user')}</Th>
                 <Th mac>{t('columns.email')}</Th>
                 <Th mac>{t('columns.role')}</Th>
@@ -395,6 +398,9 @@ export default function UsersPage() {
               {items.map((u) => (
                 <tr key={u.id} className="cursor-pointer" onClick={() => navigate(`/utilisateurs/${u.id}`)}>
                   <SelectTd selection={selection} row={u} />
+                  <Td mac>
+                    <MacAvatar photo={u.photo} firstName={u.firstName} lastName={u.lastName} />
+                  </Td>
                   <Td mac className="font-medium">
                     <p>{u.firstName} {u.lastName}</p>
                     {u.twoFactorEnabled && <Shield size={11} className="inline ml-1.5 text-[#007aff]" aria-label="2FA" />}

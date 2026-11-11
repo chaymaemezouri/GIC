@@ -1,4 +1,5 @@
 import { fetchAllRows, printRows } from '../lib/listPrint';
+import { alertCinDuplicate } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -10,6 +11,7 @@ import {
   Btn, Card, EmptyState, KpiCard, MacActionBtn, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, StatusPill, TableWrap, Td, Th,
 } from '../components/ui';
+import MacAvatar from '../components/MacAvatar';
 import {
   InternalStaffFormFields, emptyInternalStaffForm, staffFormToBody,
 } from '../components/InternalStaffFormFields';
@@ -23,6 +25,7 @@ import { useI18n } from '../i18n/I18nContext';
 type StaffRow = {
   id: string;
   reference?: string | null;
+  photo?: string | null;
   firstName: string;
   lastName: string;
   email?: string | null;
@@ -177,6 +180,7 @@ export default function EquipeInternePage() {
       load(1);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : t('common.error'));
+      await alertCinDuplicate(err);
     }
   }
 
@@ -363,6 +367,7 @@ export default function EquipeInternePage() {
             <thead>
               <tr>
                 <SelectAllTh selection={selection} rows={items} />
+                <Th mac>{t('columns.photo')}</Th>
                 <Th mac>{t('columns.collaborator')}</Th>
                 <Th mac>{t('columns.function')}</Th>
                 <Th mac>{t('columns.salary')}</Th>
@@ -379,6 +384,9 @@ export default function EquipeInternePage() {
                   onClick={() => navigate(`/equipe-interne/${s.id}`)}
                 >
                   <SelectTd selection={selection} row={s} />
+                  <Td mac>
+                    <MacAvatar photo={s.photo} firstName={s.firstName} lastName={s.lastName} />
+                  </Td>
                   <Td mac className="font-medium">
                     <p>{s.firstName} {s.lastName}</p>
                     <p className="text-[10px] text-gic-muted font-normal">{s.reference || s.email || '—'}</p>

@@ -3,11 +3,13 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Pencil, Shield, Clock, Link2, Info, History, Printer
 } from 'lucide-react';
 import { api, formatDate } from '../lib/api';
-import { escHtml, printWithCompany } from '../lib/companyPrint';
+import { PrintChoiceModal } from '../components/PrintChoiceModal';
+import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlocks';
 import { useAuth } from '../context/AuthContext';
 import { roleLabel } from '../lib/permissions';
 import { Btn, Card, Input, KpiCard, MacActionBtn, Modal, StatusPill, Select, PageBackLink } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
+import MacProfilePhoto from '../components/MacProfilePhoto';
 import { useI18n } from '../i18n/I18nContext';
 
 type Tab = 'infos' | 'historique';
@@ -16,6 +18,7 @@ type UserDetail = {
   id: string;
   email: string;
   username?: string | null;
+  photo?: string | null;
   firstName: string;
   lastName: string;
   role: string;
@@ -44,6 +47,7 @@ export default function UserDetailPage() {
   const { user: me } = useAuth();
   const [item, setItem] = useState<UserDetail | null>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [printOpen, setPrintOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
@@ -110,31 +114,10 @@ export default function UserDetailPage() {
     }
   }
 
-  function printFiche() {
-    if (!item || !id) return;
-    const row = (label: string, value: unknown) => `<p><span class="k">${escHtml(label)} :</span> ${escHtml(value ?? '—')}</p>`;
-    void printWithCompany({
-      title: `${t('detail.platformAccount')} — ${item.firstName} ${item.lastName}`,
-      subtitle: item.email,
-      bodyHtml: async () => {
-        const rows = history.length ? history : await api<any[]>(`/auth/users/${id}/history`).catch(() => []);
-        return `<div class="grid">
-          ${row(t('fields.email'), item.email)}
-          ${row(t('fields.username'), item.username || '—')}
-          ${row(t('fields.role'), roleLabel(item.role))}
-          ${row(t('fields.status'), item.isActive ? t('status.active') : t('status.inactive'))}
-          ${row(t('settings.twoFaTotp'), item.twoFactorEnabled ? t('common.yes') : t('common.no'))}
-          ${row(t('fields.lastLogin'), item.lastLoginAt ? formatDate(item.lastLoginAt) : '—')}
-          ${row(t('fields.createdAt'), formatDate(item.createdAt))}
-          ${row(t('msg.managedSites'), item._count?.managedChantiers ?? 0)}
-          ${row(t('fields.internalTeamFiche'), item.internalStaff ? item.internalStaff.reference || t('common.yes') : t('msg.noRhLinked'))}
-        </div>
-        <h2>${escHtml(t('tabs.history'))}</h2>
-        ${rows.length ? `<table><thead><tr><th>${escHtml(t('columns.date'))}</th><th>${escHtml(t('columns.action'))}</th><th>${escHtml(t('columns.entity'))}</th><th>${escHtml(t('columns.details'))}</th></tr></thead><tbody>${rows
-          .map((h) => `<tr><td>${escHtml(formatDate(h.createdAt))}</td><td>${escHtml(h.action || '—')}</td><td>${escHtml(h.entity || '—')}</td><td>${escHtml(h.details || '—')}</td></tr>`)
-          .join('')}</tbody></table>` : `<p class="muted">${escHtml(t('msg.emptyHistoryShort'))}</p>`}`;
-      },
-    });
+  function openPrint() {
+    if (!item) return;
+    loadHistory();
+    setPrintOpen(true);
   }
 
   if (!item && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
@@ -155,9 +138,7 @@ export default function UserDetailPage() {
       <div className="mac-detail-hero">
         <PageBackLink fallbackTo="/utilisateurs" />
         <div className="mac-detail-hero-main">
-          <div className="mac-avatar mac-avatar-lg bg-gic-violet-soft text-gic-violet font-semibold">
-            {item!.firstName[0]}{item!.lastName[0]}
-          </div>
+          <MacProfilePhoto photo={item!.photo} firstName={item!.firstName} lastName={item!.lastName} />
           <div className="min-w-0">
             <p className="mac-detail-eyebrow">{t('detail.platformAccount')}</p>
             <h1 className="mac-detail-name truncate">{item!.firstName} {item!.lastName}</h1>
@@ -170,7 +151,7 @@ export default function UserDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
-          <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
+          <Btn variant="secondary" icon={Printer} onClick={openPrint}>{t('common.print')}</Btn>
           <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
         </div>
       </div>
@@ -251,6 +232,49 @@ export default function UserDetailPage() {
           {formError && <p className="sm:col-span-2 text-[11px] text-gic-coral">{formError}</p>}
         </form>
       </Modal>
+      <PrintChoiceModal
+        open={printOpen}
+        title={`${item!.firstName} ${item!.lastName}`}
+        sections={userPrintSections()}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   );
+
+  function userPrintSections(): PrintSection[] {
+    if (!item) return [];
+    const yesNo = (value: unknown) => (value ? t('common.yes') : t('common.no'));
+    const when = (value: unknown) => (value ? formatDate(value as string) : '—');
+    const lines = (count: number) => t('msg.printLines', { count });
+    return [
+      {
+        id: 'infos',
+        label: t('tabs.informations'),
+        hint: t('msg.printAllFields'),
+        html: printFieldGrid([
+          [t('fields.firstName'), item.firstName],
+          [t('fields.lastName'), item.lastName],
+          [t('fields.email'), item.email],
+          [t('fields.username'), item.username],
+          [t('fields.role'), roleLabel(item.role)],
+          [t('fields.status'), item.isActive ? t('status.active') : t('status.inactive')],
+          [t('settings.twoFaTotp'), yesNo(item.twoFactorEnabled)],
+          [t('fields.lastLogin'), when(item.lastLoginAt)],
+          [t('fields.createdAt'), when(item.createdAt)],
+          [t('msg.managedSites'), item._count?.managedChantiers ?? 0],
+          [t('fields.internalTeamFiche'), item.internalStaff ? (item.internalStaff.reference || t('common.yes')) : t('msg.noRhLinked')],
+        ]),
+      },
+      {
+        id: 'historique',
+        label: t('tabs.history'),
+        hint: lines(history.length),
+        html: printTable(
+          [t('columns.date'), t('columns.action'), t('columns.entity'), t('columns.details')],
+          history.map((h) => [when(h.createdAt), h.action, h.entity, h.details]),
+          t('msg.noData'),
+        ),
+      },
+    ];
+  }
 }

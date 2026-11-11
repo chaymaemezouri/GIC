@@ -1,4 +1,4 @@
-import { appAlert, appConfirm } from '../lib/dialog';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -17,13 +17,13 @@ import { EntityDocChecklist } from '../components/EntityDocChecklist';
 
 import { SaleFormFields, saleToForm, saleFormToUpdateBody, emptySaleForm, type SaleFormData } from '../components/SaleFormFields';
 import { partyLabel } from '../components/PartyNames';
+import MacProfilePhoto from '../components/MacProfilePhoto';
 import { printSaleReceipt } from '../lib/printSale';
 import PaymentSchedulePanel from '../components/PaymentSchedulePanel';
 import { displayPayerName, isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 import { PaymentModeFields } from '../components/PaymentModeFields';
 import { printPaymentReceipt as printReceipt } from '../lib/printPayment';
 import { fileUrl } from '../lib/documentDisplay';
-import { FileInlinePreview } from '../components/PdfPreview';
 
 type Tab = 'infos' | 'echeancier' | 'paiements' | 'documents' | 'historique';
 
@@ -47,6 +47,7 @@ export default function VenteDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
   const [docUploading, setDocUploading] = useState(false);
+  const [docReload, setDocReload] = useState(0);
   const [clients, setClients] = useState<any[]>([]);
   const [properties, setProperties] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
@@ -191,34 +192,24 @@ export default function VenteDetailPage() {
 
   async function onDocUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
     setDocUploading(true);
     try {
       await uploadDocument(file, {
         name: file.name,
         category: 'vente',
-        entityType: 'Sale',
+        entityType: 'sale',
         entityId: id,
         saleId: id,
       });
+      setDocReload((n) => n + 1);
       loadDocuments();
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
     } finally {
       setDocUploading(false);
-      e.target.value = '';
-    }
-  }
-
-  async function deleteDoc(docId: string) {
-    if (!await appConfirm(t('msg.confirmDeleteDocument'))) return;
-    try {
-      await api(`/documents/${docId}`, { method: 'DELETE' });
-      loadDocuments();
-      load();
-    } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -441,11 +432,11 @@ export default function VenteDetailPage() {
       <div className="mac-detail-hero">
         <PageBackLink fallbackTo="/ventes" />
         <div className="mac-detail-hero-main">
-          <div className="mac-detail-photo">
-            <div className="mac-detail-photo-fallback">
-              <FileText size={22} strokeWidth={1.75} />
-            </div>
-          </div>
+          <MacProfilePhoto
+            photo={sale.property?.photo || sale.client?.photo}
+            firstName={sale.client?.firstName}
+            lastName={sale.client?.lastName}
+          />
           <div className="min-w-0">
             <p className="mac-detail-eyebrow">{t('detail.sale360')}</p>
             <h1 className="mac-detail-name truncate">{sale.reference}</h1>
@@ -859,42 +850,14 @@ export default function VenteDetailPage() {
 
         {tab === 'documents' && (
           <div className="mt-1">
-            {id && <EntityDocChecklist entityType="sale" entityId={id} extra={{ saleId: id }} />}
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <p className="text-[13px] font-medium text-gic-ink tracking-tight flex items-center gap-2">
-                <FileText size={15} />
-                {t('tabs.documents')} {t('fields.sale').toLowerCase()}
-              </p>
-              <DocumentFileActions
-                labelClassName="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50"
-                accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
-                onChange={onDocUpload}
-                disabled={docUploading}
-              >
-                <Upload size={14} />
-                {docUploading ? t('auth.sending') : t('actions.deposit')}
-              </DocumentFileActions>
-            </div>
-            {(documents.length === 0 && !(sale.documents?.length)) ? (
-              <p className="text-[12px] text-gic-muted py-6 text-center">{t('msg.emptyDocuments')}</p>
-            ) : (
-              <ul className="space-y-2">
-                {(documents.length ? documents : sale.documents || []).map((d: any) => (
-                  <li key={d.id} className="rounded-xl bg-gray-50 px-3 py-2 text-[12px]">
-                    <div className="flex items-center gap-2">
-                      <FileText size={14} className="text-gic-violet shrink-0" />
-                      <span className="font-medium truncate flex-1">{d.name}</span>
-                      {d.category && <span className="text-[10px] text-gic-muted shrink-0">{d.category}</span>}
-                      <span className="text-[10px] text-gic-muted shrink-0">{formatDate(d.createdAt)}</span>
-                      <a href={fileUrl(d.path)} className="text-gic-violet hover:underline shrink-0 inline-flex items-center gap-1">
-                        {t('common.view')} <ExternalLink size={11} />
-                      </a>
-                      <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
-                    </div>
-                    {d.path && <div className="mt-2"><FileInlinePreview src={fileUrl(d.path)} /></div>}
-                  </li>
-                ))}
-              </ul>
+            {id && (
+              <EntityDocChecklist
+                entityType="sale"
+                entityId={id}
+                extra={{ saleId: id }}
+                reloadToken={docReload}
+                onChanged={() => { loadDocuments(); load(); }}
+              />
             )}
           </div>
         )}

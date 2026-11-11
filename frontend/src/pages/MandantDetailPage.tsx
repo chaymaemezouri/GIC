@@ -1,5 +1,6 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { PrintChoiceModal } from '../components/PrintChoiceModal';
+import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlocks';
+import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -33,6 +34,8 @@ export default function MandantDetailPage() {
   const [mandant, setMandant] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [docReload, setDocReload] = useState(0);
   const [identityTypes, setIdentityTypes] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
@@ -88,7 +91,9 @@ export default function MandantDetailPage() {
       setEditOpen(false);
       load();
     } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
+      if (!(await alertCinDuplicate(err))) {
+        await appAlert(err instanceof Error ? err.message : t('common.error'));
+      }
     }
   }
 
@@ -119,26 +124,20 @@ export default function MandantDetailPage() {
 
   async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
     try {
       await uploadDocument(file, {
         name: file.name,
-        category: 'identite',
-        entityType: 'Mandant',
+        category: 'cin',
+        entityType: 'mandant',
         entityId: id,
       });
+      setDocReload((n) => n + 1);
       loadDocuments();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    } finally {
-      e.target.value = '';
     }
-  }
-
-  async function deleteDoc(docId: string) {
-    if (!await appConfirm(t('msg.confirmDeleteDocument'))) return;
-    await api(`/documents/${docId}`, { method: 'DELETE' });
-    loadDocuments();
   }
 
   async function linkClient(clientId: string) {
@@ -153,21 +152,10 @@ export default function MandantDetailPage() {
     load();
   }
 
-  async function printFiche() {
+  function openPrint() {
     if (!mandant) return;
-
-    const linkedClients = (mandant.clients || []).map((cm: any) => cm.client);
-    await printWithCompany({ title: `${mandant.firstName} ${mandant.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Mandant ${mandant.firstName} ${mandant.lastName}</title></head><body style="font-family:sans-serif;padding:24px">
-      <h1>Fiche mandant — GIC</h1>
-      <h2>${mandant.reference || ''} — ${mandant.firstName} ${mandant.lastName}</h2>
-      <p><b>Identité :</b> ${mandant.identityType || '—'} ${mandant.identityNumber || ''}</p>
-      <p><b>Email :</b> ${mandant.email || '—'}</p>
-      <p><b>Téléphone :</b> ${mandant.phone1 || '—'} ${mandant.phone2 ? '/ ' + mandant.phone2 : ''}</p>
-      <p><b>Adresse :</b> ${mandant.address || '—'}</p>
-      <p><b>Remarque :</b> ${mandant.remark || '—'}</p>
-      <h3>Clients liés (${linkedClients.length})</h3>
-      <ul>${linkedClients.map((c: any) => `<li>${c.reference} — ${c.firstName} ${c.lastName}</li>`).join('')}</ul>
-    </body></html>`, { grid: true }) });
+    loadHistory();
+    setPrintOpen(true);
   }
 
   if (!mandant && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
@@ -218,7 +206,7 @@ export default function MandantDetailPage() {
           </div>
         </div>
         <div className="mac-page-actions">
-          <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
+          <Btn variant="secondary" icon={Printer} onClick={openPrint}>{t('common.print')}</Btn>
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
             <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { setDeleteOpen(true); setDeleteMotif(''); }} />
@@ -259,6 +247,8 @@ export default function MandantDetailPage() {
             <Info icon={Phone} label={t('fields.phonePrimary')} value={mandant.phone1 || '—'} link={mandant.phone1 ? `tel:${mandant.phone1}` : undefined} />
             <Info icon={Phone} label={t('fields.phoneSecondary')} value={mandant.phone2 || '—'} link={mandant.phone2 ? `tel:${mandant.phone2}` : undefined} />
             <Info icon={MapPin} label={t('fields.address')} value={mandant.address || '—'} className="sm:col-span-2" />
+            <Info icon={Hash} label={t('fields.bank')} value={mandant.bankName || '—'} />
+            <Info icon={Hash} label={t('fields.rib')} value={mandant.rib || '—'} />
             <Info icon={FileText} label={t('fields.remark')} value={mandant.remark || '—'} className="sm:col-span-2" />
             <Info icon={Calendar} label={t('fields.updatedAt')} value={formatDate(mandant.updatedAt)} />
           </div>
@@ -327,34 +317,14 @@ export default function MandantDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
-            {id && <EntityDocChecklist entityType="mandant" entityId={id} />}
-            <DocumentFileActions
-              labelClassName="mac-upload-btn"
-              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-              onChange={onUploadDoc}
-            >
-              <Upload size={14} /> {t('actions.uploadIdentityDoc')}
-            </DocumentFileActions>
-            <div className="mac-section-card !p-0 overflow-hidden">
-              {documents.map((d) => (
-                <div key={d.id} className="mac-row">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileText size={14} className="text-[#007aff] shrink-0" />
-                    <div className="min-w-0">
-                      <p className="mac-row-title truncate">{d.name}</p>
-                      <p className="mac-row-subtitle capitalize">{d.category || 'doc'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <a href={d.path} target="_blank" rel="noreferrer" className="mac-table-action px-2">{t('common.view')}</a>
-                    <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
-                  </div>
-                </div>
-              ))}
-              {documents.length === 0 && (
-                <p className="text-[12px] text-gic-muted py-6 text-center">{t('msg.emptyDocuments')}</p>
-              )}
-            </div>
+            {id && (
+              <EntityDocChecklist
+                entityType="mandant"
+                entityId={id}
+                reloadToken={docReload}
+                onChanged={loadDocuments}
+              />
+            )}
           </div>
         )}
 
@@ -435,8 +405,75 @@ export default function MandantDetailPage() {
           onChange={(e) => setDeleteMotif(e.target.value)}
         />
       </Modal>
+      <PrintChoiceModal
+        open={printOpen}
+        title={`${mandant.firstName} ${mandant.lastName}`}
+        sections={mandantPrintSections()}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   );
+
+  function mandantPrintSections(): PrintSection[] {
+    const when = (value: unknown) => (value ? formatDate(value as string) : '—');
+    const lines = (count: number) => t('msg.printLines', { count });
+    const empty = t('msg.noData');
+    const clients = (mandant.clients || []).map((row: any) => row.client).filter(Boolean);
+    return [
+      {
+        id: 'infos',
+        label: t('tabs.informations'),
+        hint: t('msg.printAllFields'),
+        html: printFieldGrid([
+          [t('fields.reference'), mandant.reference],
+          [t('fields.firstName'), mandant.firstName],
+          [t('fields.lastName'), mandant.lastName],
+          [t('fields.identityType'), mandant.identityType],
+          [t('fields.identityPieceNumber'), mandant.identityNumber],
+          [t('fields.birthDate'), when(mandant.birthDate)],
+          [t('fields.email'), mandant.email],
+          [t('fields.phone1'), mandant.phone1],
+          [t('fields.phone2'), mandant.phone2],
+          [t('fields.address'), mandant.address],
+          [t('fields.bank'), mandant.bankName],
+          [t('fields.rib'), mandant.rib],
+          [t('fields.remark'), mandant.remark],
+          [t('fields.createdAt'), when(mandant.createdAt)],
+          [t('fields.updatedAt'), when(mandant.updatedAt)],
+        ]),
+      },
+      {
+        id: 'clients',
+        label: t('tabs.linkedClients'),
+        hint: lines(clients.length),
+        html: printTable(
+          [t('columns.ref'), t('columns.name'), t('fields.phone1'), t('fields.email'), t('columns.cin')],
+          clients.map((c: any) => [c.reference, `${c.firstName || ''} ${c.lastName || ''}`.trim(), c.phone1, c.email, c.identityNumber]),
+          empty,
+        ),
+      },
+      {
+        id: 'documents',
+        label: t('tabs.documents'),
+        hint: lines(documents.length),
+        html: printTable(
+          [t('columns.name'), t('columns.category'), t('columns.status'), t('fields.expirationDate'), t('columns.date')],
+          documents.map((d: any) => [d.name, d.category, d.status, when(d.expiresAt), when(d.createdAt)]),
+          empty,
+        ),
+      },
+      {
+        id: 'historique',
+        label: t('tabs.history'),
+        hint: lines(history.length),
+        html: printTable(
+          [t('columns.date'), t('columns.action'), t('columns.details'), t('columns.user')],
+          history.map((h) => [when(h.createdAt), h.action, h.details, h.user ? `${h.user.firstName} ${h.user.lastName}` : '']),
+          empty,
+        ),
+      },
+    ];
+  }
 }
 
 function Info({

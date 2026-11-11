@@ -1,9 +1,9 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { appAlert, appConfirm } from '../lib/dialog';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Plus, Building2, Pencil, Trash2, Printer, Home, Layers, History,
+  ArrowLeft, Plus, Building2, Pencil, Trash2, Printer, Home, Layers, History, Eye,
   TrendingUp, KeyRound, FileText, ExternalLink, Upload, MapPin, Image, HardHat, Camera, Wallet,
   Images, LayoutGrid, PanelTop, Info, MessageCircle, CheckCircle2, XCircle, CircleDashed,
 } from 'lucide-react';
@@ -16,6 +16,8 @@ import { partyLabel } from '../components/PartyNames';
 import { DocumentFileActions } from '../components/DocumentScanner';
 import { DocumentAddButton } from '../components/DocumentAddButton';
 import { fileUrl, photoSrc } from '../lib/photoUrl';
+import { requestPdfPreview } from '../components/PdfPreview';
+import { ZoomImage } from '../components/PhotoLightbox';
 import { occupancyStatusOf, propertyDealOf } from '../lib/propertyDeal';
 import {
   buildProjectDocChecklist,
@@ -76,7 +78,10 @@ export default function ProjectDetailPage() {
   const [checklistConfig, setChecklistConfig] = useState<DocChecklistConfig>({ custom: [], labels: {} });
   const [docUploading, setDocUploading] = useState(false);
   const [docUploadingKey, setDocUploadingKey] = useState<string | null>(null);
-  const [renameDoc, setRenameDoc] = useState<{ id: string; name: string } | null>(null);
+  const docUploadLock = useRef(false);
+  const [renameDoc, setRenameDoc] = useState<{ id: string; name: string; expiresAt: string } | null>(null);
+  const [pendingDoc, setPendingDoc] = useState<{ file: File; category: string } | null>(null);
+  const [pendingExpiry, setPendingExpiry] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
   const [checklistItemModal, setChecklistItemModal] = useState<null | {
     mode: 'add' | 'rename';
@@ -278,33 +283,36 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function onDocUpload(e: React.ChangeEvent<HTMLInputElement>, category = 'projet') {
+  function onDocUpload(e: React.ChangeEvent<HTMLInputElement>, category = 'projet') {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
+    setPendingDoc({ file, category });
+    setPendingExpiry('');
+  }
+
+  async function savePendingDoc() {
+    if (!pendingDoc || !id || docUploadLock.current) return;
+    docUploadLock.current = true;
     setDocUploading(true);
-    setDocUploadingKey(category);
+    setDocUploadingKey(pendingDoc.category);
     try {
-      const existing = documents.find((d) => d.category === category && d.entityType === 'Project');
-      await uploadDocument(file, {
-        name: file.name,
-        category,
+      await uploadDocument(pendingDoc.file, {
+        name: pendingDoc.file.name,
+        category: pendingDoc.category,
         entityType: 'Project',
         entityId: id,
+        ...(pendingExpiry ? { expiresAt: pendingExpiry } : {}),
       });
-      if (existing?.id) {
-        try {
-          await api(`/documents/${existing.id}`, { method: 'DELETE' });
-        } catch {
-          /* keep new file even if old delete fails */
-        }
-      }
+      setPendingDoc(null);
+      setPendingExpiry('');
       await reloadDocuments();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
     } finally {
+      docUploadLock.current = false;
       setDocUploading(false);
       setDocUploadingKey(null);
-      e.target.value = '';
     }
   }
 
@@ -337,7 +345,10 @@ export default function ProjectDetailPage() {
     }
     setRenameSaving(true);
     try {
-      await api(`/documents/${renameDoc.id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+      await api(`/documents/${renameDoc.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name, expiresAt: renameDoc.expiresAt || null }),
+      });
       setRenameDoc(null);
       await reloadDocuments();
     } catch (err) {
@@ -349,22 +360,24 @@ export default function ProjectDetailPage() {
 
   function renderDocFileActions(doc: ProjectDocumentRow, state: ProjectDocStatus) {
     return (
-      <div className="inline-flex items-center gap-0.5 shrink-0" title={t('projectDocs.actionsHint')}>
-        <a
-          href={fileUrl(doc.path)}
-          target="_blank"
-          rel="noreferrer"
-          className="mac-action-btn mac-action-btn-blue"
-          title={t('projectDocs.open')}
-          aria-label={t('projectDocs.open')}
-        >
-          <ExternalLink size={14} strokeWidth={2.15} />
-        </a>
+      <div className="inline-flex items-center gap-0.5 shrink-0">
+        <MacActionBtn
+          icon={Eye}
+          tone="blue"
+          title={t('common.view')}
+          onClick={() => requestPdfPreview(fileUrl(doc.path))}
+        />
         <MacActionBtn
           icon={Pencil}
-          tone="gray"
-          title={t('projectDocs.rename')}
-          onClick={() => setRenameDoc({ id: doc.id, name: doc.name })}
+          tone="orange"
+          title={t('common.edit')}
+          onClick={() => setRenameDoc({ id: doc.id, name: doc.name, expiresAt: doc.expiresAt ? doc.expiresAt.slice(0, 10) : '' })}
+        />
+        <MacActionBtn
+          icon={Trash2}
+          tone="red"
+          title={t('projectDocs.delete')}
+          onClick={() => deleteDocument(doc.id)}
         />
         {state !== 'valid' && (
           <MacActionBtn
@@ -374,28 +387,6 @@ export default function ProjectDetailPage() {
             onClick={() => setDocumentStatus(doc.id, 'valid')}
           />
         )}
-        {state !== 'invalid' && (
-          <MacActionBtn
-            icon={XCircle}
-            tone="red"
-            title={t('projectDocs.markInvalid')}
-            onClick={() => setDocumentStatus(doc.id, 'invalid')}
-          />
-        )}
-        {state !== 'pending' && (
-          <MacActionBtn
-            icon={CircleDashed}
-            tone="orange"
-            title={t('projectDocs.resetPending')}
-            onClick={() => setDocumentStatus(doc.id, 'pending')}
-          />
-        )}
-        <MacActionBtn
-          icon={Trash2}
-          tone="red"
-          title={t('projectDocs.delete')}
-          onClick={() => deleteDocument(doc.id)}
-        />
       </div>
     );
   }
@@ -869,9 +860,9 @@ export default function ProjectDetailPage() {
         <div className="mac-detail-hero-main">
           <div className="mac-detail-photo mac-project-cover">
             {project.photo ? (
-              <img
-                src={photoSrc(project.photo)}
-                alt=""
+              <ZoomImage
+                src={photoSrc(project.photo) || ''}
+                alt={project.name}
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).style.display = 'none';
                   const fb = e.currentTarget.nextElementSibling as HTMLElement | null;
@@ -1122,7 +1113,7 @@ export default function ProjectDetailPage() {
                         <span>PDF</span>
                       </a>
                     ) : (
-                      <img src={img.path} alt="" />
+                      <ZoomImage src={fileUrl(img.path)} alt={project.name} />
                     )}
                     <div className="mac-project-gallery-actions">
                       {project.photo !== img.path && (
@@ -1440,7 +1431,8 @@ export default function ProjectDetailPage() {
               {projectDocBundle.checklist.map((item) => {
                 const uploadingThis = docUploading && docUploadingKey === item.key;
                 return (
-                  <li key={item.key} className="flex flex-col sm:flex-row sm:items-center gap-2 py-2.5 first:pt-0 last:pb-0">
+                  <li key={item.key} className="flex flex-col gap-2 py-2.5 first:pt-0 last:pb-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-[13px] font-medium text-gic-ink">{item.label}</p>
@@ -1455,47 +1447,28 @@ export default function ProjectDetailPage() {
                         )}
                       </div>
                       {item.document && (
-                        <p className="text-[11px] text-gic-muted mt-0.5 truncate">
+                        <button
+                          type="button"
+                          className="text-left text-[11px] text-gic-muted mt-0.5 truncate hover:text-gic-ink"
+                          onClick={() => requestPdfPreview(fileUrl(item.document!.path))}
+                        >
                           {item.document.name} · {formatDate(item.document.createdAt)}
-                        </p>
+                        </button>
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                      <MacActionBtn
-                        icon={Pencil}
-                        tone="gray"
-                        title={t('projectDocs.renameChecklist')}
-                        onClick={() =>
-                          setChecklistItemModal({
-                            mode: 'rename',
-                            key: item.key,
-                            label: item.label,
-                            required: item.required,
-                            custom: item.custom,
-                          })
-                        }
-                      />
-                      {item.custom && (
-                        <MacActionBtn
-                          icon={Trash2}
-                          tone="red"
-                          title={t('projectDocs.removeChecklist')}
-                          onClick={() => removeCustomChecklistItem(item.key)}
-                        />
-                      )}
                       {item.document && renderDocFileActions(item.document, item.state)}
-                      <DocumentFileActions
-                        labelClassName="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50"
-                        disabled={docUploading}
-                        onChange={(e) => onDocUpload(e, item.key)}
-                      >
-                        <Upload size={12} />
-                        {uploadingThis
-                          ? t('auth.sending')
-                          : item.document
-                            ? t('projectDocs.replace')
-                            : t('projectDocs.deposit')}
-                      </DocumentFileActions>
+                      {!item.document && (
+                        <DocumentFileActions
+                          labelClassName="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium bg-white border border-gic-border cursor-pointer hover:bg-gray-50"
+                          disabled={docUploading}
+                          onChange={(e) => onDocUpload(e, item.key)}
+                        >
+                          <Upload size={12} />
+                          {uploadingThis ? t('auth.sending') : t('projectDocs.deposit')}
+                        </DocumentFileActions>
+                      )}
+                    </div>
                     </div>
                   </li>
                 );
@@ -1515,7 +1488,13 @@ export default function ProjectDetailPage() {
                   return (
                     <li key={d.id} className="flex flex-wrap items-center gap-2 text-[12px] rounded-xl bg-gray-50 px-3 py-2">
                       <FileText size={14} className="text-gic-violet shrink-0" />
-                      <span className="font-medium truncate flex-1 min-w-[120px]">{d.name}</span>
+                      <button
+                        type="button"
+                        className="font-medium truncate flex-1 min-w-[120px] text-left hover:text-gic-ink"
+                        onClick={() => requestPdfPreview(fileUrl(d.path))}
+                      >
+                        {d.name}
+                      </button>
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${docStateClass(state)}`}>
                         {docStateLabel(t, state)}
                       </span>
@@ -1597,7 +1576,28 @@ export default function ProjectDetailPage() {
             required
             autoFocus
           />
+          <Input
+            label={t('fields.expirationDate')}
+            type="date"
+            value={renameDoc?.expiresAt || ''}
+            onChange={(e) => setRenameDoc((prev) => (prev ? { ...prev, expiresAt: e.target.value } : prev))}
+          />
         </form>
+      </Modal>
+
+      <Modal
+        open={!!pendingDoc}
+        title={t('actions.addDocument')}
+        onClose={() => setPendingDoc(null)}
+        footer={(
+          <>
+            <Btn variant="secondary" onClick={() => setPendingDoc(null)}>{t('common.cancel')}</Btn>
+            <Btn onClick={() => { savePendingDoc().catch(() => {}); }} disabled={docUploading}>{t('common.save')}</Btn>
+          </>
+        )}
+      >
+        <p className="mb-3 text-[12px] text-gic-ink">{pendingDoc?.file.name}</p>
+        <Input label={t('fields.expirationDate')} type="date" value={pendingExpiry} onChange={(e) => setPendingExpiry(e.target.value)} />
       </Modal>
 
       <Modal

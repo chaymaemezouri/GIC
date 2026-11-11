@@ -3,6 +3,7 @@ import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoFi
 import { Input, Select, Textarea } from './ui';
 import { SALARY_PERIOD_LABELS, SALARY_PERIODS, salaryPeriodUnitLabel } from '../lib/staffSalaryPeriod';
 import { MAROC_BANKS } from '../lib/marocBanks';
+import { clampRib } from '../lib/rib';
 
 
 
@@ -77,6 +78,20 @@ export const JOB_TITLES = [
   'Responsable RH',
 
   'Informaticien',
+
+  'Administrateur',
+
+  'Responsable',
+
+  'TSL',
+
+  'Technicien',
+
+  'Chef d\'équipe',
+
+  'Directeur',
+
+  'Chef de département',
 
   'Autre',
 
@@ -208,7 +223,7 @@ export function staffToForm(u: Record<string, unknown>): InternalStaffFormData {
 
     bankName: String(u.bankName || ''),
 
-    rib: String(u.rib || u.bankAccount || ''),
+    rib: clampRib(String(u.rib || u.bankAccount || '')),
 
     emergencyContact: String(u.emergencyContact || ''),
 
@@ -297,9 +312,9 @@ export function InternalStaffFormFields({
       </Select>
 
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide">{t('fields.sectionContact')}</p>
-      <Input label={t('fields.cin')} value={form.cin} onChange={(e) => setForm({ ...form, cin: e.target.value })} />
+      <Input label={`${t('fields.cin')} *`} required value={form.cin} onChange={(e) => setForm({ ...form, cin: e.target.value })} />
       <Input label={t('fields.birthDate')} type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
-      <Input label={t('fields.phone')} value={form.phone1} onChange={(e) => setForm({ ...form, phone1: e.target.value })} />
+      <Input label={`${t('fields.phone1')} *`} required value={form.phone1} onChange={(e) => setForm({ ...form, phone1: e.target.value })} />
       <Input label={t('fields.phone2')} value={form.phone2} onChange={(e) => setForm({ ...form, phone2: e.target.value })} />
       <Input label={t('fields.emergencyContact')} value={form.emergencyContact} onChange={(e) => setForm({ ...form, emergencyContact: e.target.value })} className="sm:col-span-2" />
       <Textarea label={t('fields.address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} rows={2} className="sm:col-span-2" />
@@ -308,6 +323,9 @@ export function InternalStaffFormFields({
       <Select label={t('fields.function')} value={form.jobTitle} onChange={(e) => setForm({ ...form, jobTitle: e.target.value })}>
         <option value="">—</option>
         {JOB_TITLES.map((title) => <option key={title} value={title}>{title}</option>)}
+        {form.jobTitle && !(JOB_TITLES as readonly string[]).includes(form.jobTitle) && (
+          <option value={form.jobTitle}>{form.jobTitle}</option>
+        )}
       </Select>
       <Select label={t('fields.service')} value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
         <option value="">—</option>
@@ -351,7 +369,7 @@ export function InternalStaffFormFields({
           <option value={form.bankName}>{form.bankName}</option>
         )}
       </Select>
-      <Input label={`${t('fields.rib')} *`} required value={form.rib} onChange={(e) => setForm({ ...form, rib: e.target.value })} placeholder={t('fields.ribDigitsPlaceholder')} />
+      <Input label={`${t('fields.rib')} *`} required value={form.rib} inputMode="numeric" onChange={(e) => setForm({ ...form, rib: clampRib(e.target.value) })} placeholder={t('fields.ribDigitsPlaceholder')} />
       <Textarea label={t('fields.hrRemark')} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} rows={2} className="sm:col-span-2" />
     </div>
   );

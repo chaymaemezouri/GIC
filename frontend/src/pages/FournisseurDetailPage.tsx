@@ -1,5 +1,6 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { PrintChoiceModal } from '../components/PrintChoiceModal';
+import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlocks';
+import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Pencil, Trash2, History, Key, Printer, ShoppingCart, Truck, Plus, Mail, Phone, Upload, FileText, Hash, Calendar, MapPin, Building2, CreditCard, Info as InfoIcon, MessageCircle } from 'lucide-react';
@@ -45,7 +46,9 @@ export default function FournisseurDetailPage() {
   const navigate = useNavigate();
   const [supplier, setSupplier] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [printOpen, setPrintOpen] = useState(false);
   const [docBundle, setDocBundle] = useState<SupplierDocBundle>({ uploaded: [], generated: [], purchaseFiles: [] });
+  const [docReload, setDocReload] = useState(0);
   const [tab, setTab] = useState<Tab>('achats');
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
@@ -60,7 +63,7 @@ export default function FournisseurDetailPage() {
   const [families, setFamilies] = useState<any[]>([]);
   const [chantierTranches, setChantierTranches] = useState<{ id: string; name: string }[]>([]);
   const [form, setForm] = useState<SupplierFormData>({
-    companyName: '', contactName: '', phone1: '', phone2: '', email: '', cin: '', source: '',
+    companyName: '', contactName: '', phone1: '', phone2: '', email: '', cin: '', ice: '', source: '',
     address: '', bankName: '', rib: '', remark: '', isActive: 'true',
   });
 
@@ -120,6 +123,7 @@ export default function FournisseurDetailPage() {
           phone2: form.phone2 || null,
           email: form.email || null,
           cin: form.cin || null,
+          ice: form.ice || null,
           source: form.source || null,
           address: form.address || null,
           bankName: form.bankName || null,
@@ -131,7 +135,9 @@ export default function FournisseurDetailPage() {
       setEditOpen(false);
       load();
     } catch (err) {
-      await appAlert(err instanceof Error ? err.message : t('common.error'));
+      if (!(await alertCinDuplicate(err))) {
+        await appAlert(err instanceof Error ? err.message : t('common.error'));
+      }
     }
   }
 
@@ -163,27 +169,21 @@ export default function FournisseurDetailPage() {
 
   async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
     try {
       await uploadDocument(file, {
         name: file.name,
         category: 'admin',
-        entityType: 'Supplier',
+        entityType: 'supplier',
         entityId: id,
         supplierId: id,
       });
+      setDocReload((n) => n + 1);
       loadDocuments();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
-    } finally {
-      e.target.value = '';
     }
-  }
-
-  async function deleteDoc(docId: string) {
-    if (!await appConfirm(t('msg.confirmDeleteDocument'))) return;
-    await api(`/documents/${docId}`, { method: 'DELETE' });
-    loadDocuments();
   }
 
   function openPurchaseCreate() {
@@ -215,24 +215,11 @@ export default function FournisseurDetailPage() {
     }
   }
 
-  async function printFiche() {
+  function openPrint() {
     if (!supplier) return;
-
-    await printWithCompany({ title: `Fournisseur — ${supplier.companyName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Fournisseur ${supplier.companyName}</title></head><body style="font-family:sans-serif;padding:24px;font-size:12px">
-      <h1>Fiche fournisseur — GIC</h1>
-      <h2>${supplier.reference} — ${supplier.companyName}</h2>
-      <p><b>Contact :</b> ${supplier.contactName || '—'}</p>
-      <p><b>Téléphone :</b> ${supplier.phone1 || '—'} ${supplier.phone2 ? '/ ' + supplier.phone2 : ''}</p>
-      <p><b>Email :</b> ${supplier.email || '—'}</p>
-      <p><b>CIN :</b> ${supplier.cin || '—'}</p>
-      <p><b>Source :</b> ${supplier.source || '—'}</p>
-      <p><b>Adresse :</b> ${supplier.address || '—'}</p>
-      <p><b>Banque :</b> ${supplier.bankName || '—'} — RIB ${supplier.rib || '—'}</p>
-      <p><b>Statut :</b> ${supplier.isActive ? 'Actif' : 'Inactif'}</p>
-      <p><b>Portail :</b> ${supplier.hasPortal ? 'Activé' : 'Non configuré'}</p>
-      <h3>Achats (${supplier.purchases?.length || 0})</h3>
-      <ul>${(supplier.purchases || []).map((p: any) => `<li>${p.reference} — ${p.designation} — ${p.totalPrice} MAD</li>`).join('')}</ul>
-    </body></html>`, { grid: true }) });
+    loadHistory();
+    loadDocuments();
+    setPrintOpen(true);
   }
 
   if (!supplier && !error) return <p className="text-[12px] text-gic-muted p-6">{t('common.loading')}</p>;
@@ -294,7 +281,7 @@ export default function FournisseurDetailPage() {
               {supplier.hasPortal ? t('actions.renewPortal') : t('actions.activatePortal')}
             </Btn>
           )}
-          <Btn variant="secondary" icon={Printer} onClick={printFiche}>{t('common.print')}</Btn>
+          <Btn variant="secondary" icon={Printer} onClick={openPrint}>{t('common.print')}</Btn>
           <div className="mac-action-group ml-0.5">
             <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={openEdit} />
             <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => { setDeleteOpen(true); setDeleteMotif(''); }} />
@@ -339,6 +326,7 @@ export default function FournisseurDetailPage() {
             <Info icon={Phone} label={t('fields.phone1')} value={supplier.phone1 || '—'} link={supplier.phone1 ? `tel:${supplier.phone1}` : undefined} />
             <Info icon={Phone} label={t('fields.phone2')} value={supplier.phone2 || '—'} link={supplier.phone2 ? `tel:${supplier.phone2}` : undefined} />
             <Info icon={Hash} label={t('fields.cin')} value={supplier.cin || '—'} />
+            <Info icon={Hash} label={t('fields.ice')} value={supplier.ice || '—'} />
             <Info icon={Building2} label={t('fields.source')} value={supplier.source || '—'} />
             <Info icon={CreditCard} label={t('fields.bank')} value={supplier.bankName || '—'} />
             <Info icon={CreditCard} label={t('fields.rib')} value={supplier.rib || '—'} />
@@ -405,17 +393,16 @@ export default function FournisseurDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-5 mt-1">
-            {id && <EntityDocChecklist entityType="supplier" entityId={id} extra={{ supplierId: id }} />}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[12px] text-gic-muted">{t('msg.documentsSupplierHint')}</p>
-              <DocumentFileActions
-                labelClassName="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium bg-white shadow-[var(--shadow-panel)] text-gic-ink hover:bg-black/[0.02] border border-transparent cursor-pointer"
-                onChange={onUploadDoc}
-              >
-                <Upload size={14} strokeWidth={2} />
-                {t('actions.addDocument')}
-              </DocumentFileActions>
-            </div>
+            {id && (
+              <EntityDocChecklist
+                entityType="supplier"
+                entityId={id}
+                extra={{ supplierId: id }}
+                reloadToken={docReload}
+                onChanged={loadDocuments}
+              />
+            )}
+            <p className="text-[12px] text-gic-muted">{t('msg.documentsSupplierHint')}</p>
 
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-gic-muted mb-2">{t('actions.generateDocument')}</p>
@@ -427,24 +414,6 @@ export default function FournisseurDetailPage() {
                 ))}
               </div>
             </div>
-
-            {docBundle.uploaded.length > 0 && (
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-gic-muted mb-2">{t('detail.importedDocs')}</p>
-                <div className="space-y-2">
-                  {docBundle.uploaded.map((d) => (
-                    <DocRow
-                      key={d.id}
-                      name={d.name}
-                      meta={d.category || 'Document'}
-                      date={d.createdAt}
-                      href={d.path}
-                      onDelete={() => deleteDoc(d.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
 
             {docBundle.purchaseFiles.length > 0 && (
               <div>
@@ -575,8 +544,85 @@ export default function FournisseurDetailPage() {
         <p className="text-[12px] text-gic-muted mb-3">{t('msg.supplierDeleteBlocked')}</p>
         <textarea className="w-full h-24 rounded-xl border border-gic-border p-3 text-[12px]" placeholder={t('msg.motifShortPlaceholder')} value={deleteMotif} onChange={(e) => setDeleteMotif(e.target.value)} />
       </Modal>
+      <PrintChoiceModal
+        open={printOpen}
+        title={supplier.companyName}
+        sections={supplierPrintSections()}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   );
+
+  function supplierPrintSections(): PrintSection[] {
+    if (!supplier) return [];
+    const yesNo = (value: unknown) => (value ? t('common.yes') : t('common.no'));
+    const when = (value: unknown) => (value ? formatDate(value as string) : '—');
+    const lines = (count: number) => t('msg.printLines', { count });
+    const empty = t('msg.noData');
+    const purchases = supplier.purchases || [];
+    const docs = [
+      ...(docBundle.uploaded || []),
+      ...(docBundle.generated || []),
+      ...(docBundle.purchaseFiles || []),
+    ];
+    return [
+      {
+        id: 'infos',
+        label: t('tabs.informations'),
+        hint: t('msg.printAllFields'),
+        html: printFieldGrid([
+          [t('fields.reference'), supplier.reference],
+          [t('columns.companyName'), supplier.companyName],
+          [t('columns.contact'), supplier.contactName],
+          [t('fields.phone1'), supplier.phone1],
+          [t('fields.phone2'), supplier.phone2],
+          [t('fields.email'), supplier.email],
+          [t('fields.cin'), supplier.cin],
+          [t('fields.ice'), supplier.ice],
+          [t('fields.address'), supplier.address],
+          [t('fields.source'), supplier.source],
+          [t('fields.bank'), supplier.bankName],
+          [t('fields.rib'), supplier.rib],
+          [t('fields.remark'), supplier.remark],
+          [t('fields.status'), supplier.isActive ? t('status.active') : t('status.inactive')],
+          [t('columns.portal'), supplier.hasPortal ? t('status.active') : t('common.no')],
+          [t('status.active'), yesNo(supplier.isActive)],
+          [t('fields.createdAt'), when(supplier.createdAt)],
+          [t('fields.updatedAt'), when(supplier.updatedAt)],
+        ]),
+      },
+      {
+        id: 'achats',
+        label: t('tabs.purchases'),
+        hint: lines(purchases.length),
+        html: printTable(
+          [t('columns.ref'), t('columns.date'), t('columns.designation'), t('columns.chantier'), t('columns.amount'), t('columns.status')],
+          purchases.map((p: any) => [p.reference, when(p.date), p.designation, p.chantier?.name, formatMad(p.totalPrice), p.status]),
+          empty,
+        ),
+      },
+      {
+        id: 'documents',
+        label: t('tabs.documents'),
+        hint: lines(docs.length),
+        html: printTable(
+          [t('columns.name'), t('columns.category'), t('columns.date')],
+          docs.map((d: any) => [d.name || d.docType || d.reference, d.category, when(d.createdAt)]),
+          empty,
+        ),
+      },
+      {
+        id: 'historique',
+        label: t('tabs.history'),
+        hint: lines(history.length),
+        html: printTable(
+          [t('columns.date'), t('columns.action'), t('columns.details'), t('columns.user')],
+          history.map((h) => [when(h.createdAt), h.action, h.details, h.user ? `${h.user.firstName || ''} ${h.user.lastName || ''}`.trim() : '']),
+          empty,
+        ),
+      },
+    ];
+  }
 }
 
 function Info({

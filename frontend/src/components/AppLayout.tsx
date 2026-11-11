@@ -5,6 +5,7 @@ import {
 import UserAvatar from './UserAvatar';
 import { useAuth } from '../context/AuthContext';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { canAccessRoute, filterByRole, roleLabel } from '../lib/permissions';
 import RoleRoute from './RoleRoute';
 import PageErrorBoundary from './PageErrorBoundary';
@@ -69,6 +70,7 @@ function NavMenu({ group }: { group: NavGroup }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const location = useLocation();
   const GroupIcon = group.icon;
@@ -96,7 +98,9 @@ function NavMenu({ group }: { group: NavGroup }) {
     const updatePos = () => {
       const rect = btnRef.current!.getBoundingClientRect();
       const menuWidth = wide ? 480 : 240;
-      setMenuPos({ top: rect.bottom + 8, left: Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 12)) });
+      let left = rect.left;
+      if (left + menuWidth > window.innerWidth - 12) left = Math.max(12, rect.right - menuWidth);
+      setMenuPos({ top: rect.bottom + 8, left });
     };
     updatePos();
     window.addEventListener('scroll', updatePos, true);
@@ -105,11 +109,13 @@ function NavMenu({ group }: { group: NavGroup }) {
       window.removeEventListener('scroll', updatePos, true);
       window.removeEventListener('resize', updatePos);
     };
-  }, [open]);
+  }, [open, wide]);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
@@ -135,8 +141,9 @@ function NavMenu({ group }: { group: NavGroup }) {
         <span className="shell-nav-pill-text">{groupLabel}</span>
         <ChevronDown size={12} strokeWidth={2.25} className={`shell-nav-chevron${open ? ' rotate-180' : ''}`} />
       </button>
-      {open && (
+      {open && createPortal(
         <div
+          ref={menuRef}
           className="shell-nav-menu shell-nav-menu-fixed"
           role="menu"
           style={{ top: menuPos.top, left: menuPos.left }}
@@ -170,7 +177,8 @@ function NavMenu({ group }: { group: NavGroup }) {
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -335,6 +343,9 @@ export default function AppLayout() {
               <Link to="/" className="shell-mobile-header-title">
                 GIC
               </Link>
+              <div className="shell-header-search">
+                <GlobalSearch />
+              </div>
             </div>
             <div className="shell-header-center shell-header-center-desktop">
               <nav className="shell-nav-cluster" aria-label={t('nav.modules')}>
@@ -344,6 +355,9 @@ export default function AppLayout() {
                   <NavMenu key={g.id} group={g} />
                 ))}
               </nav>
+            </div>
+
+            <div className="shell-header-end">
               <div className="shell-nav-actions-wrap">
                 {directLinks.map((item) => (
                   <NavDirectLink key={item.to} item={item} accent />
@@ -352,9 +366,6 @@ export default function AppLayout() {
                   <NewMenu groups={createGroups} variant="navbar" />
                 </div>
               </div>
-            </div>
-
-            <div className="shell-header-end">
               <div className="shell-tools">
                 <NotificationsDropdown />
               </div>

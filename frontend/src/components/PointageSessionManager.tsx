@@ -82,10 +82,6 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function isFutureIso(value: string) {
-  return value > todayIso();
-}
-
 function clampDays(raw: string) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return '0';
@@ -106,9 +102,9 @@ function mondayPad(y: number, m: number) {
   return dow === 0 ? 6 : dow - 1;
 }
 
-type DayTone = 'ok' | 'partial' | 'miss' | 'future';
+type DayTone = 'ok' | 'partial' | 'miss';
 
-function sessionDayTone(daySessions: SessionSummary[]): Exclude<DayTone, 'future'> {
+function sessionDayTone(daySessions: SessionSummary[]): DayTone {
   const pointed = daySessions.filter((s) => s.linesCount > 0);
   if (!pointed.length) return 'miss';
   if (pointed.every((s) => s.validatedCount >= s.linesCount)) return 'ok';
@@ -348,7 +344,7 @@ export default function PointageSessionManager({
   const hasUnsaved = pendingIds.length > 0 || Object.keys(drafts).length > 0;
 
   async function fillAssigned(date: string) {
-    if (!chantierId || !date || isFutureIso(date)) return null;
+    if (!chantierId || !date) return null;
     const body: Record<string, unknown> = { chantierId, date };
     if (tranche === '__whole') body.tranche = '';
     else if (tranche) body.tranche = tranche;
@@ -365,10 +361,6 @@ export default function PointageSessionManager({
     if (!id || id === currentId) return;
     if (hasUnsaved && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) return;
     const session = sessions.find((row) => row.id === id);
-    if (session && isFutureIso(isoDay(session.date))) {
-      await appAlert(t('pointageMgmt.cannotPointFuture'));
-      return;
-    }
     if (session) {
       try {
         const filled = await fillAssigned(isoDay(session.date));
@@ -402,16 +394,11 @@ export default function PointageSessionManager({
   }, [visibleSessions]);
 
   function toneForIso(iso: string): DayTone {
-    if (iso > todayIso()) return 'future';
     return sessionDayTone(sessionsByDay.get(iso) || []);
   }
 
   async function jumpToDate(value: string) {
     if (!value) return;
-    if (isFutureIso(value)) {
-      await appAlert(t('pointageMgmt.cannotPointFuture'));
-      return;
-    }
     if (hasUnsaved && detail && isoDay(detail.date) !== value && !(await appConfirm(t('pointageMgmt.unsavedConfirm')))) {
       return;
     }
@@ -540,10 +527,6 @@ export default function PointageSessionManager({
     e.stopPropagation();
     if (!chantierId) return;
     setNewError('');
-    if (isFutureIso(newForm.date)) {
-      setNewError(t('pointageMgmt.cannotPointFuture'));
-      return;
-    }
     setBusy(true);
     try {
       const created = await api<SessionDetail>('/chantiers/pointage/sessions', {
@@ -928,11 +911,7 @@ export default function PointageSessionManager({
                       cell.iso === today ? 'is-today' : '',
                       cell.iso === selectedIso ? 'is-selected' : '',
                     ].filter(Boolean).join(' ')}
-                    onClick={() => {
-                      if (tone === 'future') return;
-                      void jumpToDate(cell.iso!);
-                    }}
-                    disabled={tone === 'future'}
+                    onClick={() => { void jumpToDate(cell.iso!); }}
                     aria-label={cell.iso}
                     aria-current={cell.iso === selectedIso ? 'date' : undefined}
                   >
@@ -1270,7 +1249,6 @@ export default function PointageSessionManager({
             label={`${t('common.date')} *`}
             type="date"
             required
-            max={todayIso()}
             value={newForm.date}
             onChange={(e) => { setNewForm({ ...newForm, date: e.target.value }); setNewError(''); }}
           />

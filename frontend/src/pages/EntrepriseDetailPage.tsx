@@ -4,7 +4,7 @@ import { Building2, Hash, Mail, MapPin, Pencil, Phone, Trash2, Wallet } from 'lu
 import { api, formatMad } from '../lib/api';
 import { appAlert, appConfirm } from '../lib/dialog';
 import {
-  Btn, Card, Input, KpiCard, MacActionBtn, Modal, PageBackLink, TableWrap, Td, Textarea, Th,
+  Btn, Card, Input, KpiCard, MacActionBtn, Modal, PageBackLink, Select, TableWrap, Td, Textarea, Th,
 } from '../components/ui';
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import {
@@ -12,6 +12,8 @@ import {
   type StFollow, type Subcontractor,
 } from '../components/ChantierExtraPanels';
 import { useI18n } from '../i18n/I18nContext';
+import { MAROC_BANKS } from '../lib/marocBanks';
+import { clampRib } from '../lib/rib';
 
 type EntrepriseDetail = {
   id: string;
@@ -21,13 +23,15 @@ type EntrepriseDetail = {
   email?: string | null;
   address?: string | null;
   ice?: string | null;
+  bankName?: string | null;
+  rib?: string | null;
   remark?: string | null;
   isActive?: boolean;
   subcontractors?: Subcontractor[];
   totals?: { count: number; amount: number; paid: number; remaining: number; sites?: number };
 };
 
-const emptyForm = () => ({ companyName: '', phone: '', email: '', address: '', ice: '', remark: '' });
+const emptyForm = () => ({ companyName: '', phone: '', email: '', address: '', ice: '', bankName: '', rib: '', remark: '' });
 
 export default function EntrepriseDetailPage() {
   const { t } = useI18n();
@@ -206,6 +210,8 @@ export default function EntrepriseDetailPage() {
                   email: item.email || '',
                   address: item.address || '',
                   ice: item.ice || '',
+                  bankName: item.bankName || '',
+                  rib: clampRib(item.rib || ''),
                   remark: item.remark || '',
                 });
                 setEditOpen(true);
@@ -243,6 +249,8 @@ export default function EntrepriseDetailPage() {
             <div><p className="text-gic-muted">{t('columns.reference')}</p><p className="font-medium">{item.reference}</p></div>
             <div><p className="text-gic-muted">{t('fields.companyName')}</p><p className="font-medium">{item.companyName}</p></div>
             <div><p className="text-gic-muted">{t('fields.ice')}</p><p className="font-medium">{item.ice || '—'}</p></div>
+            <div><p className="text-gic-muted">{t('fields.bank')}</p><p className="font-medium">{item.bankName || '—'}</p></div>
+            <div><p className="text-gic-muted">{t('fields.rib')}</p><p className="font-medium">{item.rib || '—'}</p></div>
             <div><p className="text-gic-muted">{t('fields.phone')}</p><p className="font-medium">{item.phone || '—'}</p></div>
             <div><p className="text-gic-muted">{t('fields.email')}</p><p className="font-medium">{item.email || '—'}</p></div>
             <div className="sm:col-span-2"><p className="text-gic-muted">{t('fields.address')}</p><p className="font-medium">{item.address || '—'}</p></div>
@@ -367,9 +375,15 @@ export default function EntrepriseDetailPage() {
       >
         <form id="ent-edit-form" onSubmit={save} className="grid gap-3">
           <Input label={t('fields.companyRequired')} required value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
-          <Input label={t('fields.phone')} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <Input label={`${t('fields.phone')} *`} required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           <Input label={t('fields.email')} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           <Input label={t('fields.ice')} value={form.ice} onChange={(e) => setForm({ ...form, ice: e.target.value })} />
+          <Select label={t('fields.bank')} value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })}>
+            <option value="">{t('fields.chooseBank')}</option>
+            {MAROC_BANKS.map((bank) => <option key={bank} value={bank}>{bank}</option>)}
+            {form.bankName && !(MAROC_BANKS as readonly string[]).includes(form.bankName) && <option value={form.bankName}>{form.bankName}</option>}
+          </Select>
+          <Input label={t('fields.rib')} value={form.rib} inputMode="numeric" placeholder={t('fields.ribDigitsPlaceholder')} onChange={(e) => setForm({ ...form, rib: clampRib(e.target.value) })} />
           <Input label={t('fields.address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           <Textarea label={t('fields.remark')} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
         </form>

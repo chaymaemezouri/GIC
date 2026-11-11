@@ -2,7 +2,7 @@ import { appAlert, appConfirm } from '../lib/dialog';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  Pencil, Trash2, Printer, History, FileText, CheckCircle, RotateCcw, ShoppingCart, Hash, Calendar, Truck, GitBranch,
+  Pencil, Trash2, Printer, History, FileText, Eye, CheckCircle, RotateCcw, ShoppingCart, Hash, Calendar, Truck, GitBranch,
   HardHat, Layers, Wallet, Info as InfoIcon, Package, Upload, Plus, User, UserCheck, Building2, Receipt, ClipboardCheck, BadgeCheck,
 } from 'lucide-react';
 import { api, fetchSupplierList, fetchChantierList, formatDate, formatMad, openPrintUrl, uploadForm } from '../lib/api';
@@ -11,6 +11,8 @@ import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
+import { requestPdfPreview } from '../components/PdfPreview';
+import { fileUrl } from '../lib/photoUrl';
 import { PurchaseFormFields, purchaseFormToBody, purchaseToForm, validatePurchaseForm, type PurchaseFormData } from '../components/PurchaseFormFields';
 import { PurchaseDeliveryPill, PurchasePaymentPill, PurchaseStatusPill } from '../components/PurchaseBadges';
 import { PurchaseReviewModal, type ChefDecision } from '../components/PurchaseReviewModal';
@@ -887,9 +889,12 @@ export default function AchatDetailPage() {
                       <Td mac className="text-[11px]">{formatDate(d.createdAt)}</Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions">
-                          <a href={d.path} target="_blank" rel="noreferrer" className="mac-action-btn mac-action-btn-blue" title={t('actions.open')}>
-                            <FileText size={14} strokeWidth={2.15} />
-                          </a>
+                          <MacActionBtn
+                            icon={Eye}
+                            tone="blue"
+                            title={t('common.view')}
+                            onClick={() => requestPdfPreview(fileUrl(d.path))}
+                          />
                           {!isArchived && <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDocument(d.id)} />}
                         </div>
                       </Td>

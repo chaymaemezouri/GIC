@@ -1,6 +1,12 @@
 import * as XLSX from 'xlsx';
 import { prisma } from './prisma.js';
 import { nextReference } from './references.js';
+import {
+  collapseName,
+  findProjectDuplicate,
+  type ImportDuplicate,
+  type SeenPerson,
+} from './importDuplicates.js';
 
 export type ProjectImportRow = {
   name: string;
@@ -21,19 +27,51 @@ export async function importProjectRows(rows: ProjectImportRow[]) {
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const duplicates: ImportDuplicate[] = [];
+  const seen = new Map<string, SeenPerson>();
 
-  for (const row of rows) {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const line = index + 2;
     const { name, ownershipType, city, address, description, remark, status } = row;
-    if (!name?.trim()) {
+    const trimmed = name?.trim();
+    if (!trimmed) {
       skipped++;
+      continue;
+    }
+    const replay = {
+      path: '/immobilier/projects',
+      body: {
+        name: trimmed,
+        ownershipType: ownershipType || 'personnel',
+        city: city?.trim() || null,
+        address: address?.trim() || null,
+        description: description?.trim() || null,
+        remark: remark?.trim() || null,
+        status: status?.trim() || 'actif',
+      },
+    };
+    const key = collapseName(trimmed);
+    const prior = seen.get(key);
+    const existing = prior || (await findProjectDuplicate(trimmed));
+    if (existing) {
+      skipped++;
+      duplicates.push({
+        line,
+        incomingName: trimmed,
+        matchKind: 'projectName',
+        matchValue: trimmed,
+        existing,
+        replay,
+      });
       continue;
     }
     try {
       const reference = await nextReference('PRJ');
-      await prisma.project.create({
+      const project = await prisma.project.create({
         data: {
           reference,
-          name: name.trim(),
+          name: trimmed,
           ownershipType: normalizeOwnershipType(ownershipType),
           city: city?.trim() || null,
           address: address?.trim() || null,
@@ -42,13 +80,21 @@ export async function importProjectRows(rows: ProjectImportRow[]) {
           status: status?.trim() || 'actif',
         },
       });
+      seen.set(key, {
+        id: project.id,
+        label: 'Projet',
+        name: project.name,
+        ref: project.reference,
+        deletePath: `/immobilier/projects/${project.id}`,
+      });
       created++;
     } catch (e) {
-      errors.push(`${name}: ${e instanceof Error ? e.message : 'erreur'}`);
+      skipped++;
+      errors.push(`${trimmed}: ${e instanceof Error ? e.message : 'erreur'}`);
     }
   }
 
-  return { created, skipped, errors };
+  return { created, skipped, errors, duplicates };
 }
 
 export function parseCsvProjectRows(csv: string): ProjectImportRow[] {

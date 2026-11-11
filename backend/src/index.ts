@@ -27,7 +27,9 @@ import { backfillPointageSessions, repairPointageSessionExclusions } from './lib
 import { migrateLegacyPurchases } from './lib/purchaseWorkflow.js';
 import { migrateEnginFleet } from './lib/enginCosts.js';
 import { prisma } from './lib/prisma.js';
+import { cinDuplicateResponse } from './lib/uniqueness.js';
 import { ensureWorkspaceColumns } from './lib/workspace.js';
+import { backfillOfficeCashFromPayments } from './lib/cashSync.js';
 
 const app = express();
 app.use(
@@ -100,6 +102,8 @@ app.use('/api/caisse-bureau', officeCashRoutes);
 app.use('/api', miscRoutes);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const duplicateCin = cinDuplicateResponse(err);
+  if (duplicateCin) return res.status(400).json(duplicateCin);
   console.error(err);
   res.status(500).json({ message: err.message || 'Erreur serveur' });
 });
@@ -108,9 +112,42 @@ process.on('unhandledRejection', (reason) => {
   console.error('unhandledRejection', reason);
 });
 
+const DELIVERY_COLUMNS = [
+  'ALTER TABLE "Agent" ADD COLUMN bankName TEXT',
+  'ALTER TABLE "Agent" ADD COLUMN rib TEXT',
+  'ALTER TABLE "Reconnu" ADD COLUMN bankName TEXT',
+  'ALTER TABLE "Reconnu" ADD COLUMN rib TEXT',
+  'ALTER TABLE "Entreprise" ADD COLUMN bankName TEXT',
+  'ALTER TABLE "Entreprise" ADD COLUMN rib TEXT',
+  'ALTER TABLE "Mandant" ADD COLUMN bankName TEXT',
+  'ALTER TABLE "Mandant" ADD COLUMN rib TEXT',
+  'ALTER TABLE "Client" ADD COLUMN bankName TEXT',
+  'ALTER TABLE "Client" ADD COLUMN rib TEXT',
+  'ALTER TABLE "Supplier" ADD COLUMN ice TEXT',
+  'ALTER TABLE "OfficeCashMovement" ADD COLUMN sourceType TEXT',
+  'ALTER TABLE "OfficeCashMovement" ADD COLUMN sourceId TEXT',
+  'ALTER TABLE "OfficeCashMovement" ADD COLUMN sourceParent TEXT',
+  'ALTER TABLE "InternalStaffSalaryRecord" ADD COLUMN paymentMode TEXT',
+];
+
+async function ensureDeliveryColumns(client: typeof prisma) {
+  for (const sql of DELIVERY_COLUMNS) {
+    try {
+      await client.$executeRawUnsafe(sql);
+    } catch {
+      /* colonne déjà présente */
+    }
+  }
+}
+
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {
   console.log(`GIC API prête sur http://localhost:${port}`);
+  prisma.$queryRawUnsafe('PRAGMA journal_mode=WAL')
+    .then(() => prisma.$queryRawUnsafe('PRAGMA synchronous=NORMAL'))
+    .then(() => prisma.$queryRawUnsafe('PRAGMA busy_timeout=8000'))
+    .catch((err) => console.error('SQLite', err));
+  ensureDeliveryColumns(prisma).catch((err) => console.error('Colonnes livraison', err));
   ensureWorkspaceColumns(prisma).catch((err) => console.error('Espaces de travail', err));
   repairPointageSessionExclusions()
     .catch((err) => console.error('Réparation exclusions pointage', err))
@@ -129,4 +166,9 @@ app.listen(port, () => {
       if (n) console.log(`Engins & Matériels : ${n} fiche(s) normalisée(s)`);
     })
     .catch((err) => console.error('Migration engins', err));
+  backfillOfficeCashFromPayments()
+    .then((n) => {
+      if (n) console.log(`Caisse : ${n} paiement(s) espèces repris`);
+    })
+    .catch((err) => console.error('Caisse espèces', err));
 });

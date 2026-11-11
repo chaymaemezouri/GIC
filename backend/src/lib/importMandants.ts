@@ -1,6 +1,9 @@
 import * as XLSX from 'xlsx';
 import { prisma } from './prisma.js';
 import { nextReference } from './references.js';
+import { cinOwnerLabel } from './uniqueness.js';
+import { rememberCin, takeCinDuplicate, type ImportDuplicate, type SeenPerson } from './importDuplicates.js';
+import { requiredCinPhoneError } from './requiredContact.js';
 
 export type MandantImportRow = {
   firstName: string;
@@ -15,23 +18,47 @@ export async function importMandantRows(rows: MandantImportRow[]) {
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const duplicates: ImportDuplicate[] = [];
+  const seen = new Map<string, SeenPerson>();
 
-  for (const row of rows) {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const line = index + 2;
     const { firstName, lastName, email, phone1, identityNumber, identityType } = row;
     if (!firstName || !lastName) {
       skipped++;
       continue;
     }
+    const contactError = requiredCinPhoneError({
+      cin: { value: identityNumber, required: true },
+      phone1: { value: phone1, required: true },
+    });
+    if (contactError) {
+      skipped++;
+      errors.push(`${firstName} ${lastName}: ${contactError}`);
+      continue;
+    }
+    const incomingName = `${firstName} ${lastName}`.trim();
+    const replay = {
+      path: '/mandants',
+      body: {
+        firstName,
+        lastName,
+        email: email || null,
+        phone1: phone1 || null,
+        identityNumber: identityNumber || null,
+        identityType: identityType || (identityNumber ? 'CIN' : null),
+      },
+    };
+    const duplicate = await takeCinDuplicate({ cin: identityNumber, incomingName, line, seen, replay });
+    if (duplicate) {
+      skipped++;
+      duplicates.push(duplicate);
+      continue;
+    }
     try {
-      if (identityNumber) {
-        const exists = await prisma.mandant.findFirst({ where: { identityNumber } });
-        if (exists) {
-          skipped++;
-          continue;
-        }
-      }
       const reference = await nextReference('MAN');
-      await prisma.mandant.create({
+      const mandant = await prisma.mandant.create({
         data: {
           reference,
           firstName,
@@ -42,13 +69,21 @@ export async function importMandantRows(rows: MandantImportRow[]) {
           identityType: identityType || (identityNumber ? 'CIN' : null),
         },
       });
+      rememberCin(seen, identityNumber, {
+        id: mandant.id,
+        label: cinOwnerLabel('mandant', null),
+        name: incomingName,
+        ref: mandant.reference,
+        deletePath: `/mandants/${mandant.id}`,
+      });
       created++;
     } catch (e) {
-      errors.push(`${firstName} ${lastName}: ${e instanceof Error ? e.message : 'erreur'}`);
+      skipped++;
+      errors.push(`${incomingName}: ${e instanceof Error ? e.message : 'erreur'}`);
     }
   }
 
-  return { created, skipped, errors };
+  return { created, skipped, errors, duplicates };
 }
 
 export function parseCsvMandantRows(csv: string): MandantImportRow[] {

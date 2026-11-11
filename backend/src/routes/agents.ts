@@ -12,6 +12,9 @@ import {
   parseCsvAgentRows,
   parseExcelAgentRows,
 } from '../lib/importAgents.js';
+import { requiredCinPhoneError } from '../lib/requiredContact.js';
+import { applyBankField, applyRibField } from '../lib/rib.js';
+import { entityTypeVariants } from '../lib/documentEntity.js';
 
 function buildAgentWhere(q: string, linked = '', active = '') {
   const linkedFilter =
@@ -159,11 +162,18 @@ router.post('/', async (req, res) => {
   if (!firstName || !lastName) {
     return res.status(400).json({ message: 'Prénom et nom obligatoires' });
   }
+  const contactError = requiredCinPhoneError({
+    phone1: { value: req.body.phone1, required: true },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
   const data = { ...req.body };
   delete data.id;
   delete data.reference;
   delete data._count;
   delete data.clients;
+  applyBankField(data);
+  const ribError = applyRibField(data);
+  if (ribError) return res.status(400).json({ message: ribError });
   data.reference = await nextReference('AGT');
   if (data.isActive === undefined) data.isActive = true;
 
@@ -191,7 +201,7 @@ router.get('/:id/history', async (req, res) => {
 router.get('/:id/documents', async (req, res) => {
   const agentId = String(req.params.id);
   const docs = await prisma.document.findMany({
-    where: { entityType: 'Agent', entityId: agentId },
+    where: { entityType: { in: entityTypeVariants('Agent') }, entityId: agentId },
     orderBy: { createdAt: 'desc' },
   });
   res.json(docs);
@@ -274,6 +284,13 @@ router.put('/:id', async (req, res) => {
   delete data._count;
   delete data.clients;
   delete data.stats;
+  applyBankField(data);
+  const ribError = applyRibField(data);
+  if (ribError) return res.status(400).json({ message: ribError });
+  const contactError = requiredCinPhoneError({
+    phone1: { value: data.phone1, required: 'phone1' in data },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
 
   const agent = await prisma.agent.update({ where: { id }, data });
   await audit(req, 'modification', 'Agent', agent.id, `${agent.reference || ''} ${agent.firstName} ${agent.lastName}`);

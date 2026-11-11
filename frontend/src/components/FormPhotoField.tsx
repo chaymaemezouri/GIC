@@ -3,6 +3,7 @@ import { Camera } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { uploadForm } from '../lib/api';
 import { photoSrc } from '../lib/photoUrl';
+import { ZoomImage } from './PhotoLightbox';
 
 export type PhotoFields = {
   photoFile: File | null;
@@ -57,7 +58,7 @@ export function FormPhotoField({
     <div className="sm:col-span-2 flex items-center gap-3 rounded-xl border border-dashed border-gic-border bg-[#f5f5f7] px-3 py-2">
       <div className="mac-detail-photo">
         {src ? (
-          <img src={src} alt="" />
+          <ZoomImage src={src} alt={t('fields.photo')} />
         ) : (
           <div className="mac-detail-photo-fallback">
             <Camera size={18} />

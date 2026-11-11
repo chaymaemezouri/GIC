@@ -18,6 +18,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { DocumentFileActions } from '../components/DocumentScanner';
 import { EntityDocChecklist } from '../components/EntityDocChecklist';
 import { photoSrc } from '../lib/photoUrl';
+import { ZoomImage } from '../components/PhotoLightbox';
 
 import {
   ChantierFormFields, chantierToForm, chantierDateError, emptyChantierForm, type ChantierFormData,
@@ -81,6 +82,7 @@ export default function ChantierDetailPage() {
   const [galleryUploading, setGalleryUploading] = useState(false);
   const [editCamera, setEditCamera] = useState<any>(null);
   const [docExpiresAt, setDocExpiresAt] = useState('');
+  const [docReload, setDocReload] = useState(0);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState<PurchaseFormData>(emptyPurchaseForm());
   const [suppliers, setSuppliers] = useState<{ id: string; reference: string; companyName: string }[]>([]);
@@ -340,6 +342,7 @@ export default function ChantierDetailPage() {
 
   async function onDocUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
     setDocUploading(true);
     try {
@@ -347,17 +350,17 @@ export default function ChantierDetailPage() {
         name: file.name,
         category: 'chantier',
         chantierId: id,
-        entityType: 'Chantier',
+        entityType: 'chantier',
         entityId: id,
         expiresAt: docExpiresAt || '',
       });
       setDocExpiresAt('');
+      setDocReload((n) => n + 1);
       load();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : t('msg.uploadError'));
     } finally {
       setDocUploading(false);
-      e.target.value = '';
     }
   }
 
@@ -540,8 +543,8 @@ export default function ChantierDetailPage() {
         <div className="mac-detail-hero-main">
           <div className="mac-detail-photo">
             {chantier.photo ? (
-              <img
-                src={photoSrc(chantier.photo)}
+              <ZoomImage
+                src={photoSrc(chantier.photo) || ''}
                 alt={chantier.name}
                 className="h-full w-full object-cover rounded-2xl"
                 onError={(e) => {
@@ -971,46 +974,14 @@ export default function ChantierDetailPage() {
 
         {tab === 'documents' && (
           <div className="mt-2 space-y-3">
-            {id && <EntityDocChecklist entityType="chantier" entityId={id} extra={{ chantierId: id }} />}
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <p className="text-[13px] font-medium text-gic-ink tracking-tight">{t('msg.siteDocumentsTitle')}</p>
-              <div className="flex flex-wrap items-end gap-2">
-                <Input label={t('fields.expiresOptional')} type="date" value={docExpiresAt} onChange={(e) => setDocExpiresAt(e.target.value)} className="!mb-0 w-40" />
-                <DocumentFileActions
-                  labelClassName="mac-upload-btn"
-                  onChange={onDocUpload}
-                  disabled={docUploading}
-                >
-                  <Upload size={14} />
-                  {docUploading ? t('auth.sending') : t('actions.deposit')}
-                </DocumentFileActions>
-              </div>
-            </div>
-            {documents.length === 0 ? (
-              <p className="py-6 text-[12px] text-gic-muted text-center">{t('msg.emptyDocuments')}</p>
-            ) : (
-              <div className="mac-section-card !p-0 overflow-hidden">
-                {documents.map((d: any) => (
-                  <div key={d.id} className="mac-row">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <FileText size={14} className="text-[#007aff] shrink-0" />
-                      <div className="min-w-0">
-                        <p className="mac-row-title truncate">{d.name}</p>
-                        <p className="mac-row-subtitle">
-                          {formatDate(d.createdAt)}
-                          {d.expiresAt ? t('msg.expiresOn', { date: formatDate(d.expiresAt) }) : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <a href={d.path} target="_blank" rel="noreferrer" className="mac-table-action inline-flex items-center gap-1">
-                        {t('actions.open')} <ExternalLink size={11} />
-                      </a>
-                      <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => removeDocument(d.id)} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {id && (
+              <EntityDocChecklist
+                entityType="chantier"
+                entityId={id}
+                extra={{ chantierId: id }}
+                reloadToken={docReload}
+                onChanged={load}
+              />
             )}
           </div>
         )}

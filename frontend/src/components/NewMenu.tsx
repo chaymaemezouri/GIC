@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, Plus } from 'lucide-react';
 import { Btn } from './ui';
@@ -57,6 +58,7 @@ export default function NewMenu({ groups, variant = 'dashboard', onOpenChange }:
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const navigate = useNavigate();
   const itemCount = groups.reduce((n, g) => n + g.items.length, 0);
@@ -75,7 +77,10 @@ export default function NewMenu({ groups, variant = 'dashboard', onOpenChange }:
     if (!open || variant !== 'navbar' || !btnRef.current) return;
     const updatePos = () => {
       const rect = btnRef.current!.getBoundingClientRect();
-      setMenuPos({ top: rect.bottom + 8, left: rect.left });
+      const menuWidth = 240;
+      let left = rect.left;
+      if (left + menuWidth > window.innerWidth - 12) left = Math.max(12, rect.right - menuWidth);
+      setMenuPos({ top: rect.bottom + 8, left });
     };
     updatePos();
     window.addEventListener('scroll', updatePos, true);
@@ -88,7 +93,9 @@ export default function NewMenu({ groups, variant = 'dashboard', onOpenChange }:
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setMenuOpen(false);
     }
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
@@ -116,14 +123,16 @@ export default function NewMenu({ groups, variant = 'dashboard', onOpenChange }:
           <span className="shell-nav-pill-text">{t('common.new')}</span>
           <ChevronDown size={12} strokeWidth={2.25} className={`shell-nav-chevron${open ? ' rotate-180' : ''}`} />
         </button>
-        {open && (
+        {open && createPortal(
           <div
+            ref={menuRef}
             className="shell-nav-menu shell-nav-menu-fixed shell-nav-menu-new"
             role="menu"
             style={{ top: menuPos.top, left: menuPos.left }}
           >
             <CreateMenuItems groups={groups} onPick={go} />
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     );

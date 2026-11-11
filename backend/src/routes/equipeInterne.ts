@@ -11,6 +11,11 @@ import { nextReference } from '../lib/references.js';
 import { staffDocHtml, computeStaffNet, monthLabel } from '../lib/staffPrint.js';
 import { getOrCreateCompanySettings } from '../lib/companySettings.js';
 import { syncStaffSalaryMovement } from '../lib/cashSync.js';
+import { ensureOfficeCashColumns } from '../lib/officeCashSync.js';
+import { parseRib } from '../lib/rib.js';
+import { assertUniqueCin, replyIfCinDuplicate } from '../lib/uniqueness.js';
+import { requiredCinPhoneError } from '../lib/requiredContact.js';
+import { entityTypeVariants } from '../lib/documentEntity.js';
 import {
   baseSalaryForPeriod,
   currentWeekOfMonth,
@@ -74,11 +79,11 @@ function parseOptionalDate(v: unknown) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function applyStaffFields(data: Record<string, unknown>, body: Record<string, unknown>) {
+function applyStaffFields(data: Record<string, unknown>, body: Record<string, unknown>): string | null {
   if (body.firstName != null) data.firstName = String(body.firstName).trim();
   if (body.lastName != null) data.lastName = String(body.lastName).trim();
   if (body.email !== undefined) data.email = body.email ? String(body.email).trim().toLowerCase() : null;
-  if (body.cin !== undefined) data.cin = body.cin ? String(body.cin).trim() : null;
+  if (body.cin !== undefined) data.cin = String(body.cin || '').trim() || null;
   if (body.birthDate !== undefined) data.birthDate = parseOptionalDate(body.birthDate);
   if (body.address !== undefined) data.address = body.address ? String(body.address).trim() : null;
   if (body.phone1 !== undefined) data.phone1 = body.phone1 ? String(body.phone1).trim() : null;
@@ -92,18 +97,16 @@ function applyStaffFields(data: Record<string, unknown>, body: Record<string, un
   if (body.declared !== undefined) data.declared = Boolean(body.declared);
   if (body.cnssNumber !== undefined) data.cnssNumber = body.cnssNumber ? String(body.cnssNumber).trim() : null;
   if (body.bankName !== undefined) data.bankName = body.bankName ? String(body.bankName).trim() : null;
-  if (body.rib !== undefined) {
-    const rib = body.rib ? String(body.rib).trim() : null;
-    data.rib = rib;
-    // Compat anciens écrans / exports
-    data.bankAccount = rib;
-  } else if (body.bankAccount !== undefined) {
-    data.bankAccount = body.bankAccount ? String(body.bankAccount).trim() : null;
-    if (data.rib === undefined) data.rib = data.bankAccount;
+  if (body.rib !== undefined || body.bankAccount !== undefined) {
+    const parsed = parseRib(body.rib !== undefined ? body.rib : body.bankAccount);
+    if (parsed.error) return parsed.error;
+    data.rib = parsed.rib;
+    data.bankAccount = parsed.rib;
   }
   if (body.emergencyContact !== undefined) data.emergencyContact = body.emergencyContact ? String(body.emergencyContact).trim() : null;
   if (body.remark !== undefined) data.remark = body.remark ? String(body.remark).trim() : null;
   if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
+  return null;
 }
 
 function buildStaffWhere(q: string, active: string, department: string) {
@@ -621,7 +624,13 @@ router.post('/salaires/:staffId/pay', requireRole(...STAFF_ROLES), async (req, r
     include: { staff: { select: { firstName: true, lastName: true } } },
   });
 
-  await syncStaffSalaryMovement(updated, req);
+  await ensureOfficeCashColumns();
+  await prisma.$executeRawUnsafe(
+    `UPDATE InternalStaffSalaryRecord SET paymentMode = ? WHERE id = ?`,
+    paymentMode,
+    updated.id,
+  );
+  await syncStaffSalaryMovement(updated, req, paymentMode);
   await audit(req, 'paie', 'InternalStaff', staffId, `${staff.firstName} ${staff.lastName} — ${periodMonth}/${periodYear}`);
 
   res.json({
@@ -672,9 +681,21 @@ router.post('/', requireRole(...STAFF_ROLES), async (req, res) => {
   const data: Record<string, unknown> = {
     firstName: String(firstName).trim(),
     lastName: String(lastName).trim(),
-    reference: await nextReference('COL'),
   };
-  applyStaffFields(data, req.body);
+  const ribError = applyStaffFields(data, req.body);
+  if (ribError) return res.status(400).json({ message: ribError });
+  const contactError = requiredCinPhoneError({
+    cin: { value: data.cin, required: true },
+    phone1: { value: data.phone1, required: true },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  try {
+    await assertUniqueCin('staff', data.cin == null ? null : String(data.cin));
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
+  }
+  data.reference = await nextReference('COL');
   const staff = await prisma.internalStaff.create({ data: data as never, select: staffSelect });
   await audit(req, 'création', 'InternalStaff', staff.id, `${staff.firstName} ${staff.lastName}`);
   res.status(201).json(staff);
@@ -750,7 +771,7 @@ router.get('/:id/documents', requireRole(...STAFF_ROLES), async (req, res) => {
   if (!staff) return res.status(404).json({ message: 'Collaborateur introuvable' });
   const [uploaded, generated] = await Promise.all([
     prisma.document.findMany({
-      where: { entityType: 'InternalStaff', entityId: staffId },
+      where: { entityType: { in: entityTypeVariants('InternalStaff') }, entityId: staffId },
       orderBy: { createdAt: 'desc' },
     }),
     prisma.internalStaffDocument.findMany({ where: { staffId }, orderBy: { createdAt: 'desc' } }),
@@ -966,7 +987,19 @@ router.put('/:id', requireRole(...STAFF_ROLES), async (req, res) => {
   if (!target) return res.status(404).json({ message: 'Collaborateur introuvable' });
 
   const data: Record<string, unknown> = {};
-  applyStaffFields(data, req.body);
+  const ribError = applyStaffFields(data, req.body);
+  if (ribError) return res.status(400).json({ message: ribError });
+  const contactError = requiredCinPhoneError({
+    cin: { value: data.cin, required: 'cin' in (req.body || {}) },
+    phone1: { value: data.phone1, required: 'phone1' in (req.body || {}) },
+  });
+  if (contactError) return res.status(400).json({ message: contactError });
+  try {
+    if (data.cin !== undefined) await assertUniqueCin('staff', data.cin == null ? null : String(data.cin), id);
+  } catch (err) {
+    if (replyIfCinDuplicate(res, err)) return;
+    throw err;
+  }
   if (!target.reference) data.reference = await nextReference('COL');
 
   const staff = await prisma.internalStaff.update({

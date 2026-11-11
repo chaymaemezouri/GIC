@@ -55,6 +55,14 @@ const MAROC_BANKS = [
   'Al Barid Bank',
   'Saham Bank',
   'CFG Bank',
+  'Bank Al Yousr',
+  'Al Akhdar Bank',
+  'Bank Assafa',
+  'Umnia Bank',
+  'Dar Al Amane',
+  'Najmah',
+  'Arreda',
+  'Al Karam',
 ] as const;
 
 const PROJECTS = [

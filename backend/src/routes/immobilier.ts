@@ -13,6 +13,7 @@ import {
 } from '../lib/importProjects.js';
 import { sendExcel } from '../lib/exportExcel.js';
 import { attachCoClients, decoratePropertyParties } from '../lib/dealParties.js';
+import { entityTypeVariants } from '../lib/documentEntity.js';
 
 function buildPropertyWhere(q: string, status: string, projectId: string) {
   return {
@@ -358,7 +359,7 @@ router.get('/projects/:id/documents', async (req, res) => {
     prisma.document.findMany({
       where: {
         OR: [
-          { entityType: 'Project', entityId: projectId },
+          { entityType: { in: entityTypeVariants('Project') }, entityId: projectId },
           { property: { projectId } },
         ],
       },

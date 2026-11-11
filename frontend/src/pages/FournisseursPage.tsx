@@ -1,5 +1,5 @@
 import { fetchAllRows, printRows } from '../lib/listPrint';
-import { appAlert } from '../lib/dialog';
+import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -169,6 +169,7 @@ export default function FournisseursPage() {
       phone2: f.phone2 || null,
       email: f.email || null,
       cin: f.cin || null,
+      ice: f.ice || null,
       source: f.source || null,
       address: f.address || null,
       bankName: f.bankName || null,
@@ -192,6 +193,7 @@ export default function FournisseursPage() {
       load(page);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+      await alertCinDuplicate(err);
     }
   }
 

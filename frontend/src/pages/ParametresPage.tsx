@@ -813,7 +813,7 @@ export default function ParametresPage() {
               <form onSubmit={saveProfile} className="grid sm:grid-cols-2 gap-3">
                 <Input label={t('fields.firstNameRequired')} required value={profile.firstName} onChange={(e) => setProfile({ ...profile, firstName: e.target.value })} />
                 <Input label={t('fields.lastNameRequired')} required value={profile.lastName} onChange={(e) => setProfile({ ...profile, lastName: e.target.value })} />
-                <Input label={t('fields.username')} value={profile.username} onChange={(e) => setProfile({ ...profile, username: e.target.value })} placeholder={t('settings.optionalPlaceholder')} />
+                <Input label={t('fields.username')} data-keep-case value={profile.username} onChange={(e) => setProfile({ ...profile, username: e.target.value })} placeholder={t('settings.optionalPlaceholder')} />
                 <Input label={t('fields.emailReadOnly')} value={user?.email || ''} disabled />
                 <div className="sm:col-span-2">
                   <Btn type="submit" disabled={saving}>{saving ? t('auth.saving') : t('settings.saveProfile')}</Btn>

@@ -2,6 +2,7 @@ import { prisma } from './prisma.js';
 import type { Payment, Purchase, PurchasePayment, InternalStaffSalaryRecord, WorkforcePayrollRecord, Maintenance, FuelLog, EnginExpense } from '@prisma/client';
 import type { Request } from 'express';
 import { audit } from './audit.js';
+import { clearOfficeCashParent, ensureOfficeCashColumns, removeOfficeCash, syncOfficeCash } from './officeCashSync.js';
 
 export const MOVEMENT_TAGS = {
   ENCAISSEMENT: 'GIC_ENCAISSEMENT:',
@@ -131,6 +132,8 @@ export async function removeAutomaticMovement(sourceType: CashSourceType, source
   if (existing) {
     await prisma.cashMovement.delete({ where: { id: existing.id } });
   }
+  await removeOfficeCash(sourceType, sourceId);
+  if (sourceType === 'main_oeuvre') await clearOfficeCashParent(sourceId);
 }
 
 export async function syncEncaissementMovement(
@@ -144,7 +147,7 @@ export async function syncEncaissementMovement(
     ? `Encaissement vente ${payment.sale?.reference || ''} — ${payment.receiptNo}`
     : `Encaissement location ${payment.rental?.reference || ''} — ${payment.receiptNo}`;
 
-  return upsertAutomaticMovement({
+  const movement = await upsertAutomaticMovement({
     sourceType: 'encaissement',
     sourceId: payment.id,
     date: payment.date,
@@ -156,6 +159,20 @@ export async function syncEncaissementMovement(
     proofFile: payment.proofFile,
     req,
   });
+  await syncOfficeCash({
+    sourceType: 'encaissement',
+    sourceId: payment.id,
+    workspaceId: payment.workspaceId,
+    mode: payment.operationType,
+    direction: 'entree',
+    amount: payment.amount,
+    date: payment.date,
+    designation: label,
+    purpose: 'alimentation',
+    remark: payment.payerName ? `Payeur: ${payment.payerName}` : payment.receiptNo,
+    createdBy: req?.user?.email || null,
+  });
+  return movement;
 }
 
 export async function syncPurchaseMovement(
@@ -185,7 +202,7 @@ const PURCHASE_PAYMENT_KIND_LABELS: Record<string, string> = {
 
 export async function syncPurchasePaymentMovement(
   payment: PurchasePayment,
-  purchase: Pick<Purchase, 'reference' | 'designation'> & { supplier?: { companyName: string } | null },
+  purchase: Pick<Purchase, 'reference' | 'designation' | 'chantierId'> & { supplier?: { companyName: string } | null },
   req?: Request,
 ) {
   if (payment.amount <= 0) {
@@ -194,17 +211,33 @@ export async function syncPurchasePaymentMovement(
   }
   const kind = PURCHASE_PAYMENT_KIND_LABELS[payment.kind] || 'Paiement';
   const supplierLabel = purchase.supplier?.companyName ? ` · ${purchase.supplier.companyName}` : '';
-  return upsertAutomaticMovement({
+  const designation = `${kind} achat ${purchase.reference} — ${purchase.designation}`;
+  const movement = await upsertAutomaticMovement({
     sourceType: 'achat_paiement',
     sourceId: payment.id,
     date: payment.date,
-    designation: `${kind} achat ${purchase.reference} — ${purchase.designation}`,
+    designation,
     mode: payment.mode,
     debit: payment.amount,
     credit: 0,
     remarkExtra: [purchase.reference + supplierLabel, payment.reference].filter(Boolean).join(' · '),
     req,
   });
+  await syncOfficeCash({
+    sourceType: 'achat_paiement',
+    sourceId: payment.id,
+    workspaceId: payment.workspaceId,
+    mode: payment.mode,
+    direction: 'sortie',
+    amount: payment.amount,
+    date: payment.date,
+    designation,
+    purpose: purchase.chantierId ? 'chantier' : 'aleatoire',
+    chantierId: purchase.chantierId,
+    remark: purchase.reference + supplierLabel,
+    createdBy: req?.user?.email || payment.createdBy || null,
+  });
+  return movement;
 }
 
 export async function syncWorkforcePayrollMovement(
@@ -223,7 +256,7 @@ export async function syncWorkforcePayrollMovement(
     : 'Ouvrier';
   const period = `${String(record.periodMonth).padStart(2, '0')}/${record.periodYear}`;
 
-  return upsertAutomaticMovement({
+  const movement = await upsertAutomaticMovement({
     sourceType: 'main_oeuvre',
     sourceId: record.id,
     date: record.paidAt || new Date(),
@@ -234,6 +267,66 @@ export async function syncWorkforcePayrollMovement(
     remarkExtra: record.reference || period,
     req,
   });
+  await syncWorkforceOfficeCash(record, name, period, req);
+  return movement;
+}
+
+async function syncWorkforceOfficeCash(
+  record: WorkforcePayrollRecord & {
+    workforce?: { firstName: string; lastName: string; reference?: string | null };
+  },
+  name: string,
+  period: string,
+  req?: Request,
+) {
+  await clearOfficeCashParent(record.id);
+  const payments = await prisma.workforcePayrollPayment.findMany({ where: { recordId: record.id } });
+  const siteId = record.chantierId || null;
+  if (!payments.length) {
+    await syncOfficeCash({
+      sourceType: 'main_oeuvre',
+      sourceId: record.id,
+      sourceParent: record.id,
+      workspaceId: record.workspaceId,
+      mode: record.paymentMode,
+      direction: 'sortie',
+      amount: record.amountPaid,
+      date: record.paidAt || new Date(),
+      designation: `Main-d'œuvre ${name} — ${period}`,
+      purpose: siteId ? 'chantier' : 'travail',
+      chantierId: siteId,
+      remark: record.reference || period,
+      createdBy: req?.user?.email || null,
+    });
+    return;
+  }
+  for (const payment of payments) {
+    await syncOfficeCash({
+      sourceType: 'main_oeuvre_ligne',
+      sourceId: payment.id,
+      sourceParent: record.id,
+      workspaceId: payment.workspaceId,
+      mode: payment.paymentMode,
+      direction: 'sortie',
+      amount: payment.amount,
+      date: payment.paidAt,
+      designation: `Main-d'œuvre ${name} — ${period}`,
+      purpose: siteId ? 'chantier' : 'travail',
+      chantierId: siteId,
+      remark: payment.remark || record.reference || period,
+      createdBy: req?.user?.email || null,
+    });
+  }
+}
+
+async function staffPaymentMode(recordId: string, mode?: string | null) {
+  await ensureOfficeCashColumns();
+  if (mode) return mode;
+  const rows = await prisma.$queryRawUnsafe<{ paymentMode: string | null }[]>(
+    `SELECT paymentMode FROM InternalStaffSalaryRecord WHERE id = ? LIMIT 1`,
+    recordId,
+  );
+  return rows[0]?.paymentMode || 'virement';
 }
 
 export async function syncStaffSalaryMovement(
@@ -241,30 +334,47 @@ export async function syncStaffSalaryMovement(
     staff?: { firstName: string; lastName: string };
   },
   req?: Request,
+  mode?: string | null,
 ) {
   if (record.status !== 'payé' || record.netSalary <= 0) {
     await removeAutomaticMovement('equipe_interne', record.id);
     return null;
   }
 
+  const paymentMode = await staffPaymentMode(record.id, mode);
   const name = record.staff ? `${record.staff.firstName} ${record.staff.lastName}` : 'Collaborateur';
   const period = `${String(record.periodMonth).padStart(2, '0')}/${record.periodYear}`;
   const periodDetail =
     record.periodWeek > 0
       ? `${period} (S${record.periodWeek})`
       : period;
+  const designation = `Salaire équipe interne ${name} — ${periodDetail}`;
 
-  return upsertAutomaticMovement({
+  const movement = await upsertAutomaticMovement({
     sourceType: 'equipe_interne',
     sourceId: record.id,
     date: record.paidAt || new Date(),
-    designation: `Salaire équipe interne ${name} — ${periodDetail}`,
-    mode: 'virement',
+    designation,
+    mode: paymentMode,
     debit: record.netSalary,
     credit: 0,
     remarkExtra: period,
     req,
   });
+  await syncOfficeCash({
+    sourceType: 'equipe_interne',
+    sourceId: record.id,
+    workspaceId: record.workspaceId,
+    mode: paymentMode,
+    direction: 'sortie',
+    amount: record.netSalary,
+    date: record.paidAt || new Date(),
+    designation,
+    purpose: 'travail',
+    remark: period,
+    createdBy: req?.user?.email || null,
+  });
+  return movement;
 }
 
 export async function syncMaintenanceMovement(
@@ -332,17 +442,109 @@ export async function syncEnginExpenseMovement(
   const enginLabel = expense.engin
     ? [expense.engin.code, expense.engin.designation || expense.engin.matricule].filter(Boolean).join(' ')
     : 'Engin';
-  return upsertAutomaticMovement({
+  const designation = `Dépense ${enginLabel} — ${expense.designation}`;
+  const movement = await upsertAutomaticMovement({
     sourceType: 'engin_depense',
     sourceId: expense.id,
     date: expense.date,
-    designation: `Dépense ${enginLabel} — ${expense.designation}`,
+    designation,
     mode: expense.paymentMode || 'especes',
     debit: expense.amount,
     credit: 0,
     remarkExtra: expense.supplier || expense.invoiceRef || undefined,
     req,
   });
+  await syncOfficeCash({
+    sourceType: 'engin_depense',
+    sourceId: expense.id,
+    workspaceId: expense.workspaceId,
+    mode: expense.paymentMode || 'especes',
+    direction: 'sortie',
+    amount: expense.amount,
+    date: expense.date,
+    designation,
+    purpose: expense.chantierId ? 'chantier' : 'aleatoire',
+    chantierId: expense.chantierId,
+    remark: expense.supplier || expense.invoiceRef || null,
+    createdBy: req?.user?.email || expense.createdBy || null,
+  });
+  return movement;
+}
+
+/** Reprend les paiements espèces déjà enregistrés pour qu'ils figurent en caisse. */
+export async function backfillOfficeCashFromPayments() {
+  await ensureOfficeCashColumns();
+  let count = 0;
+
+  const receipts = await prisma.payment.findMany({
+    where: { operationType: 'especes', amount: { gt: 0 } },
+    include: { sale: { select: { reference: true } }, rental: { select: { reference: true } } },
+  });
+  for (const payment of receipts) {
+    await syncEncaissementMovement(payment);
+    count += 1;
+  }
+
+  const purchasePayments = await prisma.purchasePayment.findMany({
+    where: { mode: 'especes', amount: { gt: 0 } },
+    include: { purchase: { include: { supplier: { select: { companyName: true } } } } },
+  });
+  for (const payment of purchasePayments) {
+    await syncPurchasePaymentMovement(payment, payment.purchase);
+    count += 1;
+  }
+
+  const payroll = await prisma.workforcePayrollRecord.findMany({
+    where: { amountPaid: { gt: 0 } },
+    include: { workforce: { select: { firstName: true, lastName: true, reference: true } } },
+  });
+  for (const record of payroll) await syncWorkforcePayrollMovement(record);
+
+  const subs = await prisma.subcontractorPayment.findMany({
+    where: { paymentMode: 'especes', amount: { gt: 0 } },
+    include: { subcontractor: { select: { companyName: true, chantierId: true } } },
+  });
+  for (const payment of subs) {
+    await syncOfficeCash({
+      sourceType: 'sous_traitance',
+      sourceId: payment.id,
+      workspaceId: payment.workspaceId,
+      mode: payment.paymentMode,
+      direction: 'sortie',
+      amount: payment.amount,
+      date: payment.date,
+      designation: `Sous-traitance ${payment.subcontractor.companyName}`,
+      purpose: 'chantier',
+      chantierId: payment.subcontractor.chantierId,
+      remark: payment.remark,
+    });
+    count += 1;
+  }
+
+  const expenses = await prisma.enginExpense.findMany({
+    where: { paymentMode: 'especes', amount: { gt: 0 } },
+    include: { engin: { select: { code: true, designation: true, matricule: true } } },
+  });
+  for (const expense of expenses) {
+    await syncEnginExpenseMovement(expense);
+    count += 1;
+  }
+
+  const staffIds = await prisma.$queryRawUnsafe<{ id: string }[]>(
+    `SELECT id FROM InternalStaffSalaryRecord WHERE status = 'payé' AND lower(ifnull(paymentMode, '')) = 'especes'`,
+  );
+  for (const row of staffIds) {
+    const record = await prisma.internalStaffSalaryRecord.findUnique({
+      where: { id: row.id },
+      include: { staff: { select: { firstName: true, lastName: true } } },
+    });
+    if (record) {
+      await syncStaffSalaryMovement(record, undefined, 'especes');
+      count += 1;
+    }
+  }
+
+  return count;
 }
 
 /** Legacy tag lookup for older movements without sourceType */

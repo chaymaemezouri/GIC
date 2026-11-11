@@ -5,6 +5,7 @@ import { api, fetchEnginList, fetchWorkforceList, formatDate } from '../lib/api'
 import { appAlert, appConfirm } from '../lib/dialog';
 import { CHAUFFEUR_CATEGORY, workforceDetailPathForCategory } from '../lib/workforceScope';
 import { photoSrc } from '../lib/photoUrl';
+import { ZoomImage } from './PhotoLightbox';
 import { Btn, Card, Input, KpiCard, MacActionBtn, MacDateInput, Modal, TableWrap, Td, Th } from './ui';
 import { EntityPickerPanel, enginToPickerItem, workforceToPickerItem, type EntityPickerItem } from './EntityPickerPanel';
 import { useI18n } from '../i18n/I18nContext';
@@ -224,7 +225,7 @@ export default function DriverVehiclePanel({ mode, entityId, initial, onChanged 
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-12 h-12 rounded-xl bg-black/[0.04] flex items-center justify-center overflow-hidden shrink-0">
               {currentPhoto ? (
-                <img src={photoSrc(currentPhoto)} alt="" className="w-full h-full object-cover" />
+                <ZoomImage src={photoSrc(currentPhoto) || ''} alt="" className="w-full h-full object-cover" />
               ) : (
                 <CurrentIcon size={20} className="text-gic-muted" />
               )}

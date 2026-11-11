@@ -2,6 +2,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { FormPhotoField, emptyPhotoFields, photoFieldsFrom } from './FormPhotoField';
 import { Input, Select } from './ui';
 import { MAROC_BANKS } from '../lib/marocBanks';
+import { clampRib } from '../lib/rib';
 
 export type WorkforceFormData = {
   firstName: string;
@@ -78,7 +79,7 @@ export function workforceToForm(w: Record<string, unknown>): WorkforceFormData {
     dailySalary: String(w.dailySalary ?? ''),
     monthlySalary: String(w.monthlySalary ?? ''),
     bankName: String(w.bankName || ''),
-    rib: String(w.rib || ''),
+    rib: clampRib(String(w.rib || '')),
     declared: w.declared ? 'true' : 'false',
     isActive: w.isActive === false ? 'false' : 'true',
     ...photoFieldsFrom(w as { photo?: string | null }),
@@ -107,12 +108,12 @@ export function WorkforceFormFields({
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide">{t('fields.sectionIdentity')}</p>
       <Input label={`${t('fields.firstName')} *`} required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
       <Input label={`${t('fields.lastName')} *`} required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
-      <Input label={t('fields.cin')} value={form.cin} onChange={(e) => setForm({ ...form, cin: e.target.value })} />
+      <Input label={`${t('fields.cin')} *`} required value={form.cin} onChange={(e) => setForm({ ...form, cin: e.target.value })} />
       <Input label={t('fields.birthDate')} type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
       <Input className="sm:col-span-2" label={t('fields.address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
 
       <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide pt-1">{t('fields.sectionContact')}</p>
-      <Input label={t('fields.phone1')} value={form.phone1} onChange={(e) => setForm({ ...form, phone1: e.target.value })} />
+      <Input label={`${t('fields.phone1')} *`} required value={form.phone1} onChange={(e) => setForm({ ...form, phone1: e.target.value })} />
       <Input label={t('fields.phone2')} value={form.phone2} onChange={(e) => setForm({ ...form, phone2: e.target.value })} />
       <Input label={t('fields.email')} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
 
@@ -140,8 +141,6 @@ export function WorkforceFormFields({
             ...form,
             salaryPeriod,
             contractType: isMoisNext ? 'Mensuel' : (form.contractType === 'Mensuel' ? 'Journalier' : form.contractType),
-            bankName: isMoisNext ? form.bankName : '',
-            rib: isMoisNext ? form.rib : '',
           });
         }}
       >
@@ -190,36 +189,35 @@ export function WorkforceFormFields({
         <option value="false">{t('status.inactive')}</option>
       </Select>
 
+      <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide pt-1">
+        {t('fields.sectionBankDetails')}
+      </p>
+      <Select
+        label={isMois ? `${t('fields.bankName')} *` : t('fields.bankName')}
+        required={isMois}
+        value={form.bankName}
+        onChange={(e) => setForm({ ...form, bankName: e.target.value })}
+      >
+        <option value="">{t('fields.chooseBank')}</option>
+        {MAROC_BANKS.map((b) => (
+          <option key={b} value={b}>{b}</option>
+        ))}
+        {form.bankName && !(MAROC_BANKS as readonly string[]).includes(form.bankName) && (
+          <option value={form.bankName}>{form.bankName}</option>
+        )}
+      </Select>
+      <Input
+        label={isMois ? `${t('fields.rib')} *` : t('fields.rib')}
+        required={isMois}
+        value={form.rib}
+        inputMode="numeric"
+        onChange={(e) => setForm({ ...form, rib: clampRib(e.target.value) })}
+        placeholder={t('fields.ribDigitsPlaceholder')}
+      />
       {isMois && (
-        <>
-          <p className="sm:col-span-2 text-[11px] font-semibold text-gic-violet uppercase tracking-wide pt-1">
-            {t('fields.sectionBankDetailsMonthly')}
-          </p>
-          <Select
-            label={`${t('fields.bankName')} *`}
-            required
-            value={form.bankName}
-            onChange={(e) => setForm({ ...form, bankName: e.target.value })}
-          >
-            <option value="">{t('fields.chooseBank')}</option>
-            {MAROC_BANKS.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-            {form.bankName && !(MAROC_BANKS as readonly string[]).includes(form.bankName) && (
-              <option value={form.bankName}>{form.bankName}</option>
-            )}
-          </Select>
-          <Input
-            label={`${t('fields.rib')} *`}
-            required
-            value={form.rib}
-            onChange={(e) => setForm({ ...form, rib: e.target.value })}
-            placeholder={t('fields.ribDigitsPlaceholder')}
-          />
-          <p className="sm:col-span-2 text-[11px] text-gic-muted">
-            {t('msg.workforceMonthlyOnlyHint')}
-          </p>
-        </>
+        <p className="sm:col-span-2 text-[11px] text-gic-muted">
+          {t('msg.workforceMonthlyOnlyHint')}
+        </p>
       )}
     </div>
   );

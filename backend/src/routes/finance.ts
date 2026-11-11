@@ -6,6 +6,7 @@ import { audit } from '../lib/audit.js';
 import { upload } from '../lib/upload.js';
 import { sendExcel } from '../lib/exportExcel.js';
 import { findMovementBySource } from '../lib/cashSync.js';
+import { parseRib } from '../lib/rib.js';
 import { CHAUFFEUR_CATEGORY } from '../lib/workforceScope.js';
 import { ENGAGED_STATUSES } from '../lib/purchaseWorkflow.js';
 
@@ -164,12 +165,14 @@ router.get('/accounts', async (_req, res) => {
 router.post('/accounts', async (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ message: 'Nom du compte obligatoire' });
+  const rib = parseRib(req.body.rib);
+  if (rib.error) return res.status(400).json({ message: rib.error });
   const account = await prisma.cashAccount.create({
     data: {
       name,
       type: req.body.type || 'caisse',
       holderUserId: req.body.holderUserId || null,
-      rib: req.body.rib || null,
+      rib: rib.rib,
       bankName: req.body.bankName || null,
       isActive: req.body.isActive !== false && req.body.isActive !== 'false',
     },
@@ -187,7 +190,11 @@ router.put('/accounts/:id', async (req, res) => {
   if (req.body.name != null) data.name = String(req.body.name).trim();
   if (req.body.type != null) data.type = req.body.type;
   if (req.body.holderUserId !== undefined) data.holderUserId = req.body.holderUserId || null;
-  if (req.body.rib !== undefined) data.rib = req.body.rib || null;
+  if (req.body.rib !== undefined) {
+    const rib = parseRib(req.body.rib);
+    if (rib.error) return res.status(400).json({ message: rib.error });
+    data.rib = rib.rib;
+  }
   if (req.body.bankName !== undefined) data.bankName = req.body.bankName || null;
   if (req.body.isActive !== undefined) {
     data.isActive = req.body.isActive === true || req.body.isActive === 'true';

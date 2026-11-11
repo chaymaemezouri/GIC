@@ -13,6 +13,7 @@ import {
   Btn, Card, EmptyState, Input, KpiCard, MacActionBtn, MacDateInput, MacSearch, MacSelect,
   Modal, PageHeader, Pagination, Select, Tabs, TableWrap, Td, Th,
 } from '../components/ui';
+import MacAvatar from '../components/MacAvatar';
 import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, type EnginFormData } from '../components/EnginFormFields';
 import { uploadEntityPhoto } from '../components/FormPhotoField';
 import { DeleteMotifModal, FleetStatusPill, invalidateFleetRefs, useFleetRefs } from '../components/engins/FleetCommon';
@@ -27,6 +28,7 @@ import { useI18n } from '../i18n/I18nContext';
 
 type Engin = {
   id: string;
+  photo?: string | null;
   code?: string | null;
   designation?: string | null;
   kind?: string | null;
@@ -847,6 +849,7 @@ function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
               <thead>
                 <tr>
                   <SelectAllTh selection={rappelsSelection} rows={items} />
+                  <Th mac>{t('columns.photo')}</Th>
                   <Th mac>{t('columns.engin')}</Th>
                   <Th mac>{t('columns.assurance')}</Th>
                   <Th mac>{t('columns.vignette')}</Th>
@@ -859,6 +862,9 @@ function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
                 {items.map((e) => (
                   <tr key={e.id} className="cursor-pointer" onClick={() => navigate(`/engins/${e.id}`)}>
                     <SelectTd selection={rappelsSelection} row={e} />
+                    <Td mac>
+                      <MacAvatar photo={e.photo} name={enginLabel(e)} fallback={<Truck size={14} />} />
+                    </Td>
                     <Td mac>
                       <Link to={`/engins/${e.id}`} className="mac-table-ref">{enginLabel(e)}</Link>
                       <span className="block text-[10px] mac-table-muted">{e.matricule || e.genre || '—'}</span>
@@ -886,6 +892,7 @@ function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
             <thead>
               <tr>
                 <SelectAllTh selection={parcSelection} rows={items} />
+                <Th mac>{t('columns.photo')}</Th>
                 <Th mac>{t('fleet.fields.code')}</Th>
                 <Th mac>{t('fleet.fields.designation')}</Th>
                 {kind === 'materiel' && <Th mac>{t('fleet.fields.quantity')}</Th>}
@@ -917,6 +924,9 @@ function EnginsView({ kind, view }: { kind: KindParam; view: View }) {
               {items.map((e) => (
                 <tr key={e.id} className="cursor-pointer" onClick={() => navigate(`/engins/${e.id}`)}>
                   <SelectTd selection={parcSelection} row={e} />
+                  <Td mac>
+                    <MacAvatar photo={e.photo} name={enginLabel(e)} fallback={<Truck size={14} />} />
+                  </Td>
                   <Td mac>
                     <Link to={`/engins/${e.id}`} className="mac-table-ref" onClick={(ev) => ev.stopPropagation()}>{e.code || '—'}</Link>
                     {e.matricule && <span className="block text-[10px] mac-table-muted">{e.matricule}</span>}

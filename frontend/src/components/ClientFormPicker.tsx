@@ -6,6 +6,7 @@ import { ClientPickerPanel, type ClientPickerOption } from './ClientLinkPicker';
 import { ClientFormFields, emptyClientForm, type ClientFormData } from './ClientFormFields';
 import { omitPhotoFields, uploadEntityPhoto } from './FormPhotoField';
 import { useI18n } from '../i18n/I18nContext';
+import { alertCinDuplicate } from '../lib/dialog';
 
 function labelClient(c: { firstName: string; lastName: string; reference?: string }) {
   return `${c.firstName} ${c.lastName}${c.reference ? ` (${c.reference})` : ''}`;
@@ -115,6 +116,7 @@ export function ClientFormPicker({
       setCreateOpen(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : t('common.error'));
+      await alertCinDuplicate(err);
     } finally {
       setCreating(false);
     }

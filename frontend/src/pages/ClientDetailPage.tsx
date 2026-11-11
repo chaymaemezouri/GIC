@@ -1,6 +1,7 @@
-import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
+import { PrintChoiceModal } from '../components/PrintChoiceModal';
+import { printFieldGrid, printTable, type PrintSection } from '../lib/printBlocks';
 import { printPaymentReceipt, printPaymentsReceipt } from '../lib/printPayment';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { alertCinDuplicate, appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -30,7 +31,7 @@ import {
   paymentFormToFormData,
   type PaymentFormData,
 } from '../components/PaymentFormFields';
-import { fileUrl, printDocumentFiche } from '../lib/documentDisplay';
+import { fileUrl } from '../lib/documentDisplay';
 import { isBankPaymentMode, paymentModeLabel } from '../lib/paymentMode';
 
 export default function ClientDetailPage() {
@@ -42,6 +43,7 @@ export default function ClientDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [agentHistory, setAgentHistory] = useState<any[]>([]);
   const [tab, setTab] = useState('vue');
+  const [printOpen, setPrintOpen] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
   const [identityTypes, setIdentityTypes] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
@@ -63,6 +65,7 @@ export default function ClientDetailPage() {
   const [payForm, setPayForm] = useState<PaymentFormData>(emptyPaymentForm());
   const [payError, setPayError] = useState('');
   const [propertyFilter, setPropertyFilter] = useState('');
+  const [docReload, setDocReload] = useState(0);
 
   function load() {
     if (!id) return;
@@ -99,6 +102,7 @@ export default function ClientDetailPage() {
       load();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : t('common.error'));
+      await alertCinDuplicate(err);
     }
   }
 
@@ -126,16 +130,15 @@ export default function ClientDetailPage() {
 
   async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file || !id) return;
-    await uploadDocument(file, { name: file.name, category: 'identite', clientId: id, entityType: 'client', entityId: id });
-    load();
     e.target.value = '';
-  }
-
-  async function deleteDoc(docId: string) {
-    if (!await appConfirm(t('msg.confirmDeleteDocument'))) return;
-    await api(`/documents/${docId}`, { method: 'DELETE' });
-    load();
+    if (!file || !id) return;
+    try {
+      await uploadDocument(file, { name: file.name, category: 'cin', clientId: id, entityType: 'client', entityId: id });
+      setDocReload((n) => n + 1);
+      load();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : t('common.error'));
+    }
   }
 
   function openPayModal() {
@@ -231,21 +234,9 @@ export default function ClientDetailPage() {
     load();
   }
 
-  async function printFiche() {
+  function openPrint() {
     if (!client) return;
-
-    const s = client.summary || {};
-    await printWithCompany({ title: `${client.firstName} ${client.lastName}`, bodyHtml: extractLegacyPrintBody(`<html><head><title>Fiche ${client.reference}</title>
-      <style>body{font-family:sans-serif;padding:24px;font-size:13px}h1{color:#6d28d9}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}</style></head><body>
-      <h1>Fiche Client 360° — ${client.firstName} ${client.lastName}</h1>
-      <p><strong>Réf.:</strong> ${client.reference}</p>
-      <p><strong>Email:</strong> ${client.email} · <strong>Tél:</strong> ${client.phone1}</p>
-      <p><strong>Identité:</strong> ${client.identityType || ''} ${client.identityNumber || ''}</p>
-      <p><strong>Total contractualisé:</strong> ${s.totalContracted || 0} MAD · <strong>Payé:</strong> ${s.totalPaid || 0} · <strong>Reste:</strong> ${s.totalRemaining || 0}</p>
-      <h2>Ventes (${(client.sales || []).length})</h2>
-      <table><tr><th>Réf</th><th>Bien</th><th>Net</th><th>Reste</th></tr>
-      ${(client.sales || []).map((v: any) => `<tr><td>${v.reference}</td><td>${v.property?.name || ''}</td><td>${v.netPrice}</td><td>${v.remaining}</td></tr>`).join('')}
-      </table></body></html>`, { grid: true }) });
+    setPrintOpen(true);
   }
 
   if (!client || !form) {
@@ -255,10 +246,6 @@ export default function ClientDetailPage() {
   const salesAll = client.sales || [];
   const rentalsAll = client.rentals || [];
   const docs = client.documents || [];
-  const identityDocs = docs.filter((d: any) =>
-    String(d.category || '').toLowerCase().includes('ident') ||
-    String(d.name || '').toLowerCase().match(/cin|passeport|identité|identite/),
-  );
   const propertiesAll = client.properties || [];
   const paymentsAll = client.allPayments || [];
   const matchProperty = (propertyId?: string | null) => !propertyFilter || propertyId === propertyFilter;
@@ -342,7 +329,7 @@ export default function ClientDetailPage() {
                 <Btn variant="secondary" icon={Archive} onClick={() => setArchiveOpen(true)}>{t('actions.archive')}</Btn>
               )}
               <div className="mac-action-group ml-0.5">
-                <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={printFiche} />
+                <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={openPrint} />
                 <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => setEditing(true)} />
                 <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => setDeleteOpen(true)} />
               </div>
@@ -454,6 +441,8 @@ export default function ClientDetailPage() {
                     <InfoRow icon={Phone} label={t('fields.phone1')} value={client.phone1} />
                     {client.phone2 && <InfoRow icon={Phone} label={t('fields.phone2')} value={client.phone2} />}
                     <InfoRow icon={MapPin} label={t('fields.address')} value={client.address || '—'} className="sm:col-span-2" />
+                    <InfoRow icon={Hash} label={t('fields.bank')} value={client.bankName || '—'} />
+                    <InfoRow icon={Hash} label={t('fields.rib')} value={client.rib || '—'} />
                   </div>
                 </SectionCard>
 
@@ -998,64 +987,13 @@ export default function ClientDetailPage() {
 
         {tab === 'documents' && id && (
           <div className="space-y-3">
-          <EntityDocChecklist entityType="client" entityId={id} extra={{ clientId: id }} />
-          <div className="space-y-3">
-            <DocumentFileActions
-              labelClassName="mac-upload-btn"
-              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-              onChange={onUploadDoc}
-            >
-              <Upload size={14} /> {t('actions.uploadIdentityDoc')}
-            </DocumentFileActions>
-            {identityDocs.length > 0 && (
-              <div className="mac-section-card">
-                <div className="mac-section-card-header">
-                  <h3 className="mac-section-card-title">
-                    <FileText size={15} strokeWidth={2} />
-                    {t('columns.pieces')} {t('columns.identity').toLowerCase()}
-                  </h3>
-                </div>
-                <div className="space-y-2">
-                  {identityDocs.map((d: any) => (
-                    <div key={d.id} className="mac-row !px-0">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText size={14} className="text-[#007aff] shrink-0" />
-                        <div className="min-w-0">
-                          <p className="mac-row-title truncate">{d.name}</p>
-                          <p className="mac-row-subtitle capitalize">{d.category || 'identité'}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <a href={fileUrl(d.path)} target="_blank" rel="noreferrer" className="mac-table-action px-2">{t('common.view')}</a>
-                        <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={() => printDocumentFiche(d)} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="mac-section-card !p-0 overflow-hidden">
-              {docs.map((d: any) => (
-                <div key={d.id} className="mac-row">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileText size={14} className="text-[#007aff] shrink-0" />
-                    <div className="min-w-0">
-                      <p className="mac-row-title truncate">{d.name}</p>
-                      <p className="mac-row-subtitle capitalize">{d.category || 'doc'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <a href={fileUrl(d.path)} target="_blank" rel="noreferrer" className="mac-table-action px-2">{t('common.view')}</a>
-                    <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={() => printDocumentFiche(d)} />
-                    <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
-                  </div>
-                </div>
-              ))}
-              {docs.length === 0 && (
-                <p className="text-[12px] text-gic-muted py-6 text-center">{t('msg.emptyDocuments')}</p>
-              )}
-            </div>
-          </div>
+            <EntityDocChecklist
+              entityType="client"
+              entityId={id}
+              extra={{ clientId: id }}
+              reloadToken={docReload}
+              onChanged={load}
+            />
           </div>
         )}
 
@@ -1186,8 +1124,161 @@ export default function ClientDetailPage() {
           )}
         </form>
       </Modal>
+
+      <PrintChoiceModal
+        open={printOpen}
+        title={`${client.firstName} ${client.lastName}`}
+        sections={clientPrintSections()}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   );
+
+  function clientPrintSections(): PrintSection[] {
+    const yesNo = (value: unknown) => (value ? t('common.yes') : t('common.no'));
+    const when = (value: unknown) => (value ? formatDate(value as string) : '—');
+    const lines = (count: number) => t('msg.printLines', { count });
+    const empty = t('msg.noData');
+    const sales = client.sales || [];
+    const rentals = client.rentals || [];
+    const properties = client.properties || [];
+    const payments = client.allPayments || [];
+    const documents = client.documents || [];
+    const mandants = (client.mandants || []).map((row: any) => row.mandant).filter(Boolean);
+    const summary = client.summary || {};
+    return [
+      {
+        id: 'infos',
+        label: t('tabs.informations'),
+        hint: t('msg.printAllFields'),
+        html: printFieldGrid([
+          [t('fields.reference'), client.reference],
+          [t('fields.firstName'), client.firstName],
+          [t('fields.lastName'), client.lastName],
+          [t('fields.identityType'), client.identityType],
+          [t('fields.identityPieceNumber'), client.identityNumber],
+          [t('fields.birthDate'), when(client.birthDate)],
+          [t('fields.nb'), client.nb],
+          [t('fields.email'), client.email],
+          [t('fields.phone1'), client.phone1],
+          [t('fields.phone2'), client.phone2],
+          [t('fields.address'), client.address],
+          [t('fields.bank'), client.bankName],
+          [t('fields.rib'), client.rib],
+          [t('fields.prospect'), yesNo(client.isProspect)],
+          [t('fields.buyer'), yesNo(client.isBuyer)],
+          [t('fields.tenant'), yesNo(client.isTenant)],
+          [t('fields.associatedAgent'), client.agent ? `${client.agent.firstName} ${client.agent.lastName}` : ''],
+          [t('fields.source'), client.source],
+          [t('fields.remark'), client.remark],
+          [t('status.archived'), yesNo(client.isArchived)],
+          [t('fields.createdAt'), when(client.createdAt)],
+          [t('fields.updatedAt'), when(client.updatedAt)],
+        ]),
+      },
+      {
+        id: 'synthese',
+        label: t('msg.printSummary'),
+        html: printFieldGrid([
+          [t('dashboard.contractedSales'), formatMad(summary.totalContracted || 0)],
+          [t('fields.collected'), formatMad(summary.totalPaid || 0)],
+          [t('dashboard.toCollect'), formatMad(summary.totalRemaining || 0)],
+          [t('tabs.sales'), summary.salesCount ?? sales.length],
+          [t('tabs.rentals'), summary.rentalsCount ?? rentals.length],
+          [t('tabs.payments'), summary.paymentsCount ?? payments.length],
+        ]),
+      },
+      {
+        id: 'biens',
+        label: t('tabs.properties'),
+        hint: lines(properties.length),
+        html: printTable(
+          [t('columns.ref'), t('columns.property'), t('fields.city'), t('columns.type'), t('columns.status'), t('columns.paid'), t('columns.remaining')],
+          properties.map((p: any) => [p.reference, p.name, p.city, p.relation, p.status, formatMad(p.totalPaid || 0), formatMad(p.remaining || 0)]),
+          empty,
+        ),
+      },
+      {
+        id: 'ventes',
+        label: t('tabs.sales'),
+        hint: lines(sales.length),
+        html: printTable(
+          [t('columns.ref'), t('columns.property'), t('columns.netPrice'), t('columns.paid'), t('columns.remaining'), t('columns.status'), t('columns.date')],
+          sales.map((s: any) => [s.reference, s.property?.name, formatMad(s.netPrice), formatMad(s.totalPaid), formatMad(s.remaining), s.status, when(s.contractDate)]),
+          empty,
+        ),
+      },
+      {
+        id: 'locations',
+        label: t('tabs.rentals'),
+        hint: lines(rentals.length),
+        html: printTable(
+          [t('columns.ref'), t('columns.property'), t('fields.monthlyRent'), t('columns.paid'), t('columns.remaining'), t('columns.status'), t('columns.date')],
+          rentals.map((r: any) => [r.reference, r.property?.name, formatMad(r.monthlyRent), formatMad(r.totalPaid), formatMad(r.remaining), r.status, when(r.contractDate)]),
+          empty,
+        ),
+      },
+      {
+        id: 'paiements',
+        label: t('tabs.payments'),
+        hint: lines(payments.length),
+        html: printTable(
+          [t('columns.date'), t('columns.type'), t('columns.ref'), t('columns.property'), t('columns.amount'), t('columns.mode'), t('columns.bank'), t('columns.receipt')],
+          payments.map((p: any) => [
+            when(p.date),
+            p.type,
+            p.ref,
+            p.propertyName,
+            formatMad(p.amount),
+            paymentModeLabel(p.mode || p.operationType),
+            p.bank,
+            p.receiptNo || p.reference,
+          ]),
+          empty,
+        ),
+      },
+      {
+        id: 'mandants',
+        label: t('tabs.mandants'),
+        hint: lines(mandants.length),
+        html: printTable(
+          [t('columns.ref'), t('columns.name'), t('columns.cin'), t('fields.phone1'), t('fields.email')],
+          mandants.map((m: any) => [m.reference, `${m.firstName || ''} ${m.lastName || ''}`.trim(), m.identityNumber, m.phone1, m.email]),
+          empty,
+        ),
+      },
+      {
+        id: 'documents',
+        label: t('tabs.documents'),
+        hint: lines(documents.length),
+        html: printTable(
+          [t('columns.name'), t('columns.category'), t('columns.status'), t('fields.expirationDate')],
+          documents.map((d: any) => [d.name, d.category, d.status, when(d.expiresAt)]),
+          empty,
+        ),
+      },
+      {
+        id: 'agent',
+        label: t('tabs.agent'),
+        hint: lines(agentHistory.length),
+        html: printTable(
+          [t('columns.date'), t('columns.oldAgent'), t('columns.newAgentLabel'), t('columns.by')],
+          agentHistory.map((h) => [when(h.createdAt), h.previousAgentName, h.newAgentName, h.changedBy]),
+          empty,
+        ),
+      },
+      {
+        id: 'historique',
+        label: t('tabs.history'),
+        hint: lines(history.length),
+        html: printTable(
+          [t('columns.date'), t('columns.action'), t('columns.details'), t('columns.user')],
+          history.map((h) => [when(h.createdAt), h.action, h.details, h.user ? `${h.user.firstName} ${h.user.lastName}` : '']),
+          empty,
+        ),
+      },
+    ];
+  }
 }
 
 function SectionCard({

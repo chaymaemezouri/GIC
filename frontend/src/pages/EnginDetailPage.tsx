@@ -1,6 +1,6 @@
 import { extractLegacyPrintBody, printWithCompany } from '../lib/companyPrint';
 import { printStandardTable } from '../lib/standardPrint';
-import { appAlert, appConfirm } from '../lib/dialog';
+import { appAlert } from '../lib/dialog';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -19,7 +19,6 @@ import { EnginFormFields, emptyEnginForm, enginFormToBody, enginToForm, type Eng
 import { uploadEntityPhoto } from '../components/FormPhotoField';
 import MacProfilePhoto from '../components/MacProfilePhoto';
 import DriverVehiclePanel from '../components/DriverVehiclePanel';
-import { fileUrl, printDocumentFiche } from '../lib/documentDisplay';
 import { AssignmentsPanel } from '../components/engins/Assignments';
 import { MaterielStockPanel } from '../components/engins/MaterielStockPanel';
 import { ExpensePanel, FuelPanel, UsagePanel } from '../components/engins/Logs';
@@ -72,6 +71,7 @@ export default function EnginDetailPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('infos');
   const [error, setError] = useState('');
+  const [docReload, setDocReload] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [maintOpen, setMaintOpen] = useState<'entretien' | 'reparation' | null>(null);
@@ -146,20 +146,15 @@ export default function EnginDetailPage() {
 
   async function onUploadDoc(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !id) return;
     try {
-      await uploadDocument(file, { name: file.name, category: 'engin', enginId: id, entityType: 'Engin', entityId: id });
+      await uploadDocument(file, { name: file.name, category: 'engin', enginId: id, entityType: 'engin', entityId: id });
+      setDocReload((n) => n + 1);
       load();
     } catch (err) {
       await appAlert(errorMessage(err, t('msg.uploadError')));
     }
-    e.target.value = '';
-  }
-
-  async function deleteDoc(docId: string) {
-    if (!await appConfirm(t('msg.confirmDeleteDocument'))) return;
-    await api(`/documents/${docId}`, { method: 'DELETE' });
-    load();
   }
 
   function openEdit() {
@@ -758,36 +753,15 @@ export default function EnginDetailPage() {
 
         {tab === 'documents' && (
           <div className="space-y-3 mt-1">
-            {id && <EntityDocChecklist entityType="engin" entityId={id} extra={{ enginId: id }} />}
-            <DocumentFileActions
-              labelClassName="mac-upload-btn"
-              accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
-              onChange={onUploadDoc}
-            >
-              <Upload size={14} /> {t('msg.uploadDocumentLabel')}
-            </DocumentFileActions>
-            <div className="mac-section-card !p-0 overflow-hidden">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {docs.map((d: any) => (
-                <div key={d.id} className="mac-row">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileText size={14} className="text-[#007aff] shrink-0" />
-                    <div className="min-w-0">
-                      <p className="mac-row-title truncate">{d.name}</p>
-                      <p className="mac-row-subtitle">
-                        {t(`fleet.docCat.${d.category}`) === `fleet.docCat.${d.category}` ? d.category || 'doc' : t(`fleet.docCat.${d.category}`)} · {formatDate(d.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <a href={fileUrl(d.path)} target="_blank" rel="noreferrer" className="mac-table-action px-2">{t('msg.viewDocShort')}</a>
-                    <MacActionBtn icon={Printer} tone="gray" title={t('common.print')} onClick={() => printDocumentFiche(d)} />
-                    <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
-                  </div>
-                </div>
-              ))}
-              {docs.length === 0 && <p className="text-[12px] text-gic-muted py-6 text-center">{t('msg.emptyEquipmentDocs')}</p>}
-            </div>
+            {id && (
+              <EntityDocChecklist
+                entityType="engin"
+                entityId={id}
+                extra={{ enginId: id }}
+                reloadToken={docReload}
+                onChanged={load}
+              />
+            )}
           </div>
         )}
 
