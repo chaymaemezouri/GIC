@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { NextFunction, Request, Response } from 'express';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 import mammoth from 'mammoth';
 
 const SHEET_EXT = new Set(['.xlsx', '.xls', '.csv']);
