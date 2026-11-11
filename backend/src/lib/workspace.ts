@@ -54,6 +54,52 @@ async function assertWorkspaceRecord(client: PrismaClient, model: string, where:
   }
 }
 
+const FORM_ONLY = new Set(['photoFile', 'photoUrl']);
+const STRING_DATE_FIELDS = new Set([
+  'sellerSignatureDate',
+  'buyerSignatureDate',
+  'landlordSignatureDate',
+  'tenantSignatureDate',
+]);
+
+function isDateField(key: string) {
+  if (STRING_DATE_FIELDS.has(key)) return false;
+  return key === 'date' || key.endsWith('Date') || key.endsWith('At');
+}
+
+/** Une date vide ou invalide devient null. Les champs photo du formulaire ne vont pas en base. */
+function sanitizeWriteData(data: unknown): unknown {
+  if (Array.isArray(data)) return data.map(sanitizeWriteData);
+  if (!data || typeof data !== 'object' || data instanceof Date) return data;
+  const out: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(data as Record<string, unknown>)) {
+    if (FORM_ONLY.has(key)) continue;
+    if (isDateField(key)) {
+      const normalized = normalizeDateField(key, raw);
+      if (normalized !== undefined) out[key] = normalized;
+      continue;
+    }
+    if (key !== 'id' && key.endsWith('Id') && raw === '') {
+      out[key] = null;
+      continue;
+    }
+    if (STRING_DATE_FIELDS.has(key) && raw === '') {
+      out[key] = null;
+      continue;
+    }
+    out[key] = raw;
+  }
+  return out;
+}
+
+function normalizeDateField(key: string, raw: unknown): Date | null | undefined {
+  const optionalStamp = key === 'createdAt' || key === 'updatedAt';
+  if (raw == null || raw === '') return optionalStamp ? undefined : null;
+  const parsed = raw instanceof Date ? raw : new Date(String(raw));
+  if (Number.isNaN(parsed.getTime())) return optionalStamp ? undefined : null;
+  return parsed;
+}
+
 function stampCreateData(data: unknown, ws: string): unknown {
   if (data == null) return data;
   if (Array.isArray(data)) return data.map((item) => stampCreateData(item, ws));
@@ -160,6 +206,7 @@ export function extendWithWorkspace(client: PrismaClient): PrismaClient {
           return query(args);
         },
         async create({ model, args, query }) {
+          args.data = sanitizeWriteData(args.data) as typeof args.data;
           if (model === 'User') {
             args.data = { ...(args.data as object), workspaceId: getWorkspaceId() } as typeof args.data;
             return query(args);
@@ -169,16 +216,19 @@ export function extendWithWorkspace(client: PrismaClient): PrismaClient {
           return query(args);
         },
         async createMany({ model, args, query }) {
+          args.data = sanitizeWriteData(args.data) as typeof args.data;
           if (!isTenanted(model)) return query(args);
           args.data = stampCreateData(args.data, getWorkspaceId()) as typeof args.data;
           return query(args);
         },
         async update({ model, args, query }) {
+          args.data = sanitizeWriteData(args.data) as typeof args.data;
           if (!isTenanted(model)) return query(args);
           await assertWorkspaceRecord(client, model, args.where);
           return query(args);
         },
         async updateMany({ model, args, query }) {
+          args.data = sanitizeWriteData(args.data) as typeof args.data;
           if (!isTenanted(model)) return query(args);
           args.where = withWorkspaceWhere(args.where, getWorkspaceId()) as typeof args.where;
           return query(args);
@@ -194,6 +244,8 @@ export function extendWithWorkspace(client: PrismaClient): PrismaClient {
           return query(args);
         },
         async upsert({ model, args, query }) {
+          args.create = sanitizeWriteData(args.create) as typeof args.create;
+          args.update = sanitizeWriteData(args.update) as typeof args.update;
           if (!isTenanted(model)) return query(args);
           args.create = stampCreateData(args.create, getWorkspaceId()) as typeof args.create;
           return query(args);
