@@ -711,7 +711,7 @@ export default function DocumentsPage() {
                     <tr
                       key={d.id}
                       className="cursor-pointer"
-                      onClick={() => requestPdfPreview(fileUrl(d.path))}
+                      onClick={() => requestPdfPreview(fileUrl(d.path), false, d.name)}
                     >
                       <SelectTd selection={docSelection} row={d} />
                       <Td mac className="font-medium max-w-[220px]">
@@ -748,7 +748,7 @@ export default function DocumentsPage() {
                       <Td mac className="mac-table-muted">{formatDate(d.createdAt)}</Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions" onClick={(e) => e.stopPropagation()}>
-                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path))} />
+                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path), false, d.name)} />
                           <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
                         </div>
                       </Td>

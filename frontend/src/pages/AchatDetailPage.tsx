@@ -893,7 +893,7 @@ export default function AchatDetailPage() {
                             icon={Eye}
                             tone="blue"
                             title={t('common.view')}
-                            onClick={() => requestPdfPreview(fileUrl(d.path))}
+                            onClick={() => requestPdfPreview(fileUrl(d.path), false, d.name)}
                           />
                           {!isArchived && <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDocument(d.id)} />}
                         </div>

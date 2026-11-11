@@ -10,17 +10,49 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 const EVENT = 'gic-pdf-preview';
 
 const PREVIEW_EXT = /\.(pdf|png|jpe?g|gif|webp|bmp|svg)$/i;
+const SHEET_EXT = /\.(xlsx|xls|csv)$/i;
+const OFFICE_EXT = /\.(xlsx|xls|csv|docx|doc|pptx|ppt)$/i;
 
-export function previewFilePath(href: string) {
+export function uploadPathname(href: string) {
   if (!href || href.startsWith('blob:') || href.startsWith('data:') || href.startsWith('#')) return null;
   try {
     const url = new URL(href, window.location.origin);
-    if (!PREVIEW_EXT.test(url.pathname)) return null;
     if (!url.pathname.includes('/uploads/')) return null;
     return url.pathname;
   } catch {
     return null;
   }
+}
+
+export function previewFilePath(href: string) {
+  const pathname = uploadPathname(href);
+  if (!pathname || !PREVIEW_EXT.test(pathname)) return null;
+  return pathname;
+}
+
+export function isSheetFile(src: string) {
+  return SHEET_EXT.test(src.split('?')[0]);
+}
+
+function shownName(src: string, title?: string) {
+  const file = decodeURIComponent(src.split('?')[0].split('/').pop() || 'document');
+  const ext = file.includes('.') ? file.slice(file.lastIndexOf('.')) : '';
+  const label = (title || '').replace(/[\\/:*?"<>|]/g, ' ').trim();
+  if (!label) return file;
+  if (/\.[a-z0-9]{2,5}$/i.test(label)) return label;
+  return `${label}${ext}`;
+}
+
+async function saveNamed(src: string, filename: string) {
+  const res = await fetch(src);
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function pdfFilePath(href: string) {
@@ -38,9 +70,81 @@ export function rawPdfUrl(src: string) {
   return `${path}${path.includes('?') ? '&' : '?'}raw=1`;
 }
 
-export function requestPdfPreview(src: string, print = false) {
-  const path = previewFilePath(src) || src;
-  window.dispatchEvent(new CustomEvent(EVENT, { detail: { src: path, print } }));
+export function requestPdfPreview(src: string, print = false, title?: string) {
+  const uploaded = uploadPathname(src);
+  const path = previewFilePath(src) || (uploaded && OFFICE_EXT.test(uploaded) ? uploaded : null) || src;
+  window.dispatchEvent(new CustomEvent(EVENT, { detail: { src: path, print, title } }));
+}
+
+type SheetData = { name: string; rows: string[][] };
+
+/** Tableau d’un classeur Excel ou CSV, lu par le serveur. */
+export function SheetView({ url }: { url: string }) {
+  const { t } = useI18n();
+  const [sheets, setSheets] = useState<SheetData[] | null>(null);
+  const [active, setActive] = useState(0);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    setSheets(null);
+    const view = `${url.split('?')[0]}?view=1`;
+    fetch(view)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('preview'))))
+      .then((data: { sheets?: SheetData[] }) => {
+        if (cancelled) return;
+        setSheets(data.sheets || []);
+        setActive(0);
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  if (failed) {
+    return <p className="py-10 text-center text-[13px] text-gic-coral">{t('docs.noPreview')}</p>;
+  }
+  if (!sheets) {
+    return <p className="py-10 text-center text-[13px] text-gic-muted">{t('common.loading')}</p>;
+  }
+  const sheet = sheets[active];
+  if (!sheet || sheet.rows.length === 0) {
+    return <p className="py-10 text-center text-[13px] text-gic-muted">{t('docs.noPreview')}</p>;
+  }
+  const width = Math.max(...sheet.rows.map((row) => row.length), 1);
+  return (
+    <div className="mx-auto max-w-[1100px] overflow-hidden rounded-xl bg-white shadow-lg">
+      {sheets.length > 1 && (
+        <div className="flex gap-1 overflow-x-auto border-b border-black/10 px-3 py-2">
+          {sheets.map((item, index) => (
+            <button
+              key={item.name}
+              type="button"
+              className={`shrink-0 rounded-full px-3 py-1 text-[12px] ${index === active ? 'bg-gic-violet text-white' : 'bg-black/[0.04] text-gic-ink'}`}
+              onClick={() => setActive(index)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="max-h-[75vh] overflow-auto">
+        <table className="w-full border-collapse text-left text-[12px]">
+          <tbody>
+            {sheet.rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className={rowIndex === 0 ? 'bg-[#f5f5f7] font-medium' : 'odd:bg-white even:bg-[#fafafa]'}>
+                {Array.from({ length: width }, (_, col) => (
+                  <td key={col} className="whitespace-nowrap border border-black/[0.06] px-2 py-1.5 text-gic-ink">
+                    {row[col] || ''}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 /** Aperçu intégré : PDF rendu dans la page, image affichée telle quelle. */
@@ -136,20 +240,21 @@ export function PdfPages({
 
 export function PdfPreviewHost() {
   const { t } = useI18n();
-  const [item, setItem] = useState<{ src: string; print: boolean } | null>(null);
+  const [item, setItem] = useState<{ src: string; print: boolean; title?: string } | null>(null);
 
   useEffect(() => {
     function onPreview(e: Event) {
-      const detail = (e as CustomEvent<{ src: string; print?: boolean }>).detail;
+      const detail = (e as CustomEvent<{ src: string; print?: boolean; title?: string }>).detail;
       if (!detail?.src) return;
-      setItem({ src: detail.src, print: Boolean(detail.print) });
+      setItem({ src: detail.src, print: Boolean(detail.print), title: detail.title });
     }
     function onClick(e: MouseEvent) {
       if (e.defaultPrevented || e.button !== 0) return;
       const anchor = (e.target as Element | null)?.closest?.('a');
       if (!anchor || anchor.hasAttribute('download')) return;
-      const path = previewFilePath(anchor.getAttribute('href') || '');
-      if (!path) return;
+      const href = anchor.getAttribute('href') || '';
+      const path = previewFilePath(href) || uploadPathname(href);
+      if (!path || (!previewFilePath(href) && !OFFICE_EXT.test(path))) return;
       e.preventDefault();
       e.stopPropagation();
       setItem({ src: path, print: false });
@@ -176,8 +281,10 @@ export function PdfPreviewHost() {
   }, [item]);
 
   if (!item) return null;
-  const name = decodeURIComponent(item.src.split('/').pop() || 'document.pdf');
-  const downloadUrl = isPdfFile(item.src) ? rawPdfUrl(item.src) : item.src;
+  const name = shownName(item.src, item.title);
+  const downloadUrl = isPdfFile(item.src) ? rawPdfUrl(item.src) : item.src.split('?')[0];
+  const sheet = isSheetFile(item.src);
+  const previewable = isPdfFile(item.src) || sheet || PREVIEW_EXT.test(item.src.split('?')[0]);
 
   return createPortal(
     <div className="pdf-preview-root fixed inset-0 z-[1400] flex flex-col bg-[#1d1d1f]/88" onClick={() => setItem(null)}>
@@ -188,9 +295,9 @@ export function PdfPreviewHost() {
       }`}</style>
       <div className="pdf-preview-bar flex items-center gap-2 px-4 py-3 text-white" onClick={(e) => e.stopPropagation()}>
         <p className="min-w-0 flex-1 truncate text-[13px] font-medium">{name}</p>
-        <a href={downloadUrl} download className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[12px] hover:bg-white/20">
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[12px] hover:bg-white/20" onClick={() => { void saveNamed(downloadUrl, name); }}>
           <Download size={14} /> {t('common.download')}
-        </a>
+        </button>
         <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[12px] hover:bg-white/20" onClick={() => window.print()}>
           <Printer size={14} /> {t('common.print')}
         </button>
@@ -204,13 +311,17 @@ export function PdfPreviewHost() {
             url={item.src}
             onReady={item.print ? () => window.print() : undefined}
           />
-        ) : (
+        ) : sheet ? (
+          <SheetView url={item.src} />
+        ) : previewable ? (
           <img
             src={item.src}
             alt={name}
             className="mx-auto block max-h-[85vh] max-w-full bg-white shadow-lg"
             onLoad={item.print ? () => window.print() : undefined}
           />
+        ) : (
+          <p className="py-16 text-center text-[13px] text-white">{t('docs.noPreviewHint')}</p>
         )}
       </div>
     </div>,

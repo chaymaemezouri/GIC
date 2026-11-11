@@ -304,7 +304,7 @@ export default function MissionDetailPage() {
                   {docs.map((d) => (
                     <tr key={d.id}>
                       <Td mac>
-                        <button type="button" className="mac-table-ref inline-flex items-center gap-1" onClick={() => requestPdfPreview(fileUrl(d.path))}>
+                        <button type="button" className="mac-table-ref inline-flex items-center gap-1" onClick={() => requestPdfPreview(fileUrl(d.path), false, d.name)}>
                           {d.name}
                         </button>
                       </Td>
@@ -312,7 +312,7 @@ export default function MissionDetailPage() {
                       <Td mac className="text-[11px]">{formatDate(d.createdAt)}</Td>
                       <Td mac className="mac-td-actions">
                         <div className="mac-actions">
-                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path))} />
+                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path), false, d.name)} />
                           <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
                         </div>
                       </Td>

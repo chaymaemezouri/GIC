@@ -38,10 +38,17 @@ export function normalizeDocStatus(status?: string | null): DocStatus {
   return 'pending';
 }
 
+export function isSheetDoc(mimeType?: string | null, path?: string | null) {
+  const mime = String(mimeType || '').toLowerCase();
+  const p = String(path || '').toLowerCase();
+  if (mime.includes('spreadsheet') || mime.includes('excel') || mime === 'text/csv') return true;
+  return /\.(xlsx|xls|csv)$/i.test(p);
+}
+
 export function isPreviewable(mimeType?: string | null, path?: string | null) {
   const mime = String(mimeType || '').toLowerCase();
   const p = String(path || '').toLowerCase();
-  if (mime.startsWith('image/') || mime === 'application/pdf') return true;
+  if (mime.startsWith('image/') || mime === 'application/pdf' || isSheetDoc(mime, p)) return true;
   return /\.(png|jpe?g|gif|webp|bmp|pdf)$/i.test(p);
 }
 

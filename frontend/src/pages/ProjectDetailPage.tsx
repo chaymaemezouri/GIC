@@ -341,7 +341,7 @@ export default function ProjectDetailPage() {
           icon={Eye}
           tone="blue"
           title={t('common.view')}
-          onClick={() => requestPdfPreview(fileUrl(doc.path))}
+          onClick={() => requestPdfPreview(fileUrl(doc.path), false, doc.name)}
         />
         <MacActionBtn
           icon={Pencil}
@@ -1341,7 +1341,7 @@ export default function ProjectDetailPage() {
                         <button
                           type="button"
                           className="text-left text-[11px] text-gic-muted mt-0.5 truncate hover:text-gic-ink"
-                          onClick={() => requestPdfPreview(fileUrl(item.document!.path))}
+                          onClick={() => requestPdfPreview(fileUrl(item.document!.path), false, item.document!.name)}
                         >
                           {item.document.name} · {formatDate(item.document.createdAt)}
                         </button>
@@ -1382,7 +1382,7 @@ export default function ProjectDetailPage() {
                       <button
                         type="button"
                         className="font-medium truncate flex-1 min-w-[120px] text-left hover:text-gic-ink"
-                        onClick={() => requestPdfPreview(fileUrl(d.path))}
+                        onClick={() => requestPdfPreview(fileUrl(d.path), false, d.name)}
                       >
                         {d.name}
                       </button>

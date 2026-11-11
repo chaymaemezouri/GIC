@@ -190,8 +190,8 @@ export function EntityDocChecklist({
     }
   }
 
-  function openDoc(path: string) {
-    requestPdfPreview(fileUrl(path));
+  function openDoc(path: string, name?: string) {
+    requestPdfPreview(fileUrl(path), false, name);
   }
 
   async function detach(id: string) {
@@ -257,7 +257,7 @@ export function EntityDocChecklist({
                     {row.label}{row.required ? ' *' : ''}
                   </p>
                   {row.doc ? (
-                    <button type="button" className="text-left text-[11px] text-gic-muted hover:text-gic-ink" onClick={() => openDoc(row.doc!.path)}>
+                    <button type="button" className="text-left text-[11px] text-gic-muted hover:text-gic-ink" onClick={() => openDoc(row.doc!.path, row.doc!.name)}>
                       {row.doc.name}
                       {row.doc.expiresAt ? ` · ${formatDate(row.doc.expiresAt)}` : ''}
                     </button>
@@ -275,7 +275,7 @@ export function EntityDocChecklist({
                 <div className="mac-actions">
                   {row.doc && (
                     <>
-                      <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => openDoc(row.doc!.path)} />
+                      <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => openDoc(row.doc!.path, row.doc!.name)} />
                       <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEdit(row.doc!)} />
                       <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => detach(row.doc!.id)} />
                       {status !== 'valid' && (
@@ -307,12 +307,12 @@ export function EntityDocChecklist({
           {extras.map((d) => (
             <div key={d.id} className="mac-row flex-col !items-stretch">
               <div className="flex w-full items-center justify-between gap-2">
-                <button type="button" className="min-w-0 text-left" onClick={() => openDoc(d.path)}>
+                <button type="button" className="min-w-0 text-left" onClick={() => openDoc(d.path, d.name)}>
                   <p className="mac-row-title truncate">{d.name}</p>
                   <p className="mac-row-subtitle">{d.category || '—'}{d.expiresAt ? ` · ${formatDate(d.expiresAt)}` : ''}</p>
                 </button>
                 <div className="mac-actions">
-                  <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => openDoc(d.path)} />
+                  <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => openDoc(d.path, d.name)} />
                   <MacActionBtn icon={Pencil} tone="orange" title={t('common.edit')} onClick={() => openEdit(d)} />
                   <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => detach(d.id)} />
                   {d.status !== 'valid' && (

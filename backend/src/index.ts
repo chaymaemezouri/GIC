@@ -23,6 +23,7 @@ import reconnusRoutes from './routes/reconnus.js';
 import entreprisesRoutes from './routes/entreprises.js';
 import officeCashRoutes from './routes/officeCash.js';
 import { legacyUploadDir, uploadDir } from './lib/uploadPaths.js';
+import { sheetPreview } from './lib/sheetPreview.js';
 import { backfillPointageSessions, repairPointageSessionExclusions } from './lib/pointageSessions.js';
 import { migrateLegacyPurchases } from './lib/purchaseWorkflow.js';
 import { migrateEnginFleet } from './lib/enginCosts.js';
@@ -76,8 +77,10 @@ const uploadStatic = {
 };
 
 // /api/uploads passe par le même proxy que l’API. /uploads reste pour le dev local.
+const uploadRoots = legacyUploadDir === uploadDir ? [uploadDir] : [uploadDir, legacyUploadDir];
 for (const prefix of ['/uploads', '/api/uploads']) {
   app.use(prefix, redirectPdfNavigation);
+  app.use(prefix, sheetPreview(uploadRoots));
   app.use(prefix, express.static(uploadDir, uploadStatic));
   if (legacyUploadDir !== uploadDir) {
     app.use(prefix, express.static(legacyUploadDir, uploadStatic));

@@ -10,7 +10,7 @@ import { Btn, Card, KpiCard, MacActionBtn, Modal, Select, TableWrap, Td, Th, Pag
 import DetailSectionNav, { DetailShell } from '../components/DetailSectionNav';
 import { useI18n } from '../i18n/I18nContext';
 import { DocumentScanButton } from '../components/DocumentScanner';
-import { PdfPages } from '../components/PdfPreview';
+import { PdfPages, SheetView, requestPdfPreview } from '../components/PdfPreview';
 import { ZoomImage } from '../components/PhotoLightbox';
 import {
   daysUntilExpiry,
@@ -23,6 +23,7 @@ import {
   isImageDoc,
   isPdfDoc,
   isPreviewable,
+  isSheetDoc,
   isDocumentLate,
   normalizeDocStatus,
   printDocumentFiche,
@@ -242,6 +243,7 @@ export default function DocumentDetailPage() {
   const canPreview = isPreviewable(d.mimeType, d.path);
   const isImage = isImageDoc(d.mimeType, d.path);
   const isPdf = isPdfDoc(d.mimeType, d.path);
+  const isSheet = isSheetDoc(d.mimeType, d.path);
   const ext = fileExtension(d.name, d.path);
   const late = isDocumentLate(d);
   const estimateDays = daysUntilExpiry(d.estimatedEndDate);
@@ -418,9 +420,7 @@ export default function DocumentDetailPage() {
             <div className="mac-section-card">
               <p className="mac-info-label mb-2">{t('fields.file')}</p>
               <div className="flex flex-wrap gap-2">
-                <a href={url} target="_blank" rel="noreferrer">
-                  <Btn variant="secondary" icon={ExternalLink}>{t('actions.openDocument')}</Btn>
-                </a>
+                <Btn variant="secondary" icon={ExternalLink} onClick={() => requestPdfPreview(url, false, d.name)}>{t('actions.openDocument')}</Btn>
                 <a href={url} download={d.name}>
                   <Btn variant="secondary" icon={Download}>{t('common.download')}</Btn>
                 </a>
@@ -443,9 +443,7 @@ export default function DocumentDetailPage() {
                 <p className="text-[13px] font-medium text-gic-ink">{t('docs.noPreview')}</p>
                 <p className="text-[12px] text-gic-muted mt-1">{t('docs.noPreviewHint')}</p>
                 <div className="flex justify-center gap-2 mt-4">
-                  <a href={url} target="_blank" rel="noreferrer">
-                    <Btn icon={ExternalLink}>{t('actions.open')}</Btn>
-                  </a>
+                  <Btn icon={ExternalLink} onClick={() => requestPdfPreview(url, false, d.name)}>{t('actions.open')}</Btn>
                   <a href={url} download={d.name}>
                     <Btn variant="secondary" icon={Download}>{t('common.download')}</Btn>
                   </a>
@@ -458,6 +456,10 @@ export default function DocumentDetailPage() {
             ) : isPdf ? (
               <div className="mac-section-card overflow-hidden bg-[#e8e8ed] p-3">
                 <PdfPages url={url} />
+              </div>
+            ) : isSheet ? (
+              <div className="mac-section-card overflow-hidden bg-[#e8e8ed] p-3">
+                <SheetView url={url} />
               </div>
             ) : null}
           </div>

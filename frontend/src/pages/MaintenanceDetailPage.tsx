@@ -542,7 +542,7 @@ export default function MaintenanceDetailPage() {
 
                       <Td mac>
 
-                        <button type="button" className="mac-table-ref inline-flex items-center gap-1" onClick={() => requestPdfPreview(fileUrl(d.path))}>
+                        <button type="button" className="mac-table-ref inline-flex items-center gap-1" onClick={() => requestPdfPreview(fileUrl(d.path), false, d.name)}>
 
                           {d.name}
 
@@ -558,7 +558,7 @@ export default function MaintenanceDetailPage() {
 
                         <div className="mac-actions">
 
-                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path))} />
+                          <MacActionBtn icon={Eye} tone="blue" title={t('common.view')} onClick={() => requestPdfPreview(fileUrl(d.path), false, d.name)} />
 
                           <MacActionBtn icon={Trash2} tone="red" title={t('common.delete')} onClick={() => deleteDoc(d.id)} />
 
