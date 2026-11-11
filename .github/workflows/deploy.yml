@@ -14,7 +14,30 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 30m
+          script_stop: true
           script: |
-            bash /var/www/projects/gic/deploy.sh
+            set -euo pipefail
             cd /var/www/projects/gic
+            bash deploy.sh || echo "deploy.sh a retourné une erreur, compilation forcée ensuite"
+            git fetch origin main
+            git reset --hard origin/main
+            echo "Compilation de $(git rev-parse --short HEAD)"
+            npm install --prefix backend
+            npm install --prefix frontend
+            npm run db:push --prefix backend
+            npm run build --prefix backend
+            npm run build --prefix frontend
+            if command -v pm2 >/dev/null 2>&1; then
+              ids="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let list=[];try{list=JSON.parse(s||"[]")}catch{process.exit(0)}const ids=list.filter(p=>{const cwd=(p.pm2_env&&p.pm2_env.pm_cwd)||"";const script=(p.pm2_env&&p.pm2_env.pm_exec_path)||"";return String(cwd).includes("/var/www/projects/gic")||String(script).includes("/var/www/projects/gic");}).map(p=>p.pm_id);process.stdout.write(ids.join(" "));});')" || ids=""
+              if [ -n "${ids}" ]; then
+                pm2 restart $ids --update-env
+              else
+                echo "Aucun process pm2 pour GIC"
+              fi
+            fi
+            mkdir -p tmp backend/tmp
+            touch tmp/restart.txt backend/tmp/restart.txt
+            test -f frontend/dist/index.html
+            echo "DEPLOY_OK $(git rev-parse --short HEAD)"
             npm run seed || echo "Seed ignoré (données déjà présentes)"
